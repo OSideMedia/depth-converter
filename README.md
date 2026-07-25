@@ -79,6 +79,13 @@ Each conversion produces a kit folder containing `depth.mp4`, `still.png`, `prom
 picture, and Seedance's reference-input window caps it anyway. Output resolution is a
 separate choice: test at 480p, confirm at 720p, master at 720p/1080p.
 
+**Letterboxed sources are cropped automatically.** A depth model reads a flat black matte
+as a *surface* — and specifically as the nearest one in the scene. On a 2.39:1 clip matted
+into 16:9, the bars measured 160/255 against 55/255 for the actual picture, putting a bright
+slab across the motion channel brighter than the subject it was meant to follow. `--crop
+auto` (the default) removes them, so the depth video comes out at the aspect ratio of the
+real image. Use `--crop none` to keep the frame as-is, or `--crop W:H:X:Y` to set it by hand.
+
 **Cloud boundary.** The source clip never leaves the Mac. Only the appearance-stripped
 `depth.mp4` (zero original pixels, ~2–6 MB) is uploaded, and only at fire time, because the
 Ark API takes video refs by URL. The local library is the permanent home; cloud copies are

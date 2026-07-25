@@ -301,6 +301,7 @@ zero logic changes. `kit.json` records which template version produced the promp
 | `--tags` / `--desc` | none | Motion Library metadata; tags also name the kit folder |
 | `--faces` / `--no-faces` | `--faces` (assume real faces present) | **[AMENDED 2026-07-24]** records `stillContainsRealFaces` in kit.json; drives the checker WARN + "still is local-only" guidance (§1 still.png). UI: checkbox |
 | `--resolution` | `720p` (long edge 1280, even dims, AR preserved) | also `480p`, `source` (validated against pixel window) |
+| `--crop` | `auto` **[ADDED 2026-07-24, Phase 1]** | strips letterbox/pillarbox mattes, which a depth model otherwise reads as the nearest surface in the scene. `none` keeps them; `W:H:X:Y` sets one by hand. Sizing and aspect ratio derive from the cropped frame |
 | `--fps` | `conform-24` | conform to 24 fps to match Seedance output cadence; `keep` preserves source (validated 24–60) |
 | `--invert` | off | white=near by default (matches VDA/community convention) |
 | `--keep-audio` | off | mux source audio back onto depth.mp4 (for beat reference while editing; Seedance ignores ref-video audio — rhythm sync is the @Audio slot's job. Say this in help text.) |
@@ -475,10 +476,26 @@ Key engineering decisions:
   surface in the scene*: measured over 26% of the frame at mean brightness **160/255**,
   against **55/255** for the actual content. A depth ref handed to Seedance would therefore
   carry a large bright slab across the top and bottom of frame — pure noise in the motion
-  channel, and brighter than the subject it is supposed to be following. `cropdetect`
-  identifies the matte cleanly (`crop=1920:800:0:140` on CLIP A). Not in the plan; unhandled
-  in Phase 1; **awaiting Peter's call** on auto-crop vs warn-only, since cropping changes
-  output framing and that is a creative decision.
+  channel, and brighter than the subject it is supposed to be following. Not anticipated
+  anywhere in this plan; found only because Gate 1 insists on real footage.
+
+  **RESOLVED — `--crop auto` is now the default** (Peter's call 2026-07-24), with
+  `--crop none` and explicit `--crop W:H:X:Y` as overrides. Three of the four test clips
+  (A, C, D) turn out to be matted; only B is full-frame.
+
+  Detection is deliberately **not** ffmpeg's `cropdetect`. On a synthetic clip with a
+  legitimately dark right edge, cropdetect removed 20 px of *real picture* along with the
+  matte — it thresholds on an average and cannot distinguish a dark image from a bar.
+  Silently cropping real content would change the very motion the ref exists to carry, so
+  `detect_crop()` instead samples ~9 frames across the clip and takes the per-row and
+  per-column MAXIMUM across every sampled pixel: a row is matte only if it is near-black at
+  every pixel in every sampled frame. One bright pixel anywhere disqualifies the row. It
+  also keeps 4 px more picture than cropdetect did on CLIP A (804 vs 800 rows).
+
+  Verified on CLIP A — top rows 134.2 → **30.6**, bottom 186.5 → **88.2**, centre 53.5 →
+  59.2: the brightness ordering is now correct (figure nearest, canopy far) instead of
+  inverted by the matte. Conversion also ran 31% faster (22.7 s vs 33.2 s) on 26% fewer
+  pixels.
 
 ### Phase 2 — Seedance Kit + checks (~small)
 - `checks.py` constraint table (§0 values) with PASS/WARN/FAIL tiers and one-line remedies.

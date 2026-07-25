@@ -56,6 +56,12 @@ def convert(
         None, "--trim", help="START END in seconds; 3-8s is the adherence sweet spot"
     ),
     resolution: str = typer.Option("720p", "--resolution", help="720p | 480p | source"),
+    crop: str = typer.Option(
+        "auto",
+        "--crop",
+        help="auto (strip letterbox/pillarbox bars, which a depth model otherwise reads "
+        "as a near surface) | none | W:H:X:Y",
+    ),
     fps: str = typer.Option(
         "conform-24", "--fps", help="conform-24 (matches Seedance cadence) | keep | <number>"
     ),
@@ -79,7 +85,9 @@ def convert(
     """Convert a clip to a grayscale depth video."""
     from depthc import engine
     from depthc.video_io import (
+        Crop,
         VideoIOError,
+        detect_crop,
         encode_gray,
         mux_audio,
         probe as probe_file,
@@ -106,10 +114,23 @@ def convert(
                 f"adherence degrades. Consider trimming to a single motion signal."
             )
 
-        size = target_size(info, resolution)
+        if crop == "auto":
+            crop_rect = detect_crop(info, trim=trim)
+            if crop_rect:
+                typer.echo(
+                    f"{DIM}matte detected — cropping to {crop_rect.width}×{crop_rect.height} "
+                    f"({crop_rect.removed_fraction(info) * 100:.0f}% of frame removed; "
+                    f"--crop none to keep it){OFF}"
+                )
+        elif crop == "none":
+            crop_rect = None
+        else:
+            crop_rect = Crop.parse(crop)
+
+        size = target_size(info, resolution, crop=crop_rect)
         out_fps = resolve_fps(info, fps)
         typer.echo(f"{DIM}decoding at {size[0]}×{size[1]} @ {out_fps:g} fps…{OFF}")
-        frames = read_frames(info, trim=trim, fps=out_fps, size=size)
+        frames = read_frames(info, trim=trim, fps=out_fps, size=size, crop=crop_rect)
         typer.echo(f"{DIM}{frames.shape[0]} frames{OFF}")
 
         device = engine.pick_device()

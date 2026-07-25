@@ -118,6 +118,28 @@ def clip_static(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def clip_letterboxed(tmp_path_factory) -> Path:
+    """320×240 with a 40 px black matte top and bottom — content is 320×160.
+
+    Mirrors the real defect found on CLIP A: a depth model reads a flat matte as the
+    nearest surface in the scene, so the bars have to come off before inference.
+    """
+    path = tmp_path_factory.mktemp("clips") / "matted.mp4"
+    inner = _make_clip(path.with_name("inner.mp4"), seconds=2.0, fps=24, width=320, height=160)
+    subprocess.run(
+        [
+            _ffmpeg(), "-v", "error", "-y", "-nostdin", "-i", str(inner),
+            "-vf", "pad=320:240:0:40:black",
+            "-c:v", "libx264", "-crf", "18", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", str(path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+@pytest.fixture(scope="session")
 def not_a_video(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("clips") / "notes.txt"
     path.write_text("this is emphatically not a video")

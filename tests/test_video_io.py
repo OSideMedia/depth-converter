@@ -4,7 +4,9 @@ import numpy as np
 import pytest
 
 from depthc.video_io import (
+    Crop,
     VideoIOError,
+    detect_crop,
     encode_gray,
     probe,
     read_frames,
@@ -134,6 +136,72 @@ def test_encode_gray_rejects_wrong_shape(tmp_path):
 def test_encode_gray_rejects_wrong_dtype(tmp_path):
     with pytest.raises(VideoIOError, match="uint8"):
         encode_gray(np.zeros((10, 64, 64), dtype=np.float32), tmp_path / "x.mp4", fps=24)
+
+
+def test_detect_crop_finds_letterbox(clip_letterboxed):
+    crop = detect_crop(probe(clip_letterboxed))
+    assert crop is not None
+    assert crop.width == 320
+    assert crop.height == pytest.approx(160, abs=4)
+    assert crop.y == pytest.approx(40, abs=4)
+    assert crop.x == 0
+
+
+def test_detect_crop_returns_none_on_full_frame(clip_3s):
+    assert detect_crop(probe(clip_3s)) is None
+
+
+def test_detect_crop_offsets_and_extents_are_even(clip_letterboxed):
+    """Odd offsets shift chroma in yuv420p; odd extents fail libx264 outright."""
+    crop = detect_crop(probe(clip_letterboxed))
+    assert crop.width % 2 == 0 and crop.height % 2 == 0
+    assert crop.x % 2 == 0 and crop.y % 2 == 0
+
+
+def test_detect_crop_stays_inside_the_frame(clip_letterboxed):
+    info = probe(clip_letterboxed)
+    crop = detect_crop(info)
+    assert crop.x + crop.width <= info.width
+    assert crop.y + crop.height <= info.height
+
+
+def test_read_frames_applies_crop(clip_letterboxed):
+    info = probe(clip_letterboxed)
+    crop = detect_crop(info)
+    frames = read_frames(info, crop=crop)
+    assert frames.shape[1:3] == (crop.height, crop.width)
+    # The matte is gone: no all-black row bands remain at the edges.
+    assert frames[0, 0].mean() > 5 or frames[0, -1].mean() > 5
+
+
+def test_target_size_uses_cropped_dimensions(clip_letterboxed):
+    info = probe(clip_letterboxed)
+    info.width, info.height = 1920, 1080
+    crop = Crop(1920, 800, 0, 140)
+    # 2.4:1 content scaled to a 1280 long edge is 1280x534, not 1280x720.
+    width, height = target_size(info, "720p", crop=crop)
+    assert width == 1280
+    assert height == pytest.approx(534, abs=2)
+    assert height % 2 == 0
+
+
+def test_crop_parse_roundtrip():
+    crop = Crop.parse("1920:800:0:140")
+    assert (crop.width, crop.height, crop.x, crop.y) == (1920, 800, 0, 140)
+    assert str(crop) == "1920:800:0:140"
+
+
+@pytest.mark.parametrize("bad", ["1920:800:0", "a:b:c:d", "1920:800:0:-4", ""])
+def test_crop_parse_rejects_junk(bad):
+    with pytest.raises(VideoIOError):
+        Crop.parse(bad)
+
+
+def test_crop_removed_fraction(clip_3s):
+    info = probe(clip_3s)
+    info.width, info.height = 1920, 1080
+    assert Crop(1920, 800, 0, 140).removed_fraction(info) == pytest.approx(0.259, abs=0.01)
+    assert Crop(1920, 1080, 0, 0).removed_fraction(info) == pytest.approx(0.0)
 
 
 def test_side_by_side_doubles_width(tmp_path):

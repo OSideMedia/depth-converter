@@ -147,14 +147,122 @@ def probe(path: str | Path) -> VideoInfo:
     )
 
 
-def target_size(info: VideoInfo, resolution: str) -> tuple[int, int]:
-    """Scale to a preset by long edge, preserving aspect ratio, forcing even dims."""
+@dataclass(frozen=True)
+class Crop:
+    """A crop rectangle in source pixels, in ffmpeg's w:h:x:y order."""
+
+    width: int
+    height: int
+    x: int
+    y: int
+
+    def __str__(self) -> str:
+        return f"{self.width}:{self.height}:{self.x}:{self.y}"
+
+    @classmethod
+    def parse(cls, text: str) -> "Crop":
+        try:
+            w, h, x, y = (int(part) for part in text.split(":"))
+        except ValueError as e:
+            raise VideoIOError(f"--crop expects W:H:X:Y (got {text!r})") from e
+        if w <= 0 or h <= 0 or x < 0 or y < 0:
+            raise VideoIOError(f"--crop values must be positive (got {text!r})")
+        return cls(w, h, x, y)
+
+    def removed_fraction(self, info: "VideoInfo") -> float:
+        return 1 - (self.width * self.height) / (info.width * info.height)
+
+
+MATTE_LUMA_LIMIT = 18  # 0-255; compressed mattes are near-black, rarely exactly 0
+MATTE_SAMPLE_FRAMES = 9
+MIN_CROP_FRACTION = 0.02
+
+
+def detect_crop(info: VideoInfo, trim: tuple[float, float] | None = None) -> Crop | None:
+    """Find matte (letterbox/pillarbox) bars, or None if the frame is already full.
+
+    Why this matters more than it sounds: a depth model reads a flat black bar as a
+    *surface*, and specifically as the nearest one in the scene. Measured on a 2.39:1 clip
+    matted into 16:9, the bars occupied 26% of the frame and came back at 160/255 while the
+    actual content averaged 55/255 — a bright slab across the top and bottom of the motion
+    channel, brighter than the subject it is meant to be following.
+
+    Deliberately NOT ffmpeg's `cropdetect`. On a test clip with a legitimately dark right
+    edge, cropdetect removed 20 px of real picture along with the matte — it thresholds on
+    an average and cannot tell a dark *image* from a bar. Cropping away real content is the
+    one failure mode that must not happen, since it silently changes the motion the ref is
+    supposed to carry.
+
+    Instead: sample frames across the clip and take the per-row and per-column MAXIMUM over
+    every sampled pixel. A row is matte only if it is near-black at every pixel in every
+    sampled frame. A single bright pixel anywhere, at any point in the clip, disqualifies
+    the row — so real content is kept unless it is genuinely black throughout, in which case
+    removing it costs nothing.
+    """
+    duration = (trim[1] - trim[0]) if trim else info.duration
+    origin = trim[0] if trim else 0.0
+    end = origin + duration
+    sample_fps = max(0.5, MATTE_SAMPLE_FRAMES / duration) if duration > 0 else 1.0
+
+    frames = read_frames(info, trim=(origin, end), fps=sample_fps)
+    if frames.shape[0] == 0:
+        return None
+
+    luma = frames.max(axis=3)  # brightest channel per pixel; a cheap, strict luma proxy
+    row_max = luma.max(axis=(0, 2))  # over frames and columns -> one value per row
+    col_max = luma.max(axis=(0, 1))  # over frames and rows    -> one value per column
+
+    def _leading(values: np.ndarray) -> int:
+        dark = values <= MATTE_LUMA_LIMIT
+        count = 0
+        for is_dark in dark:
+            if not is_dark:
+                break
+            count += 1
+        return count
+
+    top = _leading(row_max)
+    bottom = _leading(row_max[::-1])
+    left = _leading(col_max)
+    right = _leading(col_max[::-1])
+
+    height_px, width_px = luma.shape[1], luma.shape[2]
+    if top + bottom >= height_px or left + right >= width_px:
+        return None  # entirely black clip; nothing to crop toward
+
+    # Even offsets and extents: odd offsets shift chroma in yuv420p, odd extents fail x264.
+    top += top % 2
+    left += left % 2
+    width = width_px - left - right
+    height = height_px - top - bottom
+    width -= width % 2
+    height -= height % 2
+
+    if width <= 0 or height <= 0:
+        return None
+
+    crop = Crop(width, height, left, top)
+    # Ignore trivial detections: a couple of stray dark rows are not a matte, and cropping
+    # for them would change framing for no benefit.
+    if crop.removed_fraction(info) < MIN_CROP_FRACTION:
+        return None
+    return crop
+
+
+def target_size(
+    info: VideoInfo, resolution: str, crop: Crop | None = None
+) -> tuple[int, int]:
+    """Scale to a preset by long edge, preserving aspect ratio, forcing even dims.
+
+    Sized against the *cropped* frame when a crop applies, so a matted clip yields a depth
+    video at the aspect ratio of its real image rather than of its container.
+    """
     if resolution not in RESOLUTION_PRESETS:
         raise VideoIOError(
             f"Unknown resolution {resolution!r}; choose from {list(RESOLUTION_PRESETS)}"
         )
     long_edge = RESOLUTION_PRESETS[resolution]
-    w, h = info.width, info.height
+    w, h = (crop.width, crop.height) if crop else (info.width, info.height)
     if long_edge is not None and max(w, h) > long_edge:
         scale = long_edge / max(w, h)
         w, h = round(w * scale), round(h * scale)
@@ -182,9 +290,11 @@ def read_frames(
     trim: tuple[float, float] | None = None,
     fps: float | None = None,
     size: tuple[int, int] | None = None,
+    crop: Crop | None = None,
 ) -> np.ndarray:
-    """Decode to an [N, H, W, 3] uint8 RGB array, trimmed/conformed/scaled in one pass."""
-    width, height = size or (info.width, info.height)
+    """Decode to an [N, H, W, 3] uint8 RGB array, trimmed/cropped/conformed/scaled in one pass."""
+    source_size = (crop.width, crop.height) if crop else (info.width, info.height)
+    width, height = size or source_size
     cmd = [_tool("ffmpeg"), "-v", "error", "-nostdin"]
 
     duration = info.duration
@@ -205,7 +315,10 @@ def read_frames(
     filters = []
     if fps:
         filters.append(f"fps={fps:g}")
-    if (width, height) != (info.width, info.height):
+    if crop:
+        # Crop before scale, so the scale target describes the delivered picture.
+        filters.append(f"crop={crop}")
+    if (width, height) != source_size:
         filters.append(f"scale={width}:{height}:flags=lanczos")
     if filters:
         cmd += ["-vf", ",".join(filters)]
