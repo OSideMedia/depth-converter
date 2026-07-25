@@ -74,15 +74,26 @@ def _convert(
     input_size: int,
     precision: str,
     allow_long: bool,
+    snap: bool = False,
     quiet: bool = False,
 ) -> Conversion:
     """Probe → validate → decode → infer. Shared by `convert` and `kit`."""
-    from depthc import engine
+    from depthc import checks, engine
     from depthc.video_io import probe, read_frames, resolve_fps, target_size
 
     info = probe(input)
     if not quiet:
         typer.echo(f"{BOLD}{info.path.name}{OFF}  {DIM}{info.summary()}{OFF}")
+
+    # Snap before anything is decoded: a ref shorter than the generation it drives leaves the
+    # model to invent the tail, and the fix is free at this point.
+    if snap:
+        window = trim if trim else (0.0, info.duration)
+        snapped, note = checks.snap_trim(window[0], window[1], info.duration)
+        if note:
+            trim = snapped
+            if not quiet:
+                typer.echo(f"{DIM}{note}{OFF}")
 
     span = (trim[1] - trim[0]) if trim else info.duration
     if span > 15 and not allow_long:
@@ -280,9 +291,22 @@ def kit(
     zip_output: bool = typer.Option(False, "--zip", help="Also write <kit>.zip beside the folder"),
     keep_audio: bool = typer.Option(False, "--keep-audio", help="Mux source audio onto depth.mp4"),
     allow_long: bool = typer.Option(False, "--allow-long", help="Permit clips over 15s"),
+    snap: bool = typer.Option(
+        True,
+        "--snap/--no-snap",
+        help="Widen the trim to a whole number of seconds (min 4) so the ref length is "
+        "exactly requestable as an output length. Output duration is sent as an integer, so "
+        "an unsnapped ref leaves part of the generation running past its end.",
+    ),
+    variants: bool = typer.Option(
+        False,
+        "--variants",
+        help="Also write contrast-stretched and inverted versions of the same beat into "
+        "variants/, to compare in one live-fire. Upload exactly one per generation.",
+    ),
 ) -> None:
     """Probe, convert, check, and package a full Seedance Kit into the Motion Library."""
-    from depthc import checks, engine, kit as kitlib
+    from depthc import checks, engine, kit as kitlib, motion as motionlib
     from depthc.video_io import (
         VideoIOError, encode_gray, mux_audio, probe as probe_file, side_by_side, trim_copy,
     )
@@ -292,8 +316,9 @@ def kit(
     try:
         job = _convert(
             input, trim=trim, resolution=resolution, fps=fps, crop=crop, invert=invert,
-            input_size=input_size, precision=precision, allow_long=allow_long,
+            input_size=input_size, precision=precision, allow_long=allow_long, snap=snap,
         )
+        trim = job.trim
 
         root = kitlib.library_root(library)
         kit_dir = kitlib.allocate_kit_dir(root, tag_list, fallback=input.stem)
@@ -318,6 +343,28 @@ def kit(
         if preview:
             side_by_side(job.frames, job.result.frames, paths.preview, job.result.fps)
 
+        # Measured on the frames themselves rather than the encoded file: same arrays, same
+        # count, same fps for both sides, which is what makes the retention ratio meaningful.
+        depth_motion = motionlib.measure(job.result.frames, job.result.fps)
+        source_motion = motionlib.measure(job.frames, job.result.fps, with_flow=False)
+        motion_block = motionlib.manifest_block(depth_motion, source_motion)
+
+        motionlib.contact_sheet(job.result.frames, job.result.fps, paths.sheet)
+
+        variant_blocks: list[dict] = []
+        if variants:
+            paths.variants.mkdir(exist_ok=True)
+            for name, (transform, description) in motionlib.VARIANTS.items():
+                frames = transform(job.result.frames)
+                filename = f"{name}.mp4"
+                encode_gray(frames, paths.variants / filename, job.result.fps)
+                variant_blocks.append({
+                    "name": name,
+                    "filename": filename,
+                    "description": description,
+                    "energy": motionlib.measure(frames, job.result.fps, with_flow=False).energy,
+                })
+
         depth_bytes = paths.depth.stat().st_size
         depth_info = probe_file(paths.depth)
         report = checks.check(
@@ -328,6 +375,8 @@ def kit(
             size_bytes=depth_bytes,
             container="mp4",
             still_has_real_faces=faces,
+            motion=depth_motion,
+            retention=motionlib.retention(depth_motion, source_motion),
         )
 
         paths.prompt.write_text(
@@ -375,6 +424,9 @@ def kit(
             dialect=dialect,
             device=job.result.device,
             elapsed=job.result.elapsed,
+            motion=motion_block,
+            variants=variant_blocks,
+            has_sheet=paths.sheet.exists(),
         )
         kitlib.write_manifest(paths, manifest)
         paths.readme.write_text(
@@ -407,17 +459,109 @@ def kit(
         typer.echo(f"{DIM}source → {moved}{OFF}")
 
 
+def _print_scout(clip: Path, result, indent: str = "    ") -> None:
+    """Render a scout pass: the per-second profile, then the ranked windows."""
+    from depthc import motion as motionlib
+
+    profile = result.profile
+    typer.echo(
+        f"{indent}{DIM}motion profile (depth space, per second, 24fps-equivalent; "
+        f"{result.elapsed:.0f}s scout){OFF}"
+    )
+    typer.echo(f"{indent}{profile.spark}   {DIM}overall {profile.energy:.2f}{OFF}")
+    typer.echo(
+        f"{indent}{DIM}"
+        + " ".join(f"{second}s:{value:.1f}" for second, value in enumerate(result.per_second))
+        + OFF
+    )
+    if profile.camera:
+        kind = "camera-path" if profile.camera >= motionlib.CAMERA_DOMINANT else "subject-motion"
+        typer.echo(f"{indent}{DIM}{profile.camera * 100:.0f}% whole-frame movement → {kind}{OFF}")
+
+    if not result.windows:
+        typer.echo(f"{indent}{YELLOW}too short to propose a {result.target_seconds:g}s window{OFF}")
+        return
+
+    typer.echo(f"{indent}best {result.target_seconds:g}s windows:")
+    for rank, window in enumerate(result.windows, 1):
+        mark = GREEN + "→" + OFF if rank == 1 else " "
+        note = window.note()
+        typer.echo(
+            f"{indent}{mark} {window.start:g}-{window.end:g}s   "
+            f"energy {window.energy:.2f}  head {window.head:.2f}  "
+            f"balance {window.balance:.2f}  score {window.score:.2f}"
+            + (f"   {YELLOW}{note}{OFF}" if note else "")
+        )
+
+    best = result.best
+    typer.echo(
+        f"{indent}{YELLOW}!{OFF} ranked by HOW MUCH motion, not how many things are moving — "
+        f"check sheet.png for a second figure walking into the window."
+    )
+    typer.echo(
+        f"{indent}{DIM}./.tools/uv run depthc kit \"{clip}\" "
+        f"--trim {best.start:g} {best.end:g} --tags \"...\" --desc \"...\" "
+        f"--preview --archive{OFF}"
+    )
+
+
+@app.command()
+def scout(
+    input: Path = typer.Argument(..., help="Source video to profile"),
+    target: float = typer.Option(5.0, "--target", help="Window length to look for, in seconds"),
+    scout_fps: float = typer.Option(12.0, "--scout-fps", help="Sampling rate for the pass"),
+    long_edge: int = typer.Option(384, "--long-edge", help="Inference long edge for the pass"),
+) -> None:
+    """Find where the motion is in a clip, before committing to a trim.
+
+    Runs a deliberately cheap depth pass over the WHOLE clip, then ranks every window of the
+    target length by how much motion survives into depth — penalising a dead first beat, a
+    cut, and a dead stretch anywhere inside.
+
+    This is the step that was previously a judgement made by eye, and the prone-crawl kit is
+    what it got wrong: the fall at 3s was the motion, it looked blurry, so the trim kept the
+    still aftermath instead. The scorer reports softness and refuses to prefer a frozen frame
+    for it.
+    """
+    from depthc import motion as motionlib
+    from depthc.video_io import VideoIOError
+
+    try:
+        typer.echo(f"{BOLD}{input.name}{OFF}")
+        with typer.progressbar(length=100, label="scout") as bar:
+            state = {"n": 0}
+
+            def on_window(done: int, total: int) -> None:
+                target_pct = int(done / max(1, total) * 100)
+                bar.update(target_pct - state["n"])
+                state["n"] = target_pct
+
+            result = motionlib.scout_clip(
+                input, target, scout_fps=scout_fps, long_edge=long_edge, on_window=on_window
+            )
+        _print_scout(input, result, indent="  ")
+    except VideoIOError as e:
+        _die(str(e))
+    except KeyboardInterrupt:
+        typer.echo("\ncancelled", err=True)
+        raise typer.Exit(130)
+
+
 @app.command()
 def inbox(
     path: Optional[Path] = typer.Option(None, "--inbox", help="Inbox folder to scan"),
+    target: float = typer.Option(5.0, "--target", help="Window length to propose, in seconds"),
+    no_scout: bool = typer.Option(
+        False, "--no-scout", help="List and probe only — skip the depth pass"
+    ),
 ) -> None:
     """Triage the clips waiting in the inbox.
 
-    Reports what each one is and what it needs, so the trim call can be made before any
-    conversion is run. Converts nothing — deciding which 3-8s beat carries the motion is a
-    judgement, not a default.
+    Reports what each one is, where its motion actually sits, and which window to cut — so the
+    trim call is made from measurements rather than from a guess. Converts nothing and writes
+    nothing: the scout pass is read-only and the proposed window is a proposal.
     """
-    from depthc import kit as kitlib
+    from depthc import kit as kitlib, motion as motionlib
     from depthc.video_io import VideoIOError, detect_crop, probe as probe_file
 
     root = kitlib.inbox_dir(path)
@@ -446,14 +590,71 @@ def inbox(
 
         if info.duration < 2:
             typer.echo(f"    {RED}under the 2s minimum — unusable as a video reference{OFF}")
-        elif info.duration > 8:
+            typer.echo()
+            continue
+        if info.duration > 8:
             typer.echo(
                 f"    {YELLOW}needs trimming{OFF} — {info.duration:.1f}s is past the 3-8s "
                 f"sweet spot. Pick the single clearest motion beat."
             )
         else:
             typer.echo(f"    {GREEN}usable whole{OFF} — inside the 3-8s sweet spot.")
+
+        if not no_scout:
+            try:
+                result = motionlib.scout_clip(clip, target)
+                _print_scout(clip, result)
+            except (VideoIOError, ValueError) as e:
+                typer.echo(f"    {YELLOW}scout failed:{OFF} {e}")
         typer.echo()
+
+
+@app.command()
+def result(
+    kit_name: str = typer.Argument(..., help="Kit folder name, or a path to one"),
+    verdict: str = typer.Option(
+        ...,
+        "--verdict",
+        help="adhered | partial | ignored | late | rejected — what the ref actually did",
+    ),
+    surface: str = typer.Option("", "--surface", help="Where it was fired: oside, ark, other"),
+    model: str = typer.Option("", "--model", help="Model id, e.g. ark-seedance-2.0"),
+    seconds: Optional[float] = typer.Option(None, "--seconds", help="Output length requested"),
+    cost: Optional[float] = typer.Option(None, "--cost", help="USD spent on this generation"),
+    output: str = typer.Option("", "--output", help="URL or path of what came back"),
+    variant: str = typer.Option("", "--variant", help="Which ref was used: base, contrast, invert"),
+    notes: str = typer.Option("", "--notes", help="What actually happened, in your words"),
+    library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
+) -> None:
+    """Record what happened when a kit was fired.
+
+    The library has no other way to learn. A generation is the only evidence that says whether
+    any of this works, it costs money, and before this command it lived in a human's memory —
+    the prone-crawl diagnosis had to be re-derived from measurements a day later.
+    """
+    from depthc import kit as kitlib
+
+    root = kitlib.library_root(library)
+    kit_dir = Path(kit_name) if Path(kit_name).is_dir() else root / kit_name
+    if not (kit_dir / kitlib.KIT_MANIFEST).is_file():
+        _die(f"No kit at {kit_dir} (expected a {kitlib.KIT_MANIFEST} inside)")
+
+    try:
+        log = kitlib.record_result(
+            kit_dir, verdict=verdict, surface=surface, model=model,
+            output_seconds=seconds, cost_usd=cost, output_ref=output,
+            variant=variant, notes=notes,
+        )
+    except ValueError as e:
+        _die(str(e))
+
+    kitlib.write_outbox_index(root)
+    fires = log["fires"]
+    typer.echo(
+        f"{GREEN}✓{OFF} {kit_dir.name}: {BOLD}{verdict}{OFF} "
+        f"{DIM}({kitlib.VERDICTS[verdict]}) — fire {len(fires)} of this kit{OFF}"
+    )
+    typer.echo(f"{DIM}{kit_dir / 'result.json'}{OFF}")
 
 
 @app.command()
@@ -482,12 +683,21 @@ def library_list_cmd(
         typer.echo(f"No kits{where} in {root}")
         return
 
-    typer.echo(f"{BOLD}{'KIT':<34} {'DUR':>6}  {'TIER':<5} TAGS{OFF}  {DIM}({root}){OFF}")
+    typer.echo(
+        f"{BOLD}{'KIT':<34} {'DUR':>6} {'MOTION':>7}  {'TIER':<5} {'FIRED':<9} TAGS{OFF}"
+        f"  {DIM}({root}){OFF}"
+    )
     for entry in entries:
         tint = {"PASS": GREEN, "WARN": YELLOW, "FAIL": RED}.get(entry.tier, "")
+        energy = f"{entry.energy:.2f}" if entry.energy is not None else "—"
+        verdict = entry.verdict
+        vtint = {"adhered": GREEN, "partial": YELLOW}.get(
+            verdict, DIM if verdict == "untested" else RED
+        )
         typer.echo(
-            f"{entry.name:<34} {entry.duration:>5.2f}s  "
-            f"{tint}{entry.tier:<5}{OFF} {', '.join(entry.tags) or DIM + '—' + OFF}"
+            f"{entry.name:<34} {entry.duration:>5.2f}s {energy:>7}  "
+            f"{tint}{entry.tier:<5}{OFF} {vtint}{verdict:<9}{OFF} "
+            f"{', '.join(entry.tags) or DIM + '—' + OFF}"
         )
     typer.echo(f"{DIM}{len(entries)} kit{'s' if len(entries) != 1 else ''}{OFF}")
 

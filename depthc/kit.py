@@ -237,6 +237,7 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
     depth = manifest["depth"]
     faces = manifest["still"]["containsRealFaces"]
     tier = report.tier.value
+    motion = manifest.get("motion") or {}
 
     lines = [
         manifest["kitName"],
@@ -249,6 +250,25 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         f"  from {manifest['source']['filename']}"
         + (f"  trimmed {manifest['source']['trim'][0]:g}-{manifest['source']['trim'][1]:g}s"
            if manifest["source"].get("trim") else "  (untrimmed)"),
+    ]
+
+    if motion:
+        retention = motion.get("retention")
+        lines += [
+            "",
+            "MOTION  (mean grey-level change per frame, depth space; higher is more signal)",
+            f"  {motion['sparkline']}   {motion['energy']:.2f} overall"
+            + (f", {retention * 100:.0f}% of the source's motion survived into depth"
+               if retention is not None else ""),
+            f"  {'':{len(motion['sparkline'])}}   each block is "
+            f"{motion.get('bucketSeconds', 0.5):g}s · · = no usable motion"
+            + (f" · {motion['cameraShare'] * 100:.0f}% whole-frame (camera)"
+               if motion.get("cameraShare") else ""),
+            "  for scale: 4.42 = a sword duel that behaved · 0.99 = a crawl whose generation "
+            "started late",
+        ]
+
+    lines += [
         "",
         "TAKE THESE TWO TO OSIDE",
         "-----------------------",
@@ -270,11 +290,43 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
     ]
     if has_preview:
         lines.append("  preview.mp4  original | depth side by side, for eyeballing")
+    if manifest.get("sheet"):
+        lines.append("  sheet.png    depth contact sheet with timestamps - look at this first")
     lines += [
         "  still.png    "
         + ("LOCAL ONLY - has a real face, which Seedance rejects on image inputs"
            if faces else "may be attached as an @Image look reference"),
     ]
+    lines += [
+        "",
+        "AFTER YOU FIRE IT",
+        "-----------------",
+        "  Record what happened, so the next kit is chosen on evidence:",
+        f"    depthc result {manifest['kitName']} --verdict adhered|partial|ignored|late|rejected \\",
+        '        --surface oside --cost 0.30 --notes "what actually came back"',
+        "  That writes result.json here and shows up in Outbox/INDEX.txt.",
+    ]
+
+    variants = manifest.get("variants") or []
+    if variants:
+        lines += [
+            "",
+            "VARIANTS - ONE PER GENERATION, NEVER TOGETHER",
+            "---------------------------------------------",
+            "  Same beat, processed differently. Upload ONE as the video ref and compare;",
+            "  stacking them would be three motion signals fighting each other.",
+            "",
+            f"  {'depth.mp4':<24} {'base':<10} energy {motion.get('energy', 0):.2f}",
+        ]
+        for variant in variants:
+            lines.append(
+                f"  {'variants/' + variant['filename']:<24} {variant['name']:<10} "
+                f"energy {variant.get('energy', 0):.2f}"
+            )
+            lines.append(f"      {variant['description']}")
+        lines.append(
+            "  Record which one won with:  depthc result <kit> --verdict <v> --variant <name>"
+        )
 
     problems = [f for f in report.findings if f.tier is not Tier.PASS]
     if problems:
@@ -323,6 +375,18 @@ class KitPaths:
     def readme(self) -> Path:
         return self.root / "README.txt"
 
+    @property
+    def sheet(self) -> Path:
+        return self.root / "sheet.png"
+
+    @property
+    def result(self) -> Path:
+        return self.root / "result.json"
+
+    @property
+    def variants(self) -> Path:
+        return self.root / "variants"
+
 
 def build_manifest(
     *,
@@ -348,9 +412,12 @@ def build_manifest(
     dialect: str = DEFAULT_DIALECT,
     device: str = "",
     elapsed: float = 0.0,
+    motion: dict | None = None,
+    variants: list[dict] | None = None,
+    has_sheet: bool = False,
 ) -> dict:
     width, height = depth_size
-    return {
+    manifest = {
         "schemaVersion": 1,
         "kitName": kit_name,
         "createdAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -401,11 +468,90 @@ def build_manifest(
         "suggestedOutputSeconds": suggested_output_seconds(depth_duration),
         "checks": report.as_dict(),
     }
+    # Optional blocks are omitted rather than written null: a kit built before the motion gate
+    # existed and a kit whose motion was not measured are different things, and `in` should be
+    # able to tell them apart.
+    if motion is not None:
+        manifest["motion"] = motion
+    if variants:
+        manifest["variants"] = variants
+    if has_sheet:
+        manifest["sheet"] = {"filename": "sheet.png", "usage": "local-only contact sheet"}
+    return manifest
 
 
 def write_manifest(paths: KitPaths, manifest: dict) -> Path:
     paths.manifest.write_text(json.dumps(manifest, indent=2) + "\n")
     return paths.manifest
+
+
+# ------------------------------------------------------------------- the feedback loop
+
+# What a fire is allowed to have proved. Deliberately about ADHERENCE, not about whether the
+# shot was pretty: the only question a kit can answer is whether Seedance followed it.
+VERDICTS = {
+    "adhered": "followed the motion and timing",
+    "partial": "followed some of it — drifted, or lost the timing",
+    "ignored": "generated its own motion; the ref did nothing",
+    "late": "sat still and then started — the ref's timing did not transfer",
+    "rejected": "the API or moderation refused the input",
+}
+RESULT_SCHEMA_VERSION = 1
+
+
+def read_results(kit_dir: Path) -> dict:
+    """The kit's fire log, or an empty one. A malformed file is never fatal."""
+    path = Path(kit_dir) / "result.json"
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text())
+            if isinstance(data, dict) and isinstance(data.get("fires"), list):
+                return data
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"schemaVersion": RESULT_SCHEMA_VERSION, "kitName": Path(kit_dir).name, "fires": []}
+
+
+def record_result(
+    kit_dir: Path,
+    *,
+    verdict: str,
+    surface: str = "",
+    model: str = "",
+    output_seconds: float | None = None,
+    cost_usd: float | None = None,
+    output_ref: str = "",
+    variant: str = "",
+    notes: str = "",
+) -> dict:
+    """Append one fire to the kit's result.json and return the updated log.
+
+    WHY THIS EXISTS. A generation costs real money and produces the only evidence that says
+    whether any of this works, and until now that evidence lived in a human's memory. The
+    prone-crawl diagnosis had to be re-derived from scratch a day later. Fires accumulate
+    rather than overwrite: firing the same ref twice with different prompts is a data point
+    about prompts, and throwing the first one away would hide it.
+    """
+    if verdict not in VERDICTS:
+        raise ValueError(f"verdict must be one of {sorted(VERDICTS)} (got {verdict!r})")
+
+    log = read_results(kit_dir)
+    log["kitName"] = Path(kit_dir).name
+    log["schemaVersion"] = RESULT_SCHEMA_VERSION
+    log["fires"].append({
+        "firedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "verdict": verdict,
+        "meaning": VERDICTS[verdict],
+        "surface": surface,
+        "model": model,
+        "variant": variant,
+        "outputSeconds": output_seconds,
+        "costUsd": cost_usd,
+        "outputRef": output_ref,
+        "notes": notes,
+    })
+    (Path(kit_dir) / "result.json").write_text(json.dumps(log, indent=2) + "\n")
+    return log
 
 
 def zip_kit(kit_dir: Path, out_path: Path | None = None) -> Path:
@@ -439,6 +585,10 @@ def write_outbox_index(root: Path | None = None) -> Path:
         "",
         "Everything else in a kit folder is reference or archive — do not upload it.",
         "",
+        "`motion` is the mean grey-level change per frame in depth space: how much signal the",
+        "ref actually carries. 4.42 = a sword duel that behaved, 0.99 = a crawl whose",
+        "generation started late. A kit with no FIRED line has never been tested.",
+        "",
     ]
 
     if not entries:
@@ -452,16 +602,26 @@ def write_outbox_index(root: Path | None = None) -> Path:
     for entry in entries:
         depth = entry.manifest.get("depth", {})
         source = entry.manifest.get("source", {})
+        motion = entry.manifest.get("motion") or {}
         trim = source.get("trim")
         lines += [
             f"  {entry.name}",
             f"      {depth.get('width', '?')}x{depth.get('height', '?')} · "
-            f"{entry.duration:g}s · check: {entry.tier}",
+            f"{entry.duration:g}s · check: {entry.tier}"
+            + (f" · motion {motion['energy']:.2f} {motion.get('sparkline', '')}"
+               if motion.get("energy") is not None else ""),
             f"      from {source.get('filename', '?')}"
             + (f", trimmed {trim[0]:g}-{trim[1]:g}s" if trim else ""),
         ]
         if entry.manifest.get("description"):
             lines.append(f"      {entry.manifest['description']}")
+        fires = entry.fires
+        if fires:
+            last = fires[-1]
+            lines.append(
+                f"      FIRED {len(fires)}x · last: {last.get('verdict', '?')}"
+                + (f" — {last['notes']}" if last.get("notes") else "")
+            )
         lines.append("")
 
     text = "\n".join(lines)
@@ -493,6 +653,21 @@ class LibraryEntry:
     @property
     def created(self) -> str:
         return self.manifest.get("createdAt", "")
+
+    @property
+    def energy(self) -> float | None:
+        value = (self.manifest.get("motion") or {}).get("energy")
+        return float(value) if value is not None else None
+
+    @property
+    def fires(self) -> list[dict]:
+        return read_results(self.path).get("fires", [])
+
+    @property
+    def verdict(self) -> str:
+        """The most recent fire's verdict, or "untested" if it has never been fired."""
+        fires = self.fires
+        return fires[-1].get("verdict", "?") if fires else "untested"
 
 
 def library_list(root: Path | None = None, tag: str | None = None) -> list[LibraryEntry]:

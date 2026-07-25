@@ -25,23 +25,54 @@ secondary surface — it converts one clip at a time and adds a server, a port, 
 bundles for no real gain over doing it here.
 
 1. Peter drops clips into `Inbox/`.
-2. `./.tools/uv run depthc inbox` — triage: what each clip is, whether it carries a matte,
-   whether it needs trimming.
-3. **Watch each clip before choosing a trim.** Pull frames with ffmpeg, or use the
-   `claude-video-mac:watch` skill. This is the step that justifies doing this in Claude
-   Code rather than a slider: pick the single clearest motion beat and say why.
+2. `./.tools/uv run depthc inbox` — triage plus a scout pass: what each clip is, whether it
+   carries a matte, where its motion actually sits, and which window to cut. ~4s per clip.
+3. **Look at `sheet.png` / the source before accepting the proposed window.** The scorer ranks
+   HOW MUCH motion a window carries and is blind to HOW MANY things are moving — a second
+   figure walking in reads as *more* signal, not as the competing signal it is. Verified on
+   CLIP C: the top-ranked window is exactly the stretch the original trim cut away for that
+   reason. Overriding the scout is a normal outcome; say why in `--desc`.
 4. `./.tools/uv run depthc kit "Inbox/<clip>" --trim <in> <out> --tags "..." --desc "..." --archive`
 5. **Look at the depth output**, don't just read the checker. The letterbox bug — matte bars
    becoming the brightest object in the frame at 160/255 against 55 for the real subject —
-   was caught by looking at a picture, not by any test.
-6. Report the tier and hand over the kit path.
+   was caught by looking at a picture, not by any test. Every kit now ships `sheet.png` for
+   exactly this.
+6. Report the tier, the motion energy, and the kit path.
+7. After Peter fires it: `depthc result <kit> --verdict … --notes "…"`. A generation is the
+   only evidence that says whether any of this works and it costs money; unrecorded, the
+   finding has to be re-derived. Ask for it.
+
+## Motion is the measurement that matters
+
+Duration, file size, resolution and fps are shape assertions that cannot fail if the code is
+right. What predicts a bad generation is how much motion survives into the **depth** channel,
+measured as mean grey-level change per frame on a fixed 160×90 grid at 24 fps (`motion.py`):
+
+| | energy | what happened |
+|---|---|---|
+| B sword duel | 4.42 | sustained; the one that behaved |
+| C walk-in | 1.71 | steady, unspectacular, fine |
+| A prone crawl (001 trim) | 0.95 | generation started late |
+| D "slow dolly" | 0.71 | weak, with a dead first second |
+
+**RGB motion is not depth motion.** A's window carried *more* RGB motion than B's (5.98 vs
+4.93) and kept 16% of it in depth against B's 87%: a crawl along the ground never changes
+distance to the lens, so depth flattens it. Measure both sides at the same fps or the ratio is
+meaningless — an earlier pass compared 24 fps depth against 12 fps source and reported 11% vs
+52%, wrong numbers with the right ranking.
+
+Output length is requested as a **whole number of seconds, minimum 4** (OSIDE's Ark adapter:
+`duration: Math.round(...)`, `durationRange: [4, 15]`). A ref that is not a whole number of
+seconds guarantees the generation runs past its end. `--snap` is on by default.
 
 Kits land in **`Outbox/<Tags>_NNN/`** inside the project — not in the home folder.
 `Outbox/INDEX.txt` is regenerated on every build. `--archive` moves the source to
 `Processed/` on PASS/WARN; a FAIL deliberately stays in `Inbox/`.
 
-Each kit carries `README.txt` (what to do) and `binding.txt` (the Variant A phrase alone,
-one line, ready to paste). Those plus `depth.mp4` are the only files Peter needs to touch.
+Each kit carries `README.txt` (what to do), `binding.txt` (the Variant A phrase alone, one
+line, ready to paste), and `sheet.png` (depth contact sheet with timestamps). Those plus
+`depth.mp4` are the only files Peter needs to touch. `--variants` adds contrast-stretched and
+inverted refs of the same beat under `variants/` — **exactly one is uploaded per generation**.
 
 ## Laws — do not violate
 

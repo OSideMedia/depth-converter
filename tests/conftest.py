@@ -1,6 +1,6 @@
 """Synthetic fixtures.
 
-Tests use ffmpeg-generated clips rather than the real footage in `TEST CLIPS/` so they are
+Tests use ffmpeg-generated clips rather than the real footage in `Processed/` so they are
 deterministic and runnable on any machine. The real clips are the manual gate checks.
 
 DETERMINISM: every `gradients` source below pins `seed`. Its default is -1, i.e. random,

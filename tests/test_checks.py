@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
-from depthc.checks import Tier, check, format_report, suggested_output_seconds
+from depthc import motion as m
+from depthc.checks import (
+    Tier, check, format_report, on_output_grid, snap_trim, suggested_output_seconds,
+)
 
 GOOD = dict(
     duration=5.0, width=1280, height=720, fps=24.0,
@@ -123,6 +127,182 @@ def test_every_non_pass_finding_carries_a_remedy():
 def test_suggested_output_clamps_to_the_output_window(ref, expected):
     """Seedance's output floor is 4s, so short refs necessarily drive a longer generation."""
     assert suggested_output_seconds(ref) == expected
+
+
+# --------------------------------------------------------------------- the motion gate
+
+def profile(energy: float, *, seconds: float = 5.0, head: float | None = None,
+            spike: bool = False, camera: float = 0.0) -> m.MotionProfile:
+    """A profile with a chosen mean energy, optionally with a weak head or a cut in it."""
+    count = int(seconds * 24)
+    deltas = np.full(count, energy, dtype=np.float32)
+    if head is not None:
+        deltas[: int(m.DEAD_STRETCH_SECONDS * 24) + 2] = head
+    if spike:
+        deltas[count // 2] = max(m.SPIKE_FLOOR * 2, energy * 10)
+    return m.MotionProfile(fps=24.0, deltas=deltas, camera=camera)
+
+
+def test_no_motion_findings_without_a_profile():
+    """A shape-only check must stay a shape-only check rather than guess."""
+    names = {f.check for f in check(**GOOD).findings}
+    assert not names & {"motion signal", "depth retention", "late-start risk", "motion type"}
+
+
+def test_a_frozen_ref_fails_the_gate():
+    report = check(**GOOD, motion=profile(0.05))
+    assert tier_of("motion signal", report) is Tier.FAIL
+    assert not report.ok
+
+
+def test_a_weak_ref_warns_and_still_ships():
+    """0.99 is the prone crawl. It generates; it just generates badly."""
+    report = check(**GOOD, motion=profile(0.99))
+    assert tier_of("motion signal", report) is Tier.WARN
+    assert report.ok
+
+
+def test_a_strong_ref_passes_the_gate():
+    """4.42 is the sword duel — the one clip that behaved."""
+    assert tier_of("motion signal", check(**GOOD, motion=profile(4.42))) is Tier.PASS
+
+
+def test_a_jittery_ref_warns_from_the_other_side():
+    """The band has a ceiling: past it the ref is shake, not choreography."""
+    assert tier_of("motion signal", check(**GOOD, motion=profile(40.0))) is Tier.WARN
+
+
+def test_the_motion_finding_carries_the_sparkline():
+    detail = next(
+        f.detail for f in check(**GOOD, motion=profile(4.0)).findings
+        if f.check == "motion signal"
+    )
+    assert any(block in detail for block in m.SPARK_BLOCKS)
+
+
+def test_a_dead_first_beat_is_reported_as_late_start_risk():
+    report = check(**GOOD, motion=profile(4.0, head=0.05))
+    assert tier_of("late-start risk", report) is Tier.WARN
+
+
+def test_a_dead_tail_is_a_dead_stretch_not_a_late_start():
+    deltas = np.full(120, 4.0, dtype=np.float32)
+    deltas[-30:] = 0.05
+    report = check(**GOOD, motion=m.MotionProfile(fps=24.0, deltas=deltas))
+    assert tier_of("dead stretch", report) is Tier.WARN
+    assert all(f.check != "late-start risk" for f in report.findings)
+
+
+def test_a_cut_inside_the_ref_warns():
+    report = check(**GOOD, motion=profile(2.0, spike=True))
+    assert tier_of("motion spikes", report) is Tier.WARN
+
+
+def test_low_depth_retention_warns_on_a_weak_ref():
+    """The CLIP A shape: real motion in RGB, almost none of it in depth."""
+    report = check(**GOOD, motion=profile(0.99), retention=0.11)
+    assert tier_of("depth retention", report) is Tier.WARN
+    assert "distance" in next(
+        f.remedy.lower() for f in report.findings if f.check == "depth retention"
+    )
+
+
+def test_low_retention_is_tolerated_when_the_signal_is_strong_anyway():
+    assert tier_of("depth retention", check(**GOOD, motion=profile(6.0), retention=0.15)) \
+        is Tier.PASS
+
+
+def test_retention_is_omitted_when_it_could_not_be_measured():
+    report = check(**GOOD, motion=profile(4.0))
+    assert all(f.check != "depth retention" for f in report.findings)
+
+
+def test_motion_type_names_a_camera_reference():
+    report = check(**GOOD, motion=profile(4.0, camera=0.8))
+    assert "camera-path" in next(
+        f.detail for f in report.findings if f.check == "motion type"
+    )
+
+
+def test_motion_type_names_a_body_reference():
+    report = check(**GOOD, motion=profile(4.0, camera=0.2))
+    assert "subject-motion" in next(
+        f.detail for f in report.findings if f.check == "motion type"
+    )
+
+
+def test_motion_findings_never_lack_a_remedy():
+    report = check(**GOOD, motion=profile(0.05, head=0.0, spike=True), retention=0.05)
+    for finding in report.findings:
+        if finding.tier is not Tier.PASS:
+            assert finding.remedy, f"{finding.check} has no remedy"
+
+
+# ------------------------------------------------------------------- the output grid
+
+@pytest.mark.parametrize("seconds,expected", [
+    (4.0, True), (5.0, True), (10.0, True), (5.02, True),
+    (3.917, False), (5.5, False), (3.0, False), (6.4, False),
+])
+def test_on_output_grid(seconds, expected):
+    assert on_output_grid(seconds) is expected
+
+
+def test_a_ref_shorter_than_the_output_floor_warns():
+    """CLIP A shipped at 3.92s against a 4s output floor."""
+    report = check(**{**GOOD, "duration": 3.917})
+    assert tier_of("output coverage", report) is Tier.WARN
+    assert "uncovered" in next(
+        f.detail for f in report.findings if f.check == "output coverage"
+    )
+
+
+def test_a_fractional_ref_length_warns():
+    assert tier_of("output coverage", check(**{**GOOD, "duration": 6.4})) is Tier.WARN
+
+
+def test_a_whole_second_ref_passes_coverage():
+    assert tier_of("output coverage", check(**{**GOOD, "duration": 7.0})) is Tier.PASS
+
+
+def test_snap_holds_the_in_point_and_moves_the_out_point():
+    (start, end), note = snap_trim(1.0, 4.4, 20.0)
+    assert (start, end) == (1.0, 5.0)
+    assert "out-point" in note
+
+
+def test_snap_rounds_down_as_readily_as_up():
+    """6.4s rounds to 6, not up to 7: the nearest requestable length wins, not the longest."""
+    (start, end), _ = snap_trim(2.0, 8.4, 20.0)
+    assert (start, end) == (2.0, 8.0)
+
+
+def test_snap_pulls_the_in_point_back_when_the_source_runs_out():
+    """The real CLIP A case: 4.0-7.9s of a 7.944s source cannot grow forwards."""
+    (start, end), note = snap_trim(4.0, 7.9, 7.944)
+    assert end == pytest.approx(7.944)
+    assert end - start == pytest.approx(4.0)
+    assert "window" in note
+
+
+def test_snap_leaves_an_already_snapped_trim_alone():
+    assert snap_trim(1.0, 6.0, 20.0) == ((1.0, 6.0), None)
+
+
+def test_snap_gives_up_rather_than_fabricate_footage():
+    """A 3s source has no legal 4s window; the duration check owns that failure."""
+    assert snap_trim(0.0, 3.0, 3.0) == ((0.0, 3.0), None)
+
+
+def test_snap_never_exceeds_the_output_ceiling():
+    (start, end), _ = snap_trim(0.0, 19.4, 30.0)
+    assert end - start == pytest.approx(15.0)
+
+
+def test_snapped_lengths_always_land_on_the_grid():
+    for span in (2.3, 3.9, 4.4, 5.6, 7.1, 9.9):
+        (start, end), _ = snap_trim(1.0, 1.0 + span, 30.0)
+        assert on_output_grid(round(end - start, 3)), span
 
 
 def test_format_report_is_plain_text_without_colour():

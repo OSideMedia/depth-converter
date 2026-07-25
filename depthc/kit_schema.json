@@ -98,6 +98,65 @@
       }
     },
 
+    "motion": {
+      "description": "Depth-space motion measurement. Absent on kits built before the gate existed.",
+      "type": "object",
+      "required": ["energy", "buckets", "sparkline", "fps", "grid"],
+      "additionalProperties": false,
+      "properties": {
+        "energy": { "type": "number", "minimum": 0 },
+        "median": { "type": "number", "minimum": 0 },
+        "peak": { "type": "number", "minimum": 0 },
+        "headEnergy": { "type": "number", "minimum": 0 },
+        "tailEnergy": { "type": "number", "minimum": 0 },
+        "cameraShare": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bucketSeconds": { "type": "number", "exclusiveMinimum": 0 },
+        "buckets": { "type": "array", "items": { "type": "number" } },
+        "sparkline": { "type": "string" },
+        "deadStretch": {
+          "type": ["object", "null"],
+          "required": ["startSeconds", "seconds", "where"],
+          "additionalProperties": false,
+          "properties": {
+            "startSeconds": { "type": "number", "minimum": 0 },
+            "seconds": { "type": "number", "exclusiveMinimum": 0 },
+            "where": { "enum": ["head", "middle", "tail"] }
+          }
+        },
+        "spikeSeconds": { "type": "array", "items": { "type": "number" } },
+        "sourceEnergy": { "type": "number", "minimum": 0 },
+        "retention": { "type": ["number", "null"], "minimum": 0 },
+        "grid": { "type": "string" },
+        "fps": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "variants": {
+      "description": "Alternate refs of the same beat. Exactly one is uploaded per generation.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "filename", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "filename": { "type": "string" },
+          "description": { "type": "string" },
+          "energy": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+
+    "sheet": {
+      "type": "object",
+      "required": ["filename"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "const": "sheet.png" },
+        "usage": { "type": "string" }
+      }
+    },
+
     "checks": {
       "type": "object",
       "required": ["tier", "findings"],

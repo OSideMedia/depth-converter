@@ -549,3 +549,153 @@ def test_index_file_is_not_mistaken_for_a_kit(tmp_path):
     _write_kit(tmp_path, "A_001", ["x"])
     kitlib.write_outbox_index(tmp_path)
     assert [e.name for e in kitlib.library_list(tmp_path)] == ["A_001"]
+
+
+# ------------------------------------------------------------------- motion in the manifest
+
+def _motion_block(energy: float = 4.42) -> dict:
+    import numpy as np
+
+    from depthc import motion as motionlib
+
+    depth = motionlib.MotionProfile(
+        fps=24.0, deltas=np.full(120, energy, dtype="float32"), camera=0.3
+    )
+    source = motionlib.MotionProfile(fps=24.0, deltas=np.full(120, 8.5, dtype="float32"))
+    return motionlib.manifest_block(depth, source)
+
+
+def test_manifest_with_motion_validates_against_the_schema():
+    import jsonschema
+
+    manifest = _manifest(
+        motion=_motion_block(),
+        variants=[{"name": "contrast", "filename": "contrast.mp4",
+                   "description": "stretched", "energy": 6.1}],
+        has_sheet=True,
+    )
+    jsonschema.validate(manifest, json.loads(SCHEMA_PATH.read_text()))
+
+
+def test_motion_block_is_absent_rather_than_null_when_unmeasured():
+    """A kit built before the gate existed and one that measured nothing are different."""
+    assert "motion" not in _manifest()
+    assert "variants" not in _manifest()
+    assert "sheet" not in _manifest()
+
+
+def test_readme_shows_the_sparkline_and_the_scale():
+    manifest = _manifest(motion=_motion_block())
+    text = kitlib.render_kit_readme(manifest, check(duration=5.0, width=1280, height=536,
+                                                    fps=24.0, size_bytes=1_500_000,
+                                                    still_has_real_faces=True))
+    assert manifest["motion"]["sparkline"] in text
+    assert "4.42" in text  # the calibration anchor, so the number means something
+    assert "52%" in text   # retention, rendered as a percentage
+
+
+def test_readme_omits_the_motion_block_when_there_is_none():
+    text = kitlib.render_kit_readme(_manifest(), check(
+        duration=5.0, width=1280, height=536, fps=24.0, size_bytes=1_500_000,
+        still_has_real_faces=True))
+    assert "MOTION" not in text
+
+
+def test_readme_tells_you_to_upload_one_variant_not_three():
+    manifest = _manifest(
+        motion=_motion_block(),
+        variants=[{"name": "invert", "filename": "invert.mp4",
+                   "description": "flipped", "energy": 4.4}],
+    )
+    text = kitlib.render_kit_readme(manifest, check(
+        duration=5.0, width=1280, height=536, fps=24.0, size_bytes=1_500_000,
+        still_has_real_faces=True))
+    assert "ONE PER GENERATION" in text
+    assert "variants/invert.mp4" in text
+
+
+def test_readme_always_explains_how_to_record_a_fire():
+    text = kitlib.render_kit_readme(_manifest(), check(
+        duration=5.0, width=1280, height=536, fps=24.0, size_bytes=1_500_000,
+        still_has_real_faces=True))
+    assert "depthc result" in text
+
+
+# ------------------------------------------------------------------------ the fire log
+
+def _kit_on_disk(tmp_path, name: str = "Sword-duel_001") -> Path:
+    kit_dir = tmp_path / name
+    kit_dir.mkdir()
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(_manifest()))
+    return kit_dir
+
+
+def test_an_unfired_kit_has_an_empty_log(tmp_path):
+    log = kitlib.read_results(_kit_on_disk(tmp_path))
+    assert log["fires"] == []
+
+
+def test_recording_a_fire_writes_result_json(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered", surface="oside", cost_usd=0.31,
+                         notes="followed the lunge exactly")
+    saved = json.loads((kit_dir / "result.json").read_text())
+    assert saved["fires"][0]["verdict"] == "adhered"
+    assert saved["fires"][0]["costUsd"] == 0.31
+    assert saved["fires"][0]["meaning"] == kitlib.VERDICTS["adhered"]
+    assert saved["kitName"] == kit_dir.name
+
+
+def test_fires_accumulate_rather_than_overwrite(tmp_path):
+    """Two fires of one ref is a data point about prompts; keeping only the last hides it."""
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="ignored")
+    log = kitlib.record_result(kit_dir, verdict="adhered", notes="second prompt")
+    assert [f["verdict"] for f in log["fires"]] == ["ignored", "adhered"]
+
+
+def test_an_unknown_verdict_is_refused(tmp_path):
+    with pytest.raises(ValueError):
+        kitlib.record_result(_kit_on_disk(tmp_path), verdict="great")
+
+
+def test_a_corrupt_result_file_is_replaced_not_fatal(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    (kit_dir / "result.json").write_text("{not json")
+    assert kitlib.read_results(kit_dir)["fires"] == []
+    kitlib.record_result(kit_dir, verdict="partial")
+    assert len(kitlib.read_results(kit_dir)["fires"]) == 1
+
+
+def test_library_entry_reports_the_latest_verdict(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    entry = kitlib.library_list(tmp_path)[0]
+    assert entry.verdict == "untested"
+    kitlib.record_result(kit_dir, verdict="late")
+    assert kitlib.library_list(tmp_path)[0].verdict == "late"
+
+
+def test_library_entry_exposes_motion_energy(tmp_path):
+    kit_dir = tmp_path / "Kit_001"
+    kit_dir.mkdir()
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(_manifest(motion=_motion_block(2.5))))
+    assert kitlib.library_list(tmp_path)[0].energy == pytest.approx(2.5)
+
+
+def test_index_shows_motion_and_verdicts(tmp_path):
+    kit_dir = tmp_path / "Kit_001"
+    kit_dir.mkdir()
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(_manifest(motion=_motion_block())))
+    kitlib.record_result(kit_dir, verdict="adhered", notes="clean")
+    text = kitlib.write_outbox_index(tmp_path).read_text()
+    assert "motion 4.42" in text
+    assert "FIRED 1x · last: adhered — clean" in text
+
+
+def test_index_says_nothing_about_fires_for_an_untested_kit(tmp_path):
+    kit_dir = tmp_path / "Kit_001"
+    kit_dir.mkdir()
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(_manifest()))
+    # "FIRED" also appears in the header's explanation, so check the entry itself.
+    entry = kitlib.write_outbox_index(tmp_path).read_text().split("1 kit:")[1]
+    assert "FIRED" not in entry

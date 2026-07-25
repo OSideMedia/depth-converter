@@ -55,7 +55,7 @@ Processed/  ← sources file themselves here once converted
 ```
 
 ```bash
-# 1. triage what's waiting — what each clip is, whether it needs trimming
+# 1. triage what's waiting — what each clip is, where its motion sits, which window to cut
 ./.tools/uv run depthc inbox
 
 # 2. build a kit from one clip and archive the source
@@ -72,21 +72,38 @@ Processed/  ← sources file themselves here once converted
 `--archive` moves the source to `Processed/` after a PASS or WARN. A **FAIL deliberately
 stays in `Inbox/`** so a rejected clip stays visible.
 
-**Between steps 1 and 2 sits the only real judgement call: which 3–8 s beat to keep.**
-Watch the clip first — a contact sheet is enough:
-
-```bash
-ffmpeg -i "Inbox/CLIP C.mp4" -vf "fps=1,scale=320:-1,tile=5x2" -frames:v 1 sheet.png
-```
-
-On the clip above that showed a second set of figures walking in at 6 s — a competing
-motion signal — which is what set the out-point at 6.0.
-
 ```bash
 # other commands
-./.tools/uv run depthc probe "myclip.mov"     # inspect one file
-./.tools/uv run depthc ui                      # secondary: local web UI
+./.tools/uv run depthc scout "myclip.mp4" --target 5   # where is the motion? ~4s
+./.tools/uv run depthc probe "myclip.mov"              # inspect one file
+./.tools/uv run depthc result <kit> --verdict adhered  # record what a fire actually did
+./.tools/uv run depthc ui                              # secondary: local web UI
 ```
+
+### Choosing the window — measured, then vetoed
+
+Between steps 1 and 2 sits the only real judgement call: which beat to keep. `depthc inbox`
+and `depthc scout` now answer most of it, by running a deliberately cheap depth pass over the
+whole clip and ranking every window of the target length:
+
+```
+▄▄▇█▄▃▄▃   overall 2.44
+0s:1.9 1s:2.1 2s:3.6 3s:4.7 4s:2.1 5s:1.7 6s:1.8 7s:1.6
+best 5s windows:
+→ 0.75-5.75s   energy 2.87  head 2.44  balance 0.92  score 2.76   soft (0.50 of best sharpness)
+  2.75-7.75s   energy 2.54  head 4.74  balance 0.50  score 1.91
+```
+
+The score is the window's motion energy penalised for a **dead first beat** (a generation that
+sits still then starts), **imbalance** (a mean hiding a slow build or a beat that dies), a
+**cut** inside the window, and any **dead stretch**. Softness is reported and deliberately not
+scored — motion blur is what talked us out of the right window in the first place.
+
+**Then look at `sheet.png` and override it when it is wrong.** The scorer ranks how much
+motion a window carries and cannot see how many separate things are moving, so a second figure
+walking into frame reads as more signal rather than as the competing signal it is. On the
+walk-in clip the top-ranked window is exactly the stretch a human had cut away for that
+reason. Kit `_003` of that clip is the override; `_002` is what the scorer wanted.
 
 ### The web UI and desktop apps — secondary
 
@@ -124,9 +141,14 @@ index, so kits stay portable, greppable, and repairable with a text editor.
 | `depth.mp4` | upload as the **video** reference |
 | `binding.txt` | paste its one line into that reference's **binding field** |
 
-Every kit also carries a `README.txt` saying precisely that, plus the refs-only rule and
-the suggested output length. Everything else in the folder — `prompt.txt`, `kit.json`,
-`source.mp4`, `preview.mp4`, `still.png` — is reference or archive, not for upload.
+Every kit also carries a `README.txt` saying precisely that, plus the refs-only rule, the
+suggested output length, and the kit's motion profile as a sparkline. Everything else in the
+folder — `prompt.txt`, `kit.json`, `source.mp4`, `preview.mp4`, `still.png`, `sheet.png` — is
+reference or archive, not for upload.
+
+`sheet.png` is a contact sheet of the depth video with timestamps. **Look at it before
+firing**: it is the one thing that catches what the window scorer is blind to, and the
+letterbox bug was found by looking at a picture rather than by any test.
 
 `source.mp4` is stored trimmed but **uncropped**, at source resolution — the crop is
 recorded in `kit.json` as a setting, so a kit can always be re-converted at different
@@ -145,6 +167,57 @@ Every kit is graded in three tiers, and the worst finding sets the kit's tier:
 A FAIL exits non-zero, so `depthc kit` is safe to use in a script. Where sources disagree
 about a limit the stricter value is enforced (50 MB rather than 200 MB), and the Phase 4
 console check is what settles those before any of them become hard failures.
+
+Duration, file size, resolution and fps are shape checks that cannot fail if the code is
+right. The findings that actually predict a bad generation are about **motion**:
+
+| finding | what it catches |
+|---|---|
+| **motion signal** | mean grey-level change per frame in depth space. FAIL under 0.30 (nothing to follow), WARN under 1.50 (the model free-runs), WARN over 12 (shake, not choreography) |
+| **late-start risk** | the first 0.75 s is frozen, so the generation will sit still and then start |
+| **dead stretch** | ≥0.75 s of nothing anywhere else — a beat the model has to invent |
+| **motion spikes** | a hard cut inside the ref: a second motion signal, and the worst kind |
+| **depth retention** | how much of the source's motion survived into depth. Low means the movement runs parallel to the camera plane |
+| **motion type** | whether this is a camera-path or a subject-motion reference |
+| **output coverage** | the ref length is not exactly requestable as an output length |
+
+For scale, measured on the four reference clips: a sword duel reads **4.42**, a walk-in
+**1.71**, a prone crawl whose generation started late **0.95**, a near-static interior
+**0.71**.
+
+**RGB motion is not depth motion.** The prone crawl's window carries *more* frame-to-frame
+motion than the sword duel in colour (5.98 vs 4.93) and keeps 16% of it in depth against the
+duel's 87% — bodies crawling along the ground barely change distance to the lens, so the depth
+channel flattens the movement almost entirely. That is the failure behind a generation which
+"started very late", and nothing in the old checker had an opinion about it.
+
+### Output length is a whole number of seconds
+
+Output duration is sent as an integer, minimum 4 s. A 3.92 s reference therefore cannot be
+matched by any legal request: the generation is at least 4 s, and whatever it does past the
+end of the reference is undefined. `depthc kit` snaps trims to that grid by default
+(`--no-snap` to opt out), holding the in-point and moving the out-point where the source
+allows.
+
+### Recording what a fire actually did
+
+```bash
+./.tools/uv run depthc result Sword-duel_Two-fighters_002 \
+    --verdict adhered --surface oside --cost 0.31 --notes "followed the lunge exactly"
+```
+
+Verdicts are `adhered`, `partial`, `ignored`, `late`, `rejected`. Each fire appends to the
+kit's `result.json` and shows up in `depthc library list` and `Outbox/INDEX.txt`. A generation
+is the only evidence that says whether any of this works, and it costs money — the library has
+no other way to learn.
+
+### Variants — three refs of one beat, one live-fire
+
+`depthc kit --variants` also writes `variants/contrast.mp4` (percentile-stretched, more of the
+grey range spent on the subject) and `variants/invert.mp4` (far bright instead of near).
+**Upload exactly one per generation** and record which won with `--variant`. Both are
+experiments, honestly labelled: no published depth pipeline does percentile clipping, and a
+generic video-reference slot has no polarity convention to match.
 
 ### `prompt.txt` ships two variants — use exactly one
 

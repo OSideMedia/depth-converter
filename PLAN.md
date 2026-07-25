@@ -315,7 +315,7 @@ replicated to 3 channels, even width/height, source-true duration. Post-encode: 
 file ≤ 50 MB (re-encode at crf 20 with WARN if exceeded).
 
 ### §1a Test assets on hand [AMENDED 2026-07-24]
-- **`TEST CLIPS/` in this folder** — four real 1080p clips, probed 2026-07-24, ready for
+- **`Processed/` in this folder** — four real 1080p clips, probed 2026-07-24, ready for
   Gates 1 and 3 (no synthetic-only fallback needed):
   | Clip | Duration | fps | Size | Gate role |
   |---|---|---|---|---|
@@ -450,7 +450,7 @@ Key engineering decisions:
   the per-frame mean brightness std across frames must be small (calibrate threshold
   once, then freeze) — this is the flicker regression guard.
 - **GATE 1:** `uv run pytest` green including one `slow` real-model test; converting
-  **CLIP A and CLIP B from `TEST CLIPS/` [AMENDED 2026-07-24]** by hand produces upright,
+  **CLIP A and CLIP B from `Processed/` [AMENDED 2026-07-24]** by hand produces upright,
   smooth, obviously-depth MP4s (conformed to 24 fps from 60/29.97) that QuickTime and
   Chrome both play.
 - **✅ GATE 1 PASSED 2026-07-24.** 39 tests green (5 `slow`, real model). CLIP A 60→24 fps

@@ -284,11 +284,21 @@ def _convert(
         if make_preview:
             side_by_side(frames, result.frames, paths.preview, result.fps)
 
+        # Same measurements the CLI takes, so a kit built here is graded identically — the
+        # gate must not depend on which surface produced the kit.
+        from depthc import motion as motionlib
+
+        depth_motion = motionlib.measure(result.frames, result.fps)
+        source_motion = motionlib.measure(frames, result.fps, with_flow=False)
+        motionlib.contact_sheet(result.frames, result.fps, paths.sheet)
+
         depth_info = probe(paths.depth)
         report = checks.check(
             duration=depth_info.duration, width=depth_info.width, height=depth_info.height,
             fps=depth_info.fps, size_bytes=paths.depth.stat().st_size,
             still_has_real_faces=faces,
+            motion=depth_motion,
+            retention=motionlib.retention(depth_motion, source_motion),
         )
         prompt_text = kitlib.render_prompt(
             kit_name=kit_dir.name, duration=depth_info.duration, width=depth_info.width,
@@ -296,7 +306,7 @@ def _convert(
         )
         paths.prompt.write_text(prompt_text)
 
-        kitlib.write_manifest(paths, kitlib.build_manifest(
+        manifest = kitlib.build_manifest(
             kit_name=kit_dir.name, source_path=info.path,
             source_sha256=kitlib.sha256_file(info.path), source_duration=info.duration,
             source_fps=info.fps, source_size=(info.width, info.height), trim=trim,
@@ -312,7 +322,16 @@ def _convert(
                 "crop": crop_mode, "keepAudio": keep_audio,
             },
             report=report, device=result.device, elapsed=result.elapsed,
-        ))
+            motion=motionlib.manifest_block(depth_motion, source_motion),
+            has_sheet=paths.sheet.exists(),
+        )
+        kitlib.write_manifest(paths, manifest)
+        # The UI used to skip both of these while its own results panel told the user to take
+        # binding.txt to OSIDE — a kit built here was missing the file it was told to use.
+        paths.binding.write_text(kitlib.render_binding() + "\n")
+        paths.readme.write_text(
+            kitlib.render_kit_readme(manifest, report, has_preview=make_preview)
+        )
         kitlib.write_outbox_index(root)
 
         progress(1.0, desc="done")
