@@ -19,23 +19,35 @@ source sampled at 12. Per-frame deltas scale with the frame interval; the rankin
 error, the numbers did not. Both sides are now measured on the same frames.)
 
 UNITS. Every energy figure is the mean absolute difference between consecutive frames of the
-8-bit depth video, measured on a fixed 160x90 analysis grid. So 1.0 means "the average pixel
-changes by one grey level per frame". The grid is fixed rather than aspect-preserving so that
-figures are comparable across clips of different shapes; the aspect distortion does not
-affect a mean. A frozen frame pushed back through the same encoder measures 0.002, so the
-thresholds below are signal, not codec noise.
+8-bit depth video, measured on an ASPECT-PRESERVING analysis grid with a 160 px long edge.
+So 1.0 means "the average pixel changes by one grey level per frame". The mean is per PIXEL,
+which means motion is measured as a SHARE OF THE FRAME: the same subject moving the same
+distance reads ~34% hotter in a 2.39:1 frame than in 16:9, because it occupies more of the
+shorter frame (verified empirically, and true under any grid — it is a property of the
+metric, not of the resampling). That is deliberate: the model receives the ref as its whole
+frame, so frame-share is the scale adherence actually happens on.
+
+The grid preserved aspect from v2 (2026-07-25). For the full-frame mean the old fixed
+160x90 grid and this one agree — all four calibration clips re-measured within ±0.02 — but
+the squashed geometry fed distorted shapes to the optical-flow camera/subject split and to
+sharpness, and would have mis-measured portrait sources; v2 makes the geometry faithful. A
+frozen frame pushed back through the same encoder measures 0.002, so the thresholds below
+are signal, not codec noise.
 
 Energy is per FRAME, so it scales with the frame interval — figures are only comparable at
 the same fps. Everything a kit ships is conformed to 24 fps; the scout pass runs at 12 and
 rescales, and says so.
 
-THRESHOLDS are calibrated against those four clips rather than derived from theory:
+THRESHOLDS are calibrated against those four clips rather than derived from theory
+(re-measured 2026-07-25 on the v2 grid from each kit's encoded depth.mp4; the two grids
+agree on the mean, so the tiny shifts against the v1 figures are encode round-trip, not
+metric change):
 
-    A prone crawl   0.99   weak    near-static after the first half second — the clip whose
+    A prone crawl   0.94   weak    near-static after the first half second — the clip whose
                                    generation "started very late"
-    B sword duel    4.42   strong  sustained and rising; the one that behaved
-    C walk-in       1.76   fine    steady, unspectacular, works
-    D slow dolly    0.54   weak    a camera move with a 1.5 s dead head
+    B sword duel    4.40   strong  sustained and rising; the one that behaved
+    C walk-in       1.69   fine    steady, unspectacular, works
+    D slow dolly    0.72   weak    a camera move with a dead first second
 
 Two ideas here are cherry-picked from video-dataset curation pipelines (see
 DOCS/PRIOR-ART.md): motion scoring is a BAND rather than a floor — too much frame-to-frame
@@ -52,8 +64,16 @@ from pathlib import Path
 import numpy as np
 
 # --- the analysis grid --------------------------------------------------------------------
+GRID_LONG_EDGE = 160
+# The 16:9 case (and the test fixtures): a 160 px long edge lands on the original 160x90.
 GRID_WIDTH = 160
 GRID_HEIGHT = 90
+
+
+def analysis_size(width: int, height: int) -> tuple[int, int]:
+    """Grid dimensions for one frame shape: long edge 160, aspect preserved."""
+    scale = GRID_LONG_EDGE / max(width, height)
+    return max(2, round(width * scale)), max(2, round(height * scale))
 
 # --- thresholds (calibrated on the four real clips; see module docstring) ------------------
 STATIC_FLOOR = 0.30       # at or below this a stretch is as good as frozen
@@ -77,6 +97,7 @@ CUT_FRACTION = 0.35       # share of the frame that has to change at once to cal
 SPIKE_MULTIPLE = 6.0      # fallback for a bare delta series with no pixels to look at
 SPIKE_FLOOR = 8.0
 LOW_RETENTION = 0.25      # depth energy / source energy below this = in-plane motion
+NOISE_RETENTION = 1.20    # depth energy ABOVE source energy = depth flicker, not choreography
 CAMERA_DOMINANT = 0.60    # median-flow share above this = a camera-path ref, not a body one
 
 SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
@@ -84,7 +105,10 @@ SPARK_DEAD = "·"
 
 
 def analysis_gray(frames: np.ndarray) -> np.ndarray:
-    """Downsample [N,H,W] grey or [N,H,W,3] RGB to the fixed [N,90,160] uint8 analysis grid.
+    """Downsample [N,H,W] grey or [N,H,W,3] RGB to the uint8 analysis grid.
+
+    The grid preserves the frame's aspect at a 160 px long edge (see the module docstring:
+    the full-frame mean is grid-agnostic, but flow and sharpness need faithful geometry).
 
     INTER_AREA is the correct filter for shrinking: it averages the pixels it discards, so a
     small fast-moving subject still contributes to the delta instead of falling between
@@ -99,8 +123,13 @@ def analysis_gray(frames: np.ndarray) -> np.ndarray:
     else:
         raise ValueError(f"Expected [N,H,W] or [N,H,W,3] frames, got {frames.shape}")
 
+    if not source:
+        return np.zeros((0, GRID_HEIGHT, GRID_WIDTH), dtype=np.uint8)
+
+    height, width = source[0].shape[:2]
+    grid_w, grid_h = analysis_size(width, height)
     return np.stack(
-        [cv2.resize(f, (GRID_WIDTH, GRID_HEIGHT), interpolation=cv2.INTER_AREA) for f in source]
+        [cv2.resize(f, (grid_w, grid_h), interpolation=cv2.INTER_AREA) for f in source]
     )
 
 
@@ -125,7 +154,7 @@ def frame_stats(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
-def camera_share(frames: np.ndarray) -> float:
+def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     """How much of the movement is the camera rather than the subject, 0.0-1.0.
 
     Farneback dense flow, then split each frame pair's field into the median vector (every
@@ -142,6 +171,11 @@ def camera_share(frames: np.ndarray) -> float:
     zoom, orbit or roll moves pixels in opposing directions, so its median is near zero and it
     books as subject motion. Treat a high number as "definitely camera", a low one as "not a
     simple camera translation" rather than "definitely subject".
+
+    `fps` scales the static floor: STATIC_FLOOR is calibrated at 24 fps, and raw per-gap
+    deltas grow with the frame interval — at the scout's 12 fps a gap that is static by the
+    24 fps definition reads twice as large and would otherwise vote flow again, which is
+    exactly the noise dilution the exclusion was built to stop.
     """
     import cv2
 
@@ -149,10 +183,11 @@ def camera_share(frames: np.ndarray) -> float:
     if grid.shape[0] < 2:
         return 0.0
 
+    floor = STATIC_FLOOR * (24.0 / fps) if fps > 0 else STATIC_FLOOR
     deltas = np.abs(np.diff(grid.astype(np.float32), axis=0)).mean(axis=(1, 2))
     camera, subject = [], []
     for index, (previous, current) in enumerate(zip(grid[:-1], grid[1:])):
-        if deltas[index] <= STATIC_FLOOR:
+        if deltas[index] <= floor:
             continue
         flow = cv2.calcOpticalFlowFarneback(
             previous, current, None,
@@ -216,7 +251,9 @@ class MotionProfile:
     fps: float
     deltas: np.ndarray = field(repr=False)
     bucket_seconds: float = 0.5
-    camera: float = 0.0
+    # None = the flow pass was skipped; 0.0 = measured, and it is pure subject motion.
+    # Collapsing the two made a genuine zero drop the motion-type finding entirely.
+    camera: float | None = None
     changed: np.ndarray | None = field(default=None, repr=False)
 
     # ------------------------------------------------------------------ scalars
@@ -285,10 +322,14 @@ class MotionProfile:
             return None
 
         end = best_start + best_length
+        # 0.25 s of slop: a 2-3 frame blip before a frozen opening is still a late start in
+        # practice, and the old 0.1 s window classed it "middle" — burying the CLIP A
+        # finding under the generic dead-stretch label.
+        slop = max(1, int(round(0.25 * self.fps)))
         where = "middle"
-        if best_start <= max(1, int(0.1 * self.fps)):
+        if best_start <= slop:
             where = "head"
-        elif end >= dead.size - max(1, int(0.1 * self.fps)):
+        elif end >= dead.size - slop:
             where = "tail"
         return DeadStretch(best_start / self.fps, best_length / self.fps, where)
 
@@ -301,14 +342,26 @@ class MotionProfile:
         — a synthetic one, or a manifest read back from disk — falls back to a deliberately
         blunt magnitude rule, because a series alone cannot distinguish extent from intensity.
         """
-        if self.deltas.size < 3:
+        if not self.deltas.size:
             return []
-        if self.changed is not None and self.changed.size == self.deltas.size:
+        # The changed-pixel CUT_FRACTION was calibrated at 24 fps and is only honest there:
+        # at the scout's 12 fps a legitimate fast action sweeps roughly twice the pixels per
+        # frame gap (verified empirically: 2.0x) and blows through 0.35, flagging a sword
+        # impact as a cut and quartering the best window's score. Any non-24 fps profile
+        # falls back to the magnitude rule, which self-normalises — deltas and median scale
+        # with the frame interval together.
+        if (
+            self.changed is not None
+            and self.changed.size == self.deltas.size
+            and abs(self.fps - 24.0) <= 0.5
+        ):
             return [
                 round(i / self.fps, 2)
                 for i, fraction in enumerate(self.changed)
                 if fraction > CUT_FRACTION
             ]
+        if self.deltas.size < 3:
+            return []
         limit = max(SPIKE_FLOOR, self.median * SPIKE_MULTIPLE)
         return [round(i / self.fps, 2) for i, d in enumerate(self.deltas) if d > limit]
 
@@ -326,7 +379,9 @@ class MotionProfile:
             "sparkline": self.spark,
             "deadStretch": dead.as_dict() if dead else None,
             "spikeSeconds": self.spikes,
-            "grid": f"{GRID_WIDTH}x{GRID_HEIGHT}",
+            # v2: aspect-preserving grid. Energy means agree with v1's fixed "160x90";
+            # the flow-based cameraShare is the figure that may differ on non-16:9 kits.
+            "grid": f"long-edge {GRID_LONG_EDGE} (aspect-preserving, v2)",
             "fps": round(self.fps, 3),
         }
 
@@ -340,7 +395,7 @@ def measure(frames: np.ndarray, fps: float, with_flow: bool = True) -> MotionPro
         fps=float(fps),
         deltas=deltas,
         changed=changed,
-        camera=camera_share(frames) if with_flow else 0.0,
+        camera=camera_share(frames, fps) if with_flow else None,
     )
 
 
@@ -606,7 +661,7 @@ def scout_clip(
         deltas=deltas * (scout_fps / 24.0),
         changed=changed,
         bucket_seconds=1.0,
-        camera=camera_share(result.frames),
+        camera=camera_share(result.frames, scout_fps),
     )
     windows = score_windows(
         profile, target_seconds, sharpness=sharpness_series(frames)
@@ -649,6 +704,46 @@ def invert(frames: np.ndarray) -> np.ndarray:
     return (255 - frames).astype(np.uint8)
 
 
+MODERATION_CEILING = 190  # brightest grey the midgrey variant will ship
+
+
+def midgrey(frames: np.ndarray, ceiling: int = MODERATION_CEILING) -> np.ndarray:
+    """Scale the whole range down so no figure blows toward white.
+
+    Built for the moderation boundary the live run mapped: the one input rejection
+    (`InputVideoSensitiveContentDetected`) was two bare depth silhouettes, prone and
+    overlapping, blown to NEAR-WHITE filling the frame — depth strips clothing, so a
+    near-white body-shape reads as bare skin to the filter. Upright, separated,
+    mid-grey-reading figures sailed through from the same pipeline.
+
+    The map is linear, so relative depth ordering and timing are untouched; motion energy
+    scales down by the same ceiling/255 factor and the per-variant energy in the manifest
+    records that honestly. A rejection costs nothing, so probing with this is cheap.
+    """
+    return (frames.astype(np.float32) * (ceiling / 255.0)).round().astype(np.uint8)
+
+
+def depth_edges(frames: np.ndarray) -> np.ndarray:
+    """Canny edges of the DEPTH frames — outlines only, dilated to survive encoding.
+
+    Computed from depth, never from the source: an edge map of the original pixels would
+    carry face and texture contours back into the upload, exactly what the depth channel
+    exists to strip. Depth edges keep silhouettes and prop outlines (the sword survives)
+    while discarding the surface shading depth still carries.
+
+    EXPERIMENTAL, and honestly so: no published pipeline feeds Seedance edge refs, Canny
+    flickers frame to frame by nature, and a line-drawing ref may read as a STYLE cue as
+    much as a motion one. That is what --variants exists to find out.
+    """
+    import cv2
+
+    kernel = np.ones((3, 3), np.uint8)
+    out = np.empty_like(frames)
+    for index, frame in enumerate(frames):
+        out[index] = cv2.dilate(cv2.Canny(frame, 40, 120), kernel)
+    return out
+
+
 VARIANTS = {
     "contrast": (
         contrast_stretch,
@@ -657,6 +752,16 @@ VARIANTS = {
     "invert": (
         invert,
         "polarity flipped — far bright, near dark",
+    ),
+    "midgrey": (
+        midgrey,
+        f"luma capped at {MODERATION_CEILING} — figures stay grey instead of blowing to "
+        f"near-white; for refs that trip input moderation (prone/overlapping bodies)",
+    ),
+    "edges": (
+        depth_edges,
+        "Canny edges of the depth video — outlines only; may read as style as much as "
+        "motion (experiment)",
     ),
 }
 

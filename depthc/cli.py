@@ -33,6 +33,21 @@ def _warn(message: str) -> None:
     typer.echo(f"{YELLOW}warning:{OFF} {message}")
 
 
+def _abandon_kit(kit_dir) -> None:
+    """Remove a kit folder whose manifest never got written.
+
+    A kit without kit.json is invisible to `library list` and INDEX.txt but still burns its
+    numbered slot and looks like a real kit in Finder. If the build died partway, the debris
+    goes; the source clip is untouched and the next run re-allocates the same slot.
+    """
+    import shutil
+
+    from depthc.kit import KIT_MANIFEST
+
+    if kit_dir is not None and kit_dir.is_dir() and not (kit_dir / KIT_MANIFEST).exists():
+        shutil.rmtree(kit_dir, ignore_errors=True)
+
+
 @dataclass
 class Conversion:
     """Everything downstream needs from one convert run."""
@@ -85,23 +100,30 @@ def _convert(
     if not quiet:
         typer.echo(f"{BOLD}{info.path.name}{OFF}  {DIM}{info.summary()}{OFF}")
 
+    # The 15s law is enforced on the trim AS GIVEN, before snapping. Snapping exists to land
+    # a legal span on the output grid, never to shorten an illegal one: the old order let
+    # snap_trim clamp a 20s trim to 15s silently, so this gate could not fire and
+    # --allow-long was dead unless --no-snap was also passed.
+    span = (trim[1] - trim[0]) if trim else info.duration
+    if span > checks.MAX_REF_SECONDS and not allow_long:
+        _die(
+            f"Trimmed length is {span:.1f}s. Seedance caps video references at 15s and "
+            f"adherence degrades past ~8s.\n"
+            f"  Trim to the one clear motion signal, or pass --allow-long to override."
+        )
+
     # Snap before anything is decoded: a ref shorter than the generation it drives leaves the
-    # model to invent the tail, and the fix is free at this point.
-    if snap:
+    # model to invent the tail, and the fix is free at this point. An --allow-long overlength
+    # span is left alone — no output length can match it anyway.
+    if snap and span <= checks.MAX_REF_SECONDS:
         window = trim if trim else (0.0, info.duration)
         snapped, note = checks.snap_trim(window[0], window[1], info.duration)
         if note:
             trim = snapped
             if not quiet:
                 typer.echo(f"{DIM}{note}{OFF}")
+        span = (trim[1] - trim[0]) if trim else info.duration
 
-    span = (trim[1] - trim[0]) if trim else info.duration
-    if span > 15 and not allow_long:
-        _die(
-            f"Trimmed length is {span:.1f}s. Seedance caps video references at 15s and "
-            f"adherence degrades past ~8s.\n"
-            f"  Trim to the one clear motion signal, or pass --allow-long to override."
-        )
     if span > 8:
         _warn(
             f"{span:.1f}s exceeds the 3-8s sweet spot — adherence degrades. "
@@ -301,8 +323,9 @@ def kit(
     variants: bool = typer.Option(
         False,
         "--variants",
-        help="Also write contrast-stretched and inverted versions of the same beat into "
-        "variants/, to compare in one live-fire. Upload exactly one per generation.",
+        help="Also write contrast-stretched, inverted, moderation-capped (midgrey) and "
+        "edge-map versions of the same beat into variants/, to compare across live-fires. "
+        "Upload exactly one per generation.",
     ),
 ) -> None:
     """Probe, convert, check, and package a full Seedance Kit into the Motion Library."""
@@ -313,6 +336,20 @@ def kit(
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
 
+    # Validate the cheap arguments BEFORE the multi-minute inference. A typo'd --still or
+    # --dialect used to surface only after the conversion had already been paid for, as a
+    # raw traceback beside a half-built kit folder.
+    if still not in ("auto", "first"):
+        try:
+            int(still)
+        except ValueError:
+            _die(f"--still expects auto, first, or a frame number (got {still!r})")
+    try:
+        kitlib.render_binding(dialect)
+    except (FileNotFoundError, ValueError) as e:
+        _die(str(e))
+
+    kit_dir = None
     try:
         job = _convert(
             input, trim=trim, resolution=resolution, fps=fps, crop=crop, invert=invert,
@@ -325,17 +362,28 @@ def kit(
         paths = kitlib.KitPaths(kit_dir)
 
         encode_gray(job.result.frames, paths.depth, job.result.fps)
-        if keep_audio and job.info.has_audio:
-            tmp = paths.depth.with_name("depth_audio.mp4")
-            mux_audio(paths.depth, job.info.path, tmp, trim=trim)
-            tmp.replace(paths.depth)
-        elif keep_audio:
-            _warn("--keep-audio: source has no audio track.")
 
-        # Post-encode size guard (PLAN.md §1 encode spec).
+        # Post-encode size guard (PLAN.md §1 encode spec) — on the SILENT encode, before any
+        # audio mux. The old order re-encoded AFTER muxing, which overwrote the just-added
+        # audio track without saying so; and the audio bytes themselves could be what pushed
+        # the file over the limit and triggered their own removal.
         if paths.depth.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
             _warn(f"depth.mp4 exceeded {checks.MAX_FILE_MB:g} MB — re-encoding at crf 20.")
             encode_gray(job.result.frames, paths.depth, job.result.fps, crf=20)
+
+        if keep_audio and job.info.has_audio:
+            tmp = paths.depth.with_name("depth_audio.mp4")
+            mux_audio(paths.depth, job.info.path, tmp, trim=trim)
+            if tmp.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
+                tmp.unlink()
+                _warn(
+                    f"--keep-audio: the audio track pushed depth.mp4 over "
+                    f"{checks.MAX_FILE_MB:g} MB — kept the silent version instead."
+                )
+            else:
+                tmp.replace(paths.depth)
+        elif keep_audio:
+            _warn("--keep-audio: source has no audio track.")
 
         still_index = None if still == "auto" else (0 if still == "first" else int(still))
         chosen = kitlib.write_still(job.frames, paths.still, index=still_index)
@@ -418,7 +466,9 @@ def kit(
                 "inputSize": input_size,
                 "precision": job.result.dtype,
                 "crop": crop,
-                "keepAudio": keep_audio,
+                # What actually happened, not what was asked: --keep-audio on a silent
+                # source keeps nothing, and a rebuild from kit.json must not claim it did.
+                "keepAudio": keep_audio and job.info.has_audio,
             },
             report=report,
             dialect=dialect,
@@ -438,11 +488,14 @@ def kit(
         if zip_output:
             kitlib.zip_kit(kit_dir)
 
-    except (VideoIOError, FileNotFoundError) as e:
+    except (VideoIOError, FileNotFoundError, ValueError) as e:
+        _abandon_kit(kit_dir)
         _die(str(e))
     except engine.NonFiniteDepth as e:
+        _abandon_kit(kit_dir)
         _die(str(e))
     except KeyboardInterrupt:
+        _abandon_kit(kit_dir)
         typer.echo("\ncancelled", err=True)
         raise typer.Exit(130)
 
@@ -474,7 +527,7 @@ def _print_scout(clip: Path, result, indent: str = "    ") -> None:
         + " ".join(f"{second}s:{value:.1f}" for second, value in enumerate(result.per_second))
         + OFF
     )
-    if profile.camera:
+    if profile.camera is not None:
         kind = "camera-path" if profile.camera >= motionlib.CAMERA_DOMINANT else "subject-motion"
         typer.echo(f"{indent}{DIM}{profile.camera * 100:.0f}% whole-frame movement → {kind}{OFF}")
 
@@ -622,7 +675,9 @@ def result(
     seconds: Optional[float] = typer.Option(None, "--seconds", help="Output length requested"),
     cost: Optional[float] = typer.Option(None, "--cost", help="USD spent on this generation"),
     output: str = typer.Option("", "--output", help="URL or path of what came back"),
-    variant: str = typer.Option("", "--variant", help="Which ref was used: base, contrast, invert"),
+    variant: str = typer.Option(
+        "", "--variant", help="Which ref was used: base, contrast, invert, midgrey, edges"
+    ),
     notes: str = typer.Option("", "--notes", help="What actually happened, in your words"),
     library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
 ) -> None:
@@ -648,7 +703,9 @@ def result(
     except ValueError as e:
         _die(str(e))
 
-    kitlib.write_outbox_index(root)
+    # The kit's own library gets the refreshed INDEX — for a kit given by path, that is its
+    # parent, which is not necessarily the default/--library root.
+    kitlib.write_outbox_index(kit_dir.parent)
     fires = log["fires"]
     typer.echo(
         f"{GREEN}✓{OFF} {kit_dir.name}: {BOLD}{verdict}{OFF} "

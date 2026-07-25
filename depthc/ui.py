@@ -268,15 +268,25 @@ def _convert(
         paths = kitlib.KitPaths(kit_dir)
 
         encode_gray(result.frames, paths.depth, result.fps)
+        # Size guard on the SILENT encode, before the mux — the old order re-encoded after
+        # muxing, silently discarding the audio the user just asked to keep (same fix as
+        # the CLI; the gate must not depend on which surface produced the kit).
+        if paths.depth.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
+            warnings.append(f"depth.mp4 over {checks.MAX_FILE_MB:g} MB — re-encoded at crf 20.")
+            encode_gray(result.frames, paths.depth, result.fps, crf=20)
         if keep_audio and info.has_audio:
             tmp = paths.depth.with_name("depth_audio.mp4")
             from depthc.video_io import mux_audio
 
             mux_audio(paths.depth, info.path, tmp, trim=trim)
-            tmp.replace(paths.depth)
-        if paths.depth.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
-            warnings.append(f"depth.mp4 over {checks.MAX_FILE_MB:g} MB — re-encoded at crf 20.")
-            encode_gray(result.frames, paths.depth, result.fps, crf=20)
+            if tmp.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
+                tmp.unlink()
+                warnings.append(
+                    f"audio pushed depth.mp4 over {checks.MAX_FILE_MB:g} MB — "
+                    f"kept the silent version instead."
+                )
+            else:
+                tmp.replace(paths.depth)
 
         still_index = None if still_mode == "auto" else 0
         chosen = kitlib.write_still(frames, paths.still, index=still_index)

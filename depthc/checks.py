@@ -54,6 +54,13 @@ MAX_MIXED_INPUTS = 12
 OUTPUT_GRID_SECONDS = 1.0
 SNAP_TOLERANCE = 0.05
 
+# fps grading: the accepted range gets ±0.5 of slack (a container reporting 59.94 for a
+# 60 fps export is not a rejection case), but the exact-24 PASS is deliberately tight —
+# 23.976 NTSC is NOT 24, it is precisely the cadence mismatch the WARN exists to catch,
+# and a round() comparison used to wave it through as an exact match.
+FPS_RANGE_SLACK = 0.5
+FPS_EXACT_TOLERANCE = 0.005
+
 
 class Tier(str, Enum):
     PASS = "PASS"
@@ -102,20 +109,26 @@ class Report:
 
 
 def suggested_output_seconds(ref_seconds: float) -> float:
-    """Output length to request for this ref, clamped into Seedance's 4-15 s window.
+    """Output length to request for this ref: a WHOLE number of seconds in 4-15.
 
     Seedance's output minimum is 4 s, so a 3 s ref necessarily drives a longer generation
     and the uncovered tail is undefined behavior. Matching output to ref length is the rule;
-    where that is impossible the kit at least records the closest legal value.
+    where that is impossible the kit at least records the closest legal value. The result
+    always lands on the integer grid — the adapter sends `Math.round(duration)`, so a
+    fractional suggestion (5.04) would be silently rounded and the manifest would claim a
+    match no legal request can make.
     """
     low, high = OUTPUT_SECONDS
-    return round(min(max(ref_seconds, low), high), 2)
+    return float(min(max(round(ref_seconds), low), high))
 
 
 def on_output_grid(seconds: float) -> bool:
     """Is this ref length exactly requestable as an output length?"""
-    low, _ = OUTPUT_SECONDS
-    return seconds >= low - SNAP_TOLERANCE and abs(seconds - round(seconds)) <= SNAP_TOLERANCE
+    low, high = OUTPUT_SECONDS
+    return (
+        low - SNAP_TOLERANCE <= seconds <= high + SNAP_TOLERANCE
+        and abs(seconds - round(seconds)) <= SNAP_TOLERANCE
+    )
 
 
 def snap_trim(
@@ -184,7 +197,7 @@ def _motion_findings(
             Tier.WARN, "motion signal",
             f"{energy:.2f} mean depth-space energy is weak — below {motionlib.WEAK_ENERGY:g} "
             f"the model has little to lock onto and tends to free-run ({spark}).",
-            "Reference points: 4.42 = a sword duel that behaved, 0.99 = the prone crawl whose "
+            "Reference points: 4.40 = a sword duel that behaved, 0.94 = the prone crawl whose "
             "generation started late. Run `depthc scout` for a stronger window.",
         ))
     elif energy > motionlib.JITTER_ENERGY:
@@ -232,7 +245,16 @@ def _motion_findings(
     # ------------------------------------------------------------------ depth retention
     if retention is not None:
         percent = retention * 100
-        if retention < motionlib.LOW_RETENTION and energy < motionlib.STRONG_ENERGY:
+        if retention > motionlib.NOISE_RETENTION:
+            add(Finding(
+                Tier.WARN, "depth retention",
+                f"{percent:.0f}% — the depth channel carries MORE motion than the source. "
+                f"The surplus is usually depth flicker on a low-texture source, not "
+                f"choreography.",
+                "Watch depth.mp4 / sheet.png for shimmer in flat areas before firing; a "
+                "ratio far above 100% is a noise flag, not good news.",
+            ))
+        elif retention < motionlib.LOW_RETENTION and energy < motionlib.STRONG_ENERGY:
             add(Finding(
                 Tier.WARN, "depth retention",
                 f"only {percent:.0f}% of the source's frame-to-frame motion survived into "
@@ -248,7 +270,9 @@ def _motion_findings(
             ))
 
     # ------------------------------------------------------------------ what kind of ref
-    if motion.camera:
+    # `is not None`: a measured 0.0 (pure subject motion) is a real finding; None means the
+    # flow pass was skipped, which is a different fact and stays silent.
+    if motion.camera is not None:
         kind = (
             "camera-path" if motion.camera >= motionlib.CAMERA_DOMINANT
             else "subject-motion"
@@ -316,8 +340,10 @@ def check(
 
     # ------------------------------------------------------------------ output coverage
     # Independent of the sweet-spot check above: a ref can be a perfectly good length and
-    # still be un-matchable by any legal output request.
-    if duration >= MIN_REF_SECONDS and not on_output_grid(duration):
+    # still be un-matchable by any legal output request. Scoped to the legal ref window —
+    # outside it the duration FAIL owns the finding, and a 16 s ref must not also collect a
+    # misleading "not a whole number of seconds" note.
+    if MIN_REF_SECONDS <= duration <= MAX_REF_SECONDS and not on_output_grid(duration):
         low, _ = OUTPUT_SECONDS
         if duration < low:
             add(Finding(
@@ -334,7 +360,7 @@ def check(
                 f"the end of the ref.",
                 "Re-cut to a whole number of seconds — `--snap` does it.",
             ))
-    elif duration >= MIN_REF_SECONDS:
+    elif MIN_REF_SECONDS <= duration <= MAX_REF_SECONDS:
         add(Finding(
             Tier.PASS, "output coverage",
             f"{duration:.2f}s is exactly requestable as an output length.",
@@ -370,13 +396,13 @@ def check(
         ))
 
     # ------------------------------------------------------------------ frame rate
-    if not (MIN_FPS <= round(fps) <= MAX_FPS):
+    if not (MIN_FPS - FPS_RANGE_SLACK <= fps <= MAX_FPS + FPS_RANGE_SLACK):
         add(Finding(
             Tier.FAIL, "frame rate",
             f"{fps:g} fps is outside the accepted {MIN_FPS}-{MAX_FPS} fps range.",
             "Use --fps conform-24.",
         ))
-    elif round(fps) != 24:
+    elif abs(fps - 24.0) > FPS_EXACT_TOLERANCE:
         add(Finding(
             Tier.WARN, "frame rate",
             f"{fps:g} fps does not match Seedance's 24 fps output cadence — "

@@ -87,6 +87,29 @@ def _parse_fps(rate: str) -> float:
     return float(rate)
 
 
+def _stream_seconds(stream: dict) -> float:
+    """The video stream's own duration, or 0.0 when the container doesn't record one.
+
+    The format-level duration is the max over ALL streams, so a source whose audio outruns
+    its video (screen recordings, some phone exports) would otherwise report seconds that
+    contain no picture — and a snap that trusts it places the out-point in an audio-only
+    tail, delivering a depth video shorter than the length it just promised.
+    """
+    if stream.get("duration"):
+        try:
+            return float(stream["duration"])
+        except (TypeError, ValueError):
+            pass
+    tag = (stream.get("tags") or {}).get("DURATION")  # Matroska: HH:MM:SS.nnnnnnnnn
+    if tag:
+        try:
+            hours, minutes, seconds = tag.split(":")
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        except ValueError:
+            pass
+    return 0.0
+
+
 def _rotation_of(stream: dict) -> int:
     """Rotation in degrees from either a display matrix or the legacy rotate tag."""
     for side in stream.get("side_data_list", []) or []:
@@ -136,7 +159,7 @@ def probe(path: str | Path) -> VideoInfo:
     if rotation in (90, 270):
         width, height = height, width
 
-    duration = float(data.get("format", {}).get("duration") or video.get("duration") or 0)
+    duration = _stream_seconds(video) or float(data.get("format", {}).get("duration") or 0)
     fps = _parse_fps(video.get("avg_frame_rate") or "") or _parse_fps(
         video.get("r_frame_rate") or ""
     )
@@ -212,7 +235,10 @@ def detect_crop(info: VideoInfo, trim: tuple[float, float] | None = None) -> Cro
     duration = (trim[1] - trim[0]) if trim else info.duration
     origin = trim[0] if trim else 0.0
     end = origin + duration
-    sample_fps = max(0.5, MATTE_SAMPLE_FRAMES / duration) if duration > 0 else 1.0
+    # The sample COUNT is fixed, so the rate falls with duration. An earlier 0.5 fps floor
+    # made the count grow with duration instead — a 5-minute 4K inbox clip decoded ~150
+    # full-resolution frames into RAM (multiple GB) before any trim existed.
+    sample_fps = MATTE_SAMPLE_FRAMES / duration if duration > 0 else 1.0
 
     frames = read_frames(info, trim=(origin, end), fps=sample_fps)
     if frames.shape[0] == 0:
@@ -280,11 +306,22 @@ def target_size(
     return max(2, w - w % 2), max(2, h - h % 2)
 
 
+# VFR sources can report a timebase artifact instead of a real rate (avg_frame_rate 0/0
+# falls back to r_frame_rate, which can be e.g. 1000/1). `--fps keep` would then decode
+# duration×1000 duplicated raw frames into RAM before any range check runs.
+MAX_KEEP_FPS = 240.0
+
+
 def resolve_fps(info: VideoInfo, mode: str) -> float:
     """`conform-24` matches Seedance's own output cadence; `keep` preserves the source."""
     if mode == "conform-24":
         return 24.0
     if mode == "keep":
+        if info.fps > MAX_KEEP_FPS:
+            raise VideoIOError(
+                f"{info.path.name} reports {info.fps:g} fps — likely a variable-frame-rate "
+                f"artifact, not a real rate. Use --fps conform-24 (or an explicit number)."
+            )
         return info.fps
     try:
         value = float(mode)
@@ -360,6 +397,15 @@ def encode_gray(
 
     libx264, yuv420p, +faststart. Feeding `gray` in and asking for `yuv420p` out makes
     ffmpeg replicate luma across chroma at neutral — the 3-channel grayscale the spec wants.
+
+    THE STREAM IS TAGGED FULL-RANGE, EXPLICITLY. The luma here is 0-255 (depth), but H.264's
+    spec default for an untagged stream is LIMITED range: a spec-conformant decoder on the
+    consumer's side expands 16-235 → 0-255 and clips everything outside — flattening exactly
+    the nearest and farthest depth bands, ~13% of the scale. ffmpeg-world tools pass the
+    levels through untouched, which is why this never showed locally; what Seedance's
+    decoder does is not observable from here, so the file must carry the truth itself:
+    `-color_range pc` plus the h264_metadata VUI flag (verified: ffprobe reports
+    color_range=pc and a 0-255 gradient survives a round trip).
     """
     if frames.ndim != 3:
         raise VideoIOError(f"Expected [N, H, W] grayscale, got shape {frames.shape}")
@@ -377,7 +423,9 @@ def encode_gray(
         "-f", "rawvideo", "-pix_fmt", "gray",
         "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", "-",
         "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        "-pix_fmt", "yuv420p", "-color_range", "pc",
+        "-bsf:v", "h264_metadata=video_full_range_flag=1",
+        "-movflags", "+faststart",
         str(out_path),
     ]
     proc = subprocess.run(cmd, input=frames.tobytes(), capture_output=True)
@@ -392,7 +440,13 @@ def mux_audio(video_path: Path, source: Path, out_path: Path, trim=None) -> Path
 
     Seedance ignores reference-video audio entirely — this exists so the filmmaker can hear
     the beat while cutting. Rhythm sync is the @Audio slot's job, not this one.
+
+    THE VIDEO STREAM IS AUTHORITATIVE. The audio is padded (`apad`) or cut (`-t`) to the
+    video's exact length. `-shortest` is deliberately absent: a source whose audio track
+    ends before the trim window does would truncate the depth VIDEO with it — silently
+    breaking the snapped, exactly-requestable duration the whole kit is built around.
     """
+    video_seconds = probe(video_path).duration
     cmd = [_tool("ffmpeg"), "-v", "error", "-y", "-nostdin", "-i", str(video_path)]
     if trim:
         cmd += ["-ss", f"{trim[0]:.6f}", "-t", f"{trim[1] - trim[0]:.6f}"]
@@ -400,7 +454,8 @@ def mux_audio(video_path: Path, source: Path, out_path: Path, trim=None) -> Path
         "-i", str(source),
         "-map", "0:v:0", "-map", "1:a:0",
         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-movflags", "+faststart",
+        "-af", "apad", "-t", f"{video_seconds:.6f}",
+        "-movflags", "+faststart",
         str(out_path),
     ]
     _run(cmd)

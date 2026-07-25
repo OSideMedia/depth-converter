@@ -84,6 +84,14 @@ def test_non_24_fps_warns_but_ships():
     assert report.ok
 
 
+def test_ntsc_23976_is_a_cadence_warn_not_an_exact_match():
+    """23.976 is NOT 24 — it is the jitter case the WARN exists for, and a round()
+    comparison used to book it as '24 fps matches'."""
+    report = check(**{**GOOD, "fps": 23.976})
+    assert tier_of("frame rate", report) is Tier.WARN
+    assert report.ok  # near-range, so it ships with a warning rather than failing
+
+
 @pytest.mark.parametrize("fps", [12.0, 120.0])
 def test_out_of_range_fps_fails(fps):
     assert tier_of("frame rate", check(**{**GOOD, "fps": fps})) is Tier.FAIL
@@ -122,10 +130,16 @@ def test_every_non_pass_finding_carries_a_remedy():
 
 @pytest.mark.parametrize(
     "ref,expected",
-    [(2.0, 4.0), (3.0, 4.0), (5.0, 5.0), (8.0, 8.0), (15.0, 15.0), (20.0, 15.0)],
+    [(2.0, 4.0), (3.0, 4.0), (5.0, 5.0), (8.0, 8.0), (15.0, 15.0), (20.0, 15.0),
+     (5.02, 5.0), (6.4, 6.0), (3.92, 4.0)],
 )
 def test_suggested_output_clamps_to_the_output_window(ref, expected):
-    """Seedance's output floor is 4s, so short refs necessarily drive a longer generation."""
+    """Seedance's output floor is 4s, so short refs necessarily drive a longer generation.
+
+    And the suggestion always lands on the integer grid: duration is sent as an integer, so
+    a fractional suggestion (5.04) is one no legal request can honour — the adapter would
+    round it silently while the manifest claimed a match.
+    """
     assert suggested_output_seconds(ref) == expected
 
 
@@ -217,6 +231,23 @@ def test_retention_is_omitted_when_it_could_not_be_measured():
     assert all(f.check != "depth retention" for f in report.findings)
 
 
+def test_retention_far_above_100_percent_is_a_noise_flag_not_a_pass():
+    """Depth flicker on a low-texture source can exceed the source's own motion; '150%
+    survived' used to read as a cheerful PASS when it is evidence of shimmer."""
+    report = check(**GOOD, motion=profile(4.0), retention=1.5)
+    finding = next(f for f in report.findings if f.check == "depth retention")
+    assert finding.tier is Tier.WARN
+    assert "flicker" in finding.detail
+
+
+def test_a_measured_zero_camera_share_still_names_the_motion_type():
+    """0.0 is a measurement (pure subject motion); only None means 'flow pass skipped'."""
+    report = check(**GOOD, motion=profile(4.0, camera=0.0))
+    assert any(f.check == "motion type" for f in report.findings)
+    silent = check(**GOOD, motion=m.MotionProfile(fps=24.0, deltas=np.full(120, 4.0, dtype=np.float32)))
+    assert all(f.check != "motion type" for f in silent.findings)
+
+
 def test_motion_type_names_a_camera_reference():
     report = check(**GOOD, motion=profile(4.0, camera=0.8))
     assert "camera-path" in next(
@@ -241,8 +272,9 @@ def test_motion_findings_never_lack_a_remedy():
 # ------------------------------------------------------------------- the output grid
 
 @pytest.mark.parametrize("seconds,expected", [
-    (4.0, True), (5.0, True), (10.0, True), (5.02, True),
+    (4.0, True), (5.0, True), (10.0, True), (5.02, True), (15.0, True),
     (3.917, False), (5.5, False), (3.0, False), (6.4, False),
+    (16.0, False),  # over the output ceiling: whole seconds alone don't make it requestable
 ])
 def test_on_output_grid(seconds, expected):
     assert on_output_grid(seconds) is expected

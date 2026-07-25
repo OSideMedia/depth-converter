@@ -210,3 +210,92 @@ def test_side_by_side_doubles_width(tmp_path):
     out = side_by_side(original, depth, tmp_path / "sbs.mp4", fps=24)
     info = probe(out)
     assert (info.width, info.height) == (128, 64)
+
+
+def test_encode_gray_is_tagged_full_range(tmp_path):
+    """H.264's default for an UNTAGGED stream is limited range: a spec-conformant decoder
+    expands 16-235 and clips everything outside — flattening the nearest and farthest depth
+    bands. ffmpeg-world tools pass the levels through, which is why this never showed
+    locally; the file itself must carry the truth for whatever decodes it provider-side."""
+    import shutil
+    import subprocess
+
+    frames = np.tile(np.linspace(0, 255, 64, dtype=np.uint8), (10, 64, 1))
+    out = encode_gray(frames, tmp_path / "tagged.mp4", fps=24)
+    reported = subprocess.run(
+        [shutil.which("ffprobe"), "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=color_range", "-of", "default=nw=1:nk=1", str(out)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert reported == "pc"
+
+
+def test_encode_gray_preserves_the_full_luma_range(tmp_path):
+    """0 and 255 must survive the round trip — they are the nearest and farthest planes."""
+    import shutil
+    import subprocess
+
+    frames = np.tile(np.linspace(0, 255, 64, dtype=np.uint8), (10, 64, 1))
+    out = encode_gray(frames, tmp_path / "levels.mp4", fps=24)
+    raw = subprocess.run(
+        [shutil.which("ffmpeg"), "-v", "error", "-i", str(out),
+         "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+        capture_output=True, check=True,
+    ).stdout
+    decoded = np.frombuffer(raw, dtype=np.uint8)
+    assert decoded.min() <= 4 and decoded.max() >= 251
+
+
+def test_mux_audio_never_truncates_the_video(tmp_path):
+    """`-shortest` is gone: a source whose audio track ends before the video does must not
+    cut the depth video below its snapped, exactly-requestable length."""
+    import shutil
+    import subprocess
+
+    from depthc.video_io import mux_audio
+
+    silent = encode_gray(np.full((96, 64, 64), 128, dtype=np.uint8), tmp_path / "d.mp4", fps=24)
+
+    # A 4 s video whose audio track lasts only 1 s.
+    source = tmp_path / "short_audio.mp4"
+    subprocess.run(
+        [shutil.which("ffmpeg"), "-v", "error", "-y", "-nostdin",
+         "-f", "lavfi", "-i", "testsrc2=s=64x64:d=4:r=24",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-map", "0:v:0", "-map", "1:a:0",
+         "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+         str(source)],
+        capture_output=True, check=True,
+    )
+
+    out = mux_audio(silent, source, tmp_path / "muxed.mp4")
+    info = probe(out)
+    assert info.duration == pytest.approx(4.0, abs=0.1)
+    assert info.has_audio
+
+
+def test_probe_duration_is_the_video_streams_not_the_containers(tmp_path):
+    """Audio outrunning video must not inflate the duration snap_trim plans against."""
+    import shutil
+    import subprocess
+
+    path = tmp_path / "long_audio.mp4"
+    subprocess.run(
+        [shutil.which("ffmpeg"), "-v", "error", "-y", "-nostdin",
+         "-f", "lavfi", "-i", "testsrc2=s=64x64:d=2:r=24",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+         "-map", "0:v:0", "-map", "1:a:0",
+         "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+         str(path)],
+        capture_output=True, check=True,
+    )
+    assert probe(path).duration == pytest.approx(2.0, abs=0.15)
+
+
+def test_keep_fps_rejects_a_vfr_artifact_rate(clip_3s):
+    """avg_frame_rate 0/0 falls back to r_frame_rate, which can be a 1000/1 timebase
+    artifact — `--fps keep` must refuse it before duration*1000 frames hit RAM."""
+    info = probe(clip_3s)
+    info.fps = 1000.0
+    with pytest.raises(VideoIOError):
+        resolve_fps(info, "keep")

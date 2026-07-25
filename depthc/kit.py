@@ -264,7 +264,7 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
             f"{motion.get('bucketSeconds', 0.5):g}s · · = no usable motion"
             + (f" · {motion['cameraShare'] * 100:.0f}% whole-frame (camera)"
                if motion.get("cameraShare") else ""),
-            "  for scale: 4.42 = a sword duel that behaved · 0.99 = a crawl whose generation "
+            "  for scale: 4.40 = a sword duel that behaved · 0.94 = a crawl whose generation "
             "started late",
         ]
 
@@ -584,14 +584,17 @@ def write_outbox_index(root: Path | None = None) -> Path:
         "",
         "Each folder below is one finished kit. Open its README.txt for instructions.",
         "",
-        "For every kit, the only two files you hand to Seedance are:",
-        "    depth.mp4     upload as the VIDEO reference",
-        "    binding.txt   paste its one line into that reference's binding field",
+        "For every kit, the only file you hand to Seedance is:",
+        "    depth.mp4     upload as the VIDEO reference. That is the whole handover.",
+        "",
+        "In OSIDE, paste NO binding phrase — an uploaded video ref has no binding field and",
+        "the Composer writes its own line. binding.txt is only for surfaces that HAVE a",
+        "per-reference binding field (see each kit's README.txt).",
         "",
         "Everything else in a kit folder is reference or archive — do not upload it.",
         "",
         "`motion` is the mean grey-level change per frame in depth space: how much signal the",
-        "ref actually carries. 4.42 = a sword duel that behaved, 0.99 = a crawl whose",
+        "ref actually carries. 4.40 = a sword duel that behaved, 0.94 = a crawl whose",
         "generation started late. A kit with no FIRED line has never been tested.",
         "",
     ]

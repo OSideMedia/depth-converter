@@ -50,10 +50,13 @@ measured as mean grey-level change per frame on a fixed 160×90 grid at 24 fps (
 
 | | energy | what happened |
 |---|---|---|
-| B sword duel | 4.42 | sustained; the one that behaved |
-| C walk-in | 1.71 | steady, unspectacular, fine |
-| A prone crawl (001 trim) | 0.95 | generation started late |
-| D "slow dolly" | 0.71 | weak, with a dead first second |
+| B sword duel | 4.40 | sustained; the one that behaved |
+| C walk-in | 1.69 | steady, unspectacular, fine |
+| A prone crawl (001 trim) | 0.94 | generation started late |
+| D "slow dolly" | 0.72 | weak, with a dead first second |
+
+(Figures re-measured 2026-07-25 on the v2 aspect-preserving analysis grid — the means agree
+with the old fixed 160×90 grid, so shifts against older notes are encode round-trip only.)
 
 **RGB motion is not depth motion.** A's window carried *more* RGB motion than B's (5.98 vs
 4.93) and kept 16% of it in depth against B's 87%: a crawl along the ground never changes
@@ -71,8 +74,10 @@ Kits land in **`Outbox/<Tags>_NNN/`** inside the project — not in the home fol
 
 Each kit carries `README.txt` (what to do), `binding.txt` (the Variant A phrase alone, one
 line, ready to paste), and `sheet.png` (depth contact sheet with timestamps). Those plus
-`depth.mp4` are the only files Peter needs to touch. `--variants` adds contrast-stretched and
-inverted refs of the same beat under `variants/` — **exactly one is uploaded per generation**.
+`depth.mp4` are the only files Peter needs to touch. `--variants` adds four refs of the same
+beat under `variants/` — contrast-stretched, inverted, **midgrey** (luma capped at 190 so
+figures never blow to near-white — the moderation-rejection shape), and **edges** (Canny of
+the depth video, experimental) — **exactly one is uploaded per generation**.
 
 ## Firing a kit — the rules the live run produced
 

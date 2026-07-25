@@ -297,6 +297,63 @@ def test_every_variant_is_a_named_transform_with_a_description():
         assert description and name
 
 
+def test_midgrey_caps_the_brightest_level():
+    """Nothing may approach white: near-white body-shapes are the moderation trigger."""
+    hot = np.full((3, 90, 160), 255, dtype=np.uint8)
+    capped = m.midgrey(hot)
+    assert capped.max() == m.MODERATION_CEILING
+    assert capped.dtype == np.uint8
+
+
+def test_midgrey_is_linear_so_depth_ordering_survives():
+    ramp = np.tile(np.arange(0, 256, 8, dtype=np.uint8), (2, 4, 1))
+    row = m.midgrey(ramp)[0, 0].astype(int)
+    assert (np.diff(row) >= 0).all()
+    assert row[0] == 0  # black stays black; only the top is pulled down
+
+
+def test_depth_edges_is_binary_outlines():
+    """Canny + dilate: only pure black and pure white may appear."""
+    edges = m.depth_edges(moving_clip(3))
+    assert set(np.unique(edges)) <= {0, 255}
+    assert edges.shape == moving_clip(3).shape
+    assert edges.any(), "a moving box must produce some outline"
+
+
+# --------------------------------------------------------------- fps-honesty regressions
+
+def test_analysis_grid_preserves_aspect():
+    """2.39:1 frames keep their shape (160x67) instead of being squashed into 90 rows."""
+    wide = np.zeros((2, 536, 1280), dtype=np.uint8)
+    assert m.analysis_gray(wide).shape == (2, 67, 160)
+    assert m.analysis_size(1280, 720) == (160, 90)  # 16:9 lands on the v1 grid exactly
+
+
+def test_analysis_gray_of_an_empty_clip_is_empty_not_a_crash():
+    assert m.analysis_gray(np.zeros((0, 90, 160), dtype=np.uint8)).shape[0] == 0
+
+
+def test_cut_detection_falls_back_off_24fps():
+    """CUT_FRACTION is calibrated at 24 fps; a 12 fps profile must not use it.
+
+    At 12 fps a legitimate fast action sweeps ~2x the pixels per frame gap, so the extent
+    rule flags choreography as a cut and the scorer buries the best window. The magnitude
+    fallback self-normalises and stays honest at any rate.
+    """
+    deltas = np.full(48, 2.0, dtype=np.float32)
+    changed = np.full(48, 0.48, dtype=np.float32)  # legit action at 12fps; a "cut" by 0.35
+    scout = m.MotionProfile(fps=12.0, deltas=deltas, changed=changed)
+    assert scout.spikes == []
+    kit = m.MotionProfile(fps=24.0, deltas=deltas, changed=changed)
+    assert kit.spikes, "at 24 fps the same extent IS a cut"
+
+
+def test_unmeasured_camera_is_none_not_zero():
+    """None = flow skipped; 0.0 = measured pure subject motion. Different facts."""
+    assert m.measure(moving_clip(6), 24.0, with_flow=False).camera is None
+    assert m.measure(moving_clip(24, speed=6), 24.0, with_flow=True).camera is not None
+
+
 # -------------------------------------------------------------------------- contact sheet
 
 def test_contact_sheet_writes_a_tiled_png(tmp_path):

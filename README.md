@@ -183,9 +183,9 @@ right. The findings that actually predict a bad generation are about **motion**:
 | **motion type** | whether this is a camera-path or a subject-motion reference |
 | **output coverage** | the ref length is not exactly requestable as an output length |
 
-For scale, measured on the four reference clips: a sword duel reads **4.42**, a walk-in
-**1.71**, a prone crawl whose generation started late **0.95**, a near-static interior
-**0.71**.
+For scale, measured on the four reference clips: a sword duel reads **4.40**, a walk-in
+**1.69**, a prone crawl whose generation started late **0.94**, a near-static interior
+**0.72**.
 
 **RGB motion is not depth motion.** The prone crawl's window carries *more* frame-to-frame
 motion than the sword duel in colour (5.98 vs 4.93) and keeps 16% of it in depth against the
@@ -213,13 +213,24 @@ kit's `result.json` and shows up in `depthc library list` and `Outbox/INDEX.txt`
 is the only evidence that says whether any of this works, and it costs money — the library has
 no other way to learn.
 
-### Variants — three refs of one beat, one live-fire
+### Variants — five refs of one beat, one live-fire each
 
-`depthc kit --variants` also writes `variants/contrast.mp4` (percentile-stretched, more of the
-grey range spent on the subject) and `variants/invert.mp4` (far bright instead of near).
-**Upload exactly one per generation** and record which won with `--variant`. Both are
-experiments, honestly labelled: no published depth pipeline does percentile clipping, and a
-generic video-reference slot has no polarity convention to match.
+`depthc kit --variants` also writes four processed versions of the same beat under
+`variants/`:
+
+- **contrast.mp4** — percentile-stretched (2–98%), more of the grey range spent on the subject
+- **invert.mp4** — polarity flipped, far bright instead of near
+- **midgrey.mp4** — luma capped at 190 so no figure blows toward white. Built for the
+  moderation boundary the live run mapped: the one input rejection was two bare depth
+  silhouettes blown to near-white filling the frame. A rejection costs nothing, so probing
+  with this is cheap.
+- **edges.mp4** — Canny edges of the *depth* video (never the source — an edge map of the
+  original pixels would carry face contours back into the upload). Outlines only; may read
+  as a style cue as much as motion.
+
+**Upload exactly one per generation** and record which won with `--variant`. All four are
+experiments, honestly labelled: no published depth pipeline does percentile clipping or edge
+refs, and a generic video-reference slot has no polarity convention to match.
 
 ### `prompt.txt` ships two variants — use exactly one
 
@@ -246,7 +257,8 @@ dialect is a new template file plus `--dialect`, with no code change.
 
 **Resolution guidance.** The depth ref is always ≤720p-class; it's a motion guide, not
 picture, and Seedance's reference-input window caps it anyway. Output resolution is a
-separate choice: test at 480p, confirm at 720p, master at 720p/1080p.
+separate choice: test at 480p, confirm at 720p, master at 720p or 4K — **never 1080p**
+(see the resolution law below).
 
 **Letterboxed sources are cropped automatically.** A depth model reads a flat black matte
 as a *surface* — and specifically as the nearest one in the scene. On a 2.39:1 clip matted
