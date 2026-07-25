@@ -134,12 +134,14 @@ every build so it cannot drift from what is on disk.
 There is no database and never will be: the folder tree and the `kit.json` files *are* the
 index, so kits stay portable, greppable, and repairable with a text editor.
 
-**From each kit you take exactly two files to OSIDE:**
+**From each kit you take exactly one file to OSIDE:** `depth.mp4`, uploaded as the **video**
+reference. That is the whole handover.
 
-| file | what to do with it |
-|---|---|
-| `depth.mp4` | upload as the **video** reference |
-| `binding.txt` | paste its one line into that reference's **binding field** |
+Do **not** paste a binding phrase there. An uploaded video reference has no binding field in
+the Composer, and the compiler already writes its own line for it — adding one on top is two
+instructions for the same reference. Describe the *look* in your prompt and let the reference
+carry the motion. `binding.txt` exists for surfaces that do have a per-reference binding
+field; the Ark console block is Variant B in `prompt.txt`.
 
 Every kit also carries a `README.txt` saying precisely that, plus the refs-only rule, the
 suggested output length, and the kit's motion profile as a sparkline. Everything else in the
@@ -257,6 +259,35 @@ real image. Use `--crop none` to keep the frame as-is, or `--crop W:H:X:Y` to se
 `depth.mp4` (zero original pixels, ~2–6 MB) is uploaded, and only at fire time, because the
 Ark API takes video refs by URL. The local library is the permanent home; cloud copies are
 transient.
+
+## Does it work? Yes — measured, twice
+
+Live-fired 2026-07-25 against Seedance 2.0 on Ark. Full protocol and results in
+[`DOCS/LIVE-FIRE.md`](DOCS/LIVE-FIRE.md).
+
+The generated video was run **back through this converter** and its depth-space motion
+profile correlated against the reference's, bucket for bucket:
+
+| run | cast | adherence |
+|---|---|---|
+| sword duel | one identity | **r = +0.950** at zero lag |
+| sword duel | two identities | **r = +0.916** at zero lag |
+
+Both collapse to ~0 at ±0.5 s, which is what makes it an alignment rather than two clips that
+happen to be busy. On the two-character run the sparklines came out identical bar for bar.
+**Timing transfers beat for beat, with no delay.** The swords survived as props. Appearance
+came entirely from the image references, and a custom location rode alongside without a fight.
+
+Three things the run taught that no amount of reading would have:
+
+- **The ref outranks the prompt.** Given one identity against a two-body reference, the model
+  cloned that identity rather than inventing a stranger — in direct defiance of an explicit
+  "do not generate duplicate avatars" lock. Attach one identity per body; the count comes from
+  the reference and cannot be argued down in text.
+- **Moderation has a shape.** One kit was refused at input: two bare depth silhouettes, prone
+  and overlapping, filling frame. Upright separated figures pass. Depth strips clothing, so
+  every figure is a body-shape — compose accordingly. A rejection costs nothing.
+- **Budget 3× the obvious guess**: $0.93 for 5 s at 720p with a video reference.
 
 ## Honest limits
 

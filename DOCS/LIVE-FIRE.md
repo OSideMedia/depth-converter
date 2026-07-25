@@ -1,6 +1,11 @@
 # Phase 4 — Live-fire verification protocol
 
-**STATUS: awaiting Peter's budget-approved run. Not to be executed autonomously.**
+**STATUS: RUN 2026-07-25. GATE 4 PASSED — the technique works.** Two generations adhered
+with a measured motion correlation of **r = +0.950** and **r = +0.916** at zero lag. Results
+and corrections are at the bottom; the protocol below stands for future runs, with the
+binding-field step corrected.
+
+**Not to be executed autonomously.**
 
 **LAW (mirrors OSIDE): nothing fires against a paid API automatically.** This document is a
 protocol a human runs or supervises. Low-res first, always.
@@ -40,10 +45,18 @@ weighting rather than to an unfamiliar identity reference.
 2. Upload `depth.mp4` through OSIDE's upload route (→ `references` bucket) or attach it
    directly in Composer.
 3. Add WILLIAM and/or ANNA as identity `@Image` refs.
-4. Paste the kit's **Variant A binding phrase** into the video ref's binding field.
-   **Never** paste the Variant B standalone block into OSIDE — the Composer compiles its
-   own ACTIVE REFERENCES block, and two competing blocks is the exact failure mode
-   `refManifest.ts` exists to prevent.
+4. **Do not paste any binding phrase.** [CORRECTED 2026-07-25, from the live run.] An
+   *uploaded* video reference has **no binding field** in the Composer — bindings are
+   auto-generated only for entity refs (characters, elements), and an upload is serialized
+   as `{url, role:'video'}` with nothing else. The compiler already writes its own line
+   from `refManifest.ts:117`: *"@Video 1 is a motion and camera reference — take movement,
+   action and pacing from it."* Pasting Variant A into the prompt body on top of that is
+   two instructions for one reference — the same collision the two-variant design exists to
+   prevent, arriving by a different road. Variant B remains for the Ark console only.
+
+   If you want the appearance-stripping clause the compiler's generic line lacks, paste
+   **only** its second half: *"it carries structure only: take no color, texture, clothing,
+   face, lighting, or environment from it."*
 5. **Go straight to "make video". Skip the create-frame step.** A depth-motion shot is a
    refs-only shot: the adapter sets `refsWithStartFrame:false`, so a frame-first shot
    silently drops the depth ref and you will have paid to test nothing.
@@ -90,15 +103,76 @@ be read directly.
 
 Append below. What adhered, what drifted, what prompt wording changed, and the cost.
 
-### Results
+### Results — 2026-07-25
 
-_(empty — awaiting the run)_
+| Kit | Cast | Res | Cost | Verdict | Adherence |
+|---|---|---|---|---|---|
+| Prone-crawl_002 | ANNA | 720p | $0.00 | **rejected** | blocked at input moderation |
+| Sword-duel_002 | ANNA | 720p | $0.93 | **adhered** | r = **+0.950** @ lag 0 |
+| Sword-duel_002 | ANNA + WILLIAM | 720p | $0.93 | **adhered** | r = **+0.916** @ lag 0 |
 
-| Date | Clip | Res | Output len | Cost | Motion | Camera | Timing | Notes |
-|---|---|---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |  |  |
+Total spend $1.86. Per-kit detail lives in each kit's `result.json`.
+
+**How adherence was measured.** The generated video was run back through this same converter
+and its depth-space motion profile correlated against the reference's, bucket for bucket. The
+figure is the Pearson r of the two energy envelopes at zero lag, with ±0.5 s and ±1.0 s lags
+computed as controls. On the two-character run the sparklines came out identical bar for bar —
+`▆▆▆▆█▆██▆▆` on both sides — and camera share matched at 0.16 against 0.17.
+
+    lag −1.0s  r = −0.306
+    lag −0.5s  r = −0.143
+    lag  0.0s  r = +0.916   ← in phase, no delay
+    lag +0.5s  r = −0.018
+    lag +1.0s  r = +0.135
+
+The collapse to ~0 on either side of zero is what makes it a real alignment rather than two
+clips that happen to be busy. **Timing transfers beat for beat, with no delay** — the precise
+opposite of the "started very late" complaint that motivated the motion gate.
+
+### What else the run established
+
+- **Props survive.** The swords came through as swords in both generations. That is the thing
+  depth keeps and a pose skeleton would discard, and it is the strongest argument for this
+  channel over a skeleton one.
+- **Appearance comes from the image refs, as designed.** Source was a stone hall; the
+  generations were a bright room and a Japanese dojo, both from the text. Zero source pixels
+  leaked, which is structural — there are none in a depth map.
+- **A location reference rides alongside without a fight.** A later run carried two identity
+  refs + a custom location + the depth video, and all four channels held.
+- **The video ref OUTRANKS text locks, consistently — three for three.** Given one identity
+  against a two-body ref, the model cloned that identity rather than inventing a stranger, in
+  direct defiance of an explicit `Do not generate duplicate avatars or a twin effect` lock.
+  With two identities attached, the fighters crossed sides despite a `characters keep their
+  sides of the frame` anchor. **Treat the depth ref as the blocking; text locks about count
+  and position are advisory at best.**
+- **Attach one identity per body in the ref.** The count comes from the ref and cannot be
+  argued down in the prompt.
+- **Cost is roughly 3× the pre-run estimate**: $0.93 for 5 s at 720p with a video reference,
+  against the $0.10–0.40 guessed above for 480p. Budget accordingly.
+
+### The moderation boundary — real, and narrower than feared
+
+`Prone-crawl_002` was refused before generation: `[content-policy] InputVideoSensitiveContent
+Detected`. The sword duel, from the same tool and the same pipeline, sailed through twice.
+
+So **human depth maps are not categorically blocked.** The likely trigger is specific: depth
+strips clothing, so every figure is a smooth featureless body-shape, and that clip's last
+2.5 s is two of them prone, overlapping and blown to near-white filling the frame. Upright,
+separated, clothed-reading figures pass.
+
+Working constraint until more data: **avoid prone, intertwined, or close-to-camera bodies.**
+A rejection costs nothing, so probing the boundary is cheap.
+
+### One failure that was not ours
+
+Two runs were blocked with `[real-person]` on an image reference, which looked like the
+technique failing and was not. OSIDE's supporting-cast path rode the unregistered combined
+character sheet instead of the registered `asset://` crops, so **every** two-character
+Seedance shot was rejected — including plain text prompts with no video reference at all.
+Fixed in `oside-studio` v0.66.3. Recorded here because it cost an hour of this session and
+would otherwise read as a depth failure in the log.
 
 ## Gate 4
 
-One verified motion-transfer generation, with the source and the result archived
-side by side.
+**PASSED 2026-07-25.** Two verified motion-transfer generations, with the reference and the
+result measured side by side rather than eyeballed, and the source archived in the kit.

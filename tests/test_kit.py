@@ -452,16 +452,22 @@ def test_render_binding_rejects_unknown_dialect():
         kitlib.render_binding("seedance-9.9")
 
 
-def test_kit_readme_names_the_two_files_to_upload():
-    """The whole point: six files in the folder, only two go to Seedance."""
+def test_kit_readme_names_the_one_file_to_upload():
+    """Seven files in the folder, exactly one goes to Seedance.
+
+    It was two until the 2026-07-25 live run: an uploaded video reference has no binding
+    field in OSIDE, and the compiler writes its own @Video line, so pasting binding.txt on
+    top was two instructions for one reference. The README must not send Peter looking for
+    a field that isn't there.
+    """
     report = check(duration=5.0, width=1280, height=536, fps=24.0,
                    size_bytes=800_000, still_has_real_faces=True)
     text = kitlib.render_kit_readme(_manifest(), report, has_preview=True)
 
-    assert "TAKE THESE TWO TO OSIDE" in text
-    assert "1. depth.mp4" in text
-    assert "2. binding.txt" in text
-    assert text.index("TAKE THESE TWO") < text.index("EVERYTHING ELSE")
+    assert "TAKE THIS ONE FILE TO OSIDE" in text
+    assert "depth.mp4    upload as the VIDEO reference" in text
+    assert "WRITE NOTHING ABOUT THE MOTION" in text
+    assert text.index("TAKE THIS ONE FILE") < text.index("EVERYTHING ELSE")
 
 
 def test_kit_readme_states_the_refs_only_rule():
@@ -595,10 +601,12 @@ def test_readme_shows_the_sparkline_and_the_scale():
 
 
 def test_readme_omits_the_motion_block_when_there_is_none():
+    """Matches the block HEADER, not the bare word — the Composer guidance says
+    'WRITE NOTHING ABOUT THE MOTION' in every README."""
     text = kitlib.render_kit_readme(_manifest(), check(
         duration=5.0, width=1280, height=536, fps=24.0, size_bytes=1_500_000,
         still_has_real_faces=True))
-    assert "MOTION" not in text
+    assert "MOTION  (mean grey-level change" not in text
 
 
 def test_readme_tells_you_to_upload_one_variant_not_three():

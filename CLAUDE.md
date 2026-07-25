@@ -81,25 +81,36 @@ inverted refs of the same beat under `variants/` — **exactly one is uploaded p
   model-size selector by design, and adding one is a licensing violation, not an upgrade.
 - **Nothing fires against a paid API automatically.** Live-fire is human-run and
   budget-approved. See `DOCS/LIVE-FIRE.md`.
-- **Local-only repo until Gate 4 passes.** Local commits per gate are wanted; no remote.
-  After the technique is proven, push private under OSideMedia with the per-repo noreply
-  email `261988918+OSideMedia@users.noreply.github.com`.
+- **Never commit media.** `Inbox/`, `Processed/` and `Outbox/` contents are gitignored and
+  stay that way: source clips carry other people's rights, and a kit's `source.mp4` is the
+  original footage. Evidence about a fire belongs in `DOCS/LIVE-FIRE.md`, which is tracked;
+  the per-kit `result.json` is local. (Repo went private under OSideMedia on 2026-07-25
+  once Gate 4 passed, with the per-repo noreply email
+  `261988918+OSideMedia@users.noreply.github.com`.)
 - **Never edit `vendor/`.** Upstream is pinned and imported; device and precision handling
   lives in `engine.py`. The per-window hook works by rebinding `tqdm` in their module
   namespace at runtime.
 - **fp32 is the default.** fp16/bf16 autocast returns all-NaN on MPS *and* is slower. The
   NaN is sticky until `mps.empty_cache()` and casts silently to an all-black video.
 
-## Attaching a kit in OSIDE (manual, by design)
+## Attaching a kit in OSIDE — corrected by the live run
 
 Shotlist → pick the shot → go straight to **"make video", skipping create-frame**. A
 depth-motion shot is refs-only: the adapter sets `refsWithStartFrame:false`, so a
-frame-first shot silently drops the depth ref. Then add character/location/prop `@Image`
-refs for the look, upload `depth.mp4` as the video ref, and paste **Variant A** from
-`prompt.txt` into that ref's binding field — never Variant B, which is for the Ark console
-and would collide with the Composer's own ACTIVE REFERENCES block.
+frame-first shot silently drops the depth ref. Upload `depth.mp4` as the video ref and add
+character/location/prop `@Image` refs for the look.
 
-Automating this is the Phase 5 ticket, deferred until Phase 4 proves the technique.
+**Paste no binding phrase.** An uploaded video ref has no binding field — bindings are
+auto-generated for entity refs only — and the compiler already writes its own line from
+`refManifest.ts:117`. Adding Variant A on top is two instructions for one reference.
+Describe the LOOK only; the ref carries the motion.
+
+**One identity per body in the ref.** The ref sets the head-count and wins: given one
+identity against a two-body ref the model cloned it, in defiance of an explicit anti-twin
+text lock. Three for three, the video ref outranks text locks on count and position — treat
+it as the blocking.
+
+Phase 5 (automating the attach) is still deferred, but Phase 4 has now passed.
 
 ## Gotchas
 
