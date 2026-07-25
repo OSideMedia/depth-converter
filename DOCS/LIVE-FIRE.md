@@ -105,13 +105,64 @@ Append below. What adhered, what drifted, what prompt wording changed, and the c
 
 ### Results — 2026-07-25
 
-| Kit | Cast | Res | Cost | Verdict | Adherence |
-|---|---|---|---|---|---|
-| Prone-crawl_002 | ANNA | 720p | $0.00 | **rejected** | blocked at input moderation |
-| Sword-duel_002 | ANNA | 720p | $0.93 | **adhered** | r = **+0.950** @ lag 0 |
-| Sword-duel_002 | ANNA + WILLIAM | 720p | $0.93 | **adhered** | r = **+0.916** @ lag 0 |
+| Kit | Cast | Res | Cost | Verdict | Energy vs ref | Adherence |
+|---|---|---|---|---|---|---|
+| Prone-crawl_002 | ANNA | 720p | $0.00 | **rejected** | — | blocked at input moderation |
+| Sword-duel_002 | ANNA | 720p | $0.93 | **adhered** | +8% | r = **+0.950** |
+| Sword-duel_002 | ANNA + WILLIAM | 720p | $0.93 | **adhered** | +8% | r = **+0.916** |
+| Sword-duel_002 | + custom location | 720p | $0.93 | **adhered** | +8% | r = **+0.926** |
+| Sword-duel_002 | ANNA + WILLIAM | **1080p** | $2.29 | **partial** | **+32%** | r = +0.721 |
+| Sword-duel_002 | ANNA + WILLIAM | **1080p** | $2.29 | **ignored** | **+31%** | r = **−0.056** |
+| Sword-duel_002 | ANNA + WILLIAM | **4K** | — | **adhered** | +6% | r = +0.747 |
 
-Total spend $1.86. Per-kit detail lives in each kit's `result.json`.
+Total spend ~$8.70. Per-kit detail lives in each kit's `result.json`.
+
+## THE RESOLUTION LAW — shoot 720p or 4K, never 1080p
+
+**1080p is 0 for 2. Every other tier is 4 for 4.** This is the single most operationally
+important thing the run found, and it cost $4.58 to learn.
+
+Both 1080p generations, on independent seeds (`2133440621`, `197983437`), came back carrying
+**+31% and +32% more motion than the reference asked for**, with the props failing — swords
+dissolving from ~3 s in the first, absent entirely in the second, replaced by bare fists. The
+second ignored the reference outright at r = −0.056 and invented its own shot: a push-in from
+a wide two-shot to tight close-ups that a near-static reference never suggests.
+
+Meanwhile 720p (three times) and 4K held their amplitude to **+6–8%** and kept the swords.
+
+4K matters here because it kills the obvious explanation. If the mechanism were the reference
+being coarser than the output grid, 4K — a 720p reference driving nine times the pixels —
+would be the worst case. It was the best. Whatever goes wrong is inside Ark's 1080p lane, it
+is not a resolution gradient, and it is not visible from the client side.
+
+**A single 1080p sample was misread as seed variance before the second one landed.** The tell
+was already in the data: both 1080p runs shared the +31/32% energy signature, which is a
+fingerprint, not a draw. Two samples of a failure that looks identical twice is worth more
+than one sample of anything.
+
+## The metric lesson — amplitude beats correlation for predicting artifacts
+
+Correlation and the eye disagreed, and **the eye was right.**
+
+| | energy vs ref | correlation | looked |
+|---|---|---|---|
+| 720p | +8% | +0.926 | good |
+| 4K | +6% | +0.747 | good, arguably best |
+| 1080p | +32% | +0.721 | ghosting, props gone |
+
+Ranked by correlation, 4K (0.747) sits barely above the broken 1080p (0.721). Ranked by
+energy ratio, 4K and 720p are together and 1080p is the obvious outlier — which is what a
+human watching them reported without seeing either number.
+
+The reason: **correlation measures timing, and over-following destroys pictures.** A blade is
+a thin high-frequency structure; it survives a lunge and does not survive a lunge rendered
+50% faster than it should be. Small phase wobbles that nobody perceives punish correlation
+hard, while excess amplitude — which nothing in the correlation notices — is what smears
+bodies and dissolves props.
+
+So any adherence report must lead with **energy ratio vs the reference**, and treat
+correlation as the timing companion. That ordering would have flagged the first 1080p as bad
+before it was watched.
 
 **How adherence was measured.** The generated video was run back through this same converter
 and its depth-space motion profile correlated against the reference's, bucket for bucket. The

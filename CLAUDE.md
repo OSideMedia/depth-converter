@@ -74,6 +74,18 @@ line, ready to paste), and `sheet.png` (depth contact sheet with timestamps). Th
 `depth.mp4` are the only files Peter needs to touch. `--variants` adds contrast-stretched and
 inverted refs of the same beat under `variants/` — **exactly one is uploaded per generation**.
 
+## Firing a kit — the rules the live run produced
+
+- **720p or 4K. NEVER 1080p.** 1080p is 0/2 across independent seeds, both runs carrying
+  +31/32% more motion than the reference with the props failing (swords dissolving, then gone
+  entirely); one ignored the ref outright at r = −0.056. 720p (×3) and 4K held to +6–8% and
+  kept the swords. 4K rules out a resolution gradient — a 720p ref driving 9× the pixels
+  should be worst if coarseness were the cause, and it was best.
+- **Judge by motion ratio first, correlation second.** They disagreed and the ratio was right:
+  over-following is what smears bodies and dissolves props, and correlation cannot see it.
+- **One identity per body in the ref.** The ref sets the head-count and beats any text lock.
+- **Costs:** ~$0.93 for 5 s at 720p with a video ref; $2.29 at 1080p. Rejections cost nothing.
+
 ## Laws — do not violate
 
 - **VDA-Small only.** Across DA-V2, VDA and DA3 only the Small checkpoints are Apache-2.0;

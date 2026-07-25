@@ -272,11 +272,37 @@ profile correlated against the reference's, bucket for bucket:
 |---|---|---|
 | sword duel | one identity | **r = +0.950** at zero lag |
 | sword duel | two identities | **r = +0.916** at zero lag |
+| sword duel | two identities + a custom location | **r = +0.926** at zero lag |
 
-Both collapse to ~0 at ±0.5 s, which is what makes it an alignment rather than two clips that
+Each collapses to ~0 at ±0.5 s, which is what makes it an alignment rather than two clips that
 happen to be busy. On the two-character run the sparklines came out identical bar for bar.
 **Timing transfers beat for beat, with no delay.** The swords survived as props. Appearance
-came entirely from the image references, and a custom location rode alongside without a fight.
+came entirely from the image references, and a custom location rode alongside without a fight —
+two identities, a location and the depth video, four channels holding at once.
+
+### Shoot 720p or 4K. Never 1080p.
+
+The one hard operational rule the live run produced, and it cost $4.58 to find:
+
+| tier | fires | motion vs reference | props |
+|---|---|---|---|
+| 720p | 3 | +8% | ✅ |
+| **1080p** | **2** | **+31%, +32%** | ❌ dissolve, then absent |
+| 4K | 1 | +6% | ✅ |
+
+Both 1080p runs, on independent seeds, came back carrying roughly a third more motion than the
+reference asked for — and over-following is what destroys pictures. A blade survives a lunge;
+it does not survive a lunge rendered 50% too fast. One of the two ignored the reference
+outright (r = −0.056) and invented its own push-in.
+
+4K is the proof that this is not a resolution gradient: a 720p reference driving nine times the
+pixels should be the worst case if coarseness were the mechanism, and it was the best. Whatever
+happens is inside the provider's 1080p lane and isn't visible from here.
+
+**Judge adherence by motion ratio first, correlation second.** They disagreed on this run and
+the ratio was right: ranked by correlation, 4K sits barely above the broken 1080p; ranked by
+how much motion each added, 4K and 720p are together and 1080p is the obvious outlier — which
+is exactly what a human watching them said without seeing either number.
 
 Three things the run taught that no amount of reading would have:
 
