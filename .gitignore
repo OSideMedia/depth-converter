@@ -1,0 +1,16 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+
+# Toolchain: project-local arm64 uv (PLAN.md Phase 0 — recreated by scripts/setup.sh)
+.tools/
+
+# Recreated by scripts/setup.sh
+vendor/
+checkpoints/
+
+# Large binaries and local outputs
+TEST CLIPS/
+out/
+*.zip
