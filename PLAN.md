@@ -582,12 +582,25 @@ does not collide with OSIDE dev (3000) — e.g. 7861 — and record it in README
   - Also: a non-video upload leaked raw ffprobe output ("Invalid data found when
     processing input") at the user; `probe()` now says "<name> is not a video file".
 
-  **Known limitation, not a product fault:** CDP `Page.captureScreenshot` times out on this
-  page once hardware-decoded video elements are loaded (three at once after a conversion:
-  source, depth, and the 2560×720 side-by-side). The page stays fully responsive — the
-  accessibility tree and the server both answer instantly, and the conversion completes
-  normally — so this only affects automated capture, not use. Screenshots of loaded-video
-  state need a manual grab.
+  **[CORRECTED 2026-07-25] The "CDP cannot screenshot video pages" limitation was a
+  MISDIAGNOSIS.** Re-tested deliberately: in a fresh browser tab, captures succeed with the
+  source clip loaded, on the Library tab, and — the state originally claimed impossible —
+  after a full conversion with all three video elements live. Neither video nor the
+  Dataframe was ever the trigger.
+
+  The real fault is an **intermittent renderer crash** that kills the tab outright (observed
+  twice; each time the tab group had vanished on the next call, so "renderer unresponsive"
+  was literal). It is **not memory exhaustion** — the page holds ~14 MB of a 4.4 GB heap
+  with 362 elements — and no console errors precede it. Root cause not established; it may
+  belong to the automation extension rather than the page. **Workaround: open a fresh tab,
+  after which capture works normally.** Worth watching in ordinary use; if a tab ever dies
+  mid-session the server is unaffected and a reload restores the UI, since all state lives
+  in the Motion Library on disk rather than in the page.
+
+  Chasing that also caught a fourth styling defect: **video players rendered as solid white
+  slabs** on the dark page — before the first frame paints, and permanently in the pillarbox
+  around a 2.39:1 depth clip. Now forced to black, which is also the honest backdrop for
+  judging a grayscale depth map.
 
 ### Phase 4 — Live-fire verification (HUMAN-GATED — do not execute autonomously)
 **LAW (mirrors OSIDE): nothing fires against a paid API automatically.** This phase is a

@@ -73,6 +73,16 @@ CSS = """
 .gradio-container .html-container:empty { display: none !important; padding: 0 !important; }
 .gradio-container .block:has(> .html-container:empty) { display: none !important; }
 
+/* Video players default to a white backdrop, which is a bright slab on this page both
+   before the first frame paints and in the letterboxed area around a 2.39:1 depth clip.
+   Black is also the honest backdrop for judging a grayscale depth map. */
+.gradio-container video,
+.gradio-container .video-container,
+.gradio-container [data-testid="video"],
+.gradio-container .wrap:has(> video) {
+  background: #000 !important;
+}
+
 footer { display:none !important; }
 """
 
