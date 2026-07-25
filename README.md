@@ -63,6 +63,43 @@ Verify the toolchain at any time:
 Each conversion produces a kit folder containing `depth.mp4`, `still.png`, `prompt.txt`,
 `kit.json`, and a copy of the trimmed `source.mp4`.
 
+### The Motion Library
+
+Kits land in `~/Depth_Motion_Library/` — override with `--library` or `$DEPTHC_LIBRARY`.
+Each kit is one folder named from its tags plus an auto-incrementing index
+(`Sword-fight_Tracking-orbit_001/`). There is no database and never will be: the folder tree
+and the `kit.json` files *are* the index, so kits stay portable, greppable, and repairable
+with a text editor.
+
+`source.mp4` is stored trimmed but **uncropped**, at source resolution — the crop is
+recorded in `kit.json` as a setting, so a kit can always be re-converted at different
+settings later.
+
+### The constraint checker
+
+Every kit is graded in three tiers, and the worst finding sets the kit's tier:
+
+| tier | meaning |
+|---|---|
+| **PASS** | inside the 3–8 s single-signal sweet spot, everything in window |
+| **WARN** | it will generate, but adherence is known to degrade — or a human needs to look |
+| **FAIL** | Seedance is expected to reject it, or the ref is unusable as motion |
+
+A FAIL exits non-zero, so `depthc kit` is safe to use in a script. Where sources disagree
+about a limit the stricter value is enforced (50 MB rather than 200 MB), and the Phase 4
+console check is what settles those before any of them become hard failures.
+
+### `prompt.txt` ships two variants — use exactly one
+
+**Variant A** is a bare binding phrase for OSIDE's Composer, which generates its own
+`ACTIVE REFERENCES` block from each reference's binding field. **Variant B** is the full
+standalone block for the Ark console or any non-OSIDE surface. Pasting Variant B into OSIDE
+produces two competing reference blocks — the precise failure the binding field exists to
+prevent.
+
+The binding text lives in `depthc/templates/seedance-2.0.txt`, never in Python. A future
+dialect is a new template file plus `--dialect`, with no code change.
+
 ## The workflow
 
 1. **Curate** — find the clip with the camera move or choreography you want.

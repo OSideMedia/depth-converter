@@ -508,6 +508,25 @@ Key engineering decisions:
 - **GATE 2:** kit folder from the real test clip lands in the library, passes its own
   checker; prompt.txt matches the template; kit.json (incl. tags/description/template
   version) validates against a checked-in JSON schema; `library list --tag` filters it.
+- **✅ GATE 2 PASSED 2026-07-24.** 127 tests green. Five real kits built into a library
+  from the test clips; all five manifests validate against `depthc/kit_schema.json`.
+  `Sword-fight_Tracking-orbit_001` (CLIP B trimmed 1–6 s) contains depth.mp4 / still.png /
+  prompt.txt / kit.json / source.mp4 / preview.mp4 and reports WARN — the only finding
+  being the real-face still flag, exactly as designed. `library list` and
+  `library list --tag "sword fight"` both filter correctly. Tier drives the exit code: a
+  deliberate 1.5 s ref reports FAIL on the < 2 s rule and exits 1, while `--no-faces` on a
+  4 s ref gives a clean PASS and exits 0.
+
+  Notes on what was built:
+  - **`source.mp4` is stored trimmed but UNCROPPED**, at source resolution. The crop is a
+    derived setting recorded in `kit.json`; baking it into the archived source would
+    permanently fix one framing decision and defeat the point of keeping the source for
+    re-conversion. It is re-encoded rather than stream-copied, because `-c copy` can only
+    cut on keyframes and would shift the in-point off the motion the kit is built around.
+  - **The still is cut from the cropped, scaled frames** — the same pixels fed to the
+    model — so its framing matches depth.mp4 rather than the source container.
+  - **The library is the filesystem.** `library_list()` is a directory scan of `kit.json`
+    files; a malformed manifest is skipped, never fatal. No database, per §1.
 
 ### Phase 3 — Gradio UI (~medium)
 `depthc ui` → localhost app, dark theme (near-black surfaces, minimal chrome — Peter's

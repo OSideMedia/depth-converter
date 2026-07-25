@@ -1,0 +1,60 @@
+DEPTH MOTION KIT — {kit_name}
+depth.mp4 · {duration:.2f}s · {width}×{height} · {fps:g} fps · suggested output {suggested_output:g}s
+Depth Converter v{version} · dialect seedance-2.0
+
+TWO VARIANTS BELOW. Use exactly one — they are not meant to be combined.
+OSIDE's Composer auto-generates its own ACTIVE REFERENCES block from each reference's
+binding field, so pasting the standalone block into OSIDE produces two competing reference
+blocks. That is the precise failure the binding field exists to prevent.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+VARIANT A — FOR OSIDE COMPOSER
+Paste into the video reference's binding field. Nothing else. The compiler wraps it and
+does its own @Video numbering.
+═══════════════════════════════════════════════════════════════════════════════
+
+the depth motion blueprint (grayscale depth map of a real performance) — follow its body
+motion, choreography, camera path, and timing exactly, beat for beat; it carries structure
+only: take no color, texture, clothing, face, lighting, or environment from it; appearance
+comes entirely from the image references
+
+
+═══════════════════════════════════════════════════════════════════════════════
+VARIANT B — STANDALONE
+For the Ark console or any non-OSIDE surface. Paste the whole block.
+═══════════════════════════════════════════════════════════════════════════════
+
+ACTIVE REFERENCES
+@Video 1 — depth motion blueprint (grayscale depth map of a real performance)
+
+Define @Video 1 as the motion blueprint. Follow its body motion, choreography, camera
+path, and timing exactly, beat for beat. @Video 1 carries structure only: take no color,
+texture, clothing, face, lighting, or environment from it. Appearance comes entirely from
+the image references.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+GUIDANCE — not part of either paste block
+═══════════════════════════════════════════════════════════════════════════════
+
+• Keep the ref in the 3–8 s sweet spot. Adherence degrades past ~8 s and refs over ~10 s
+  lose it badly. This kit is {duration:.2f}s.
+
+• One dominant motion signal per clip. A ref carrying a camera move AND an action AND a
+  lighting change gets followed at random.
+
+• Weight roughly 70% identity refs / 30% motion ref. Over-weighting the motion ref is the
+  usual cause of identity drift.
+
+• Identity images must not contain real photographic faces — Seedance rejects them. Use
+  AI-generated or stylized references, or an approved likeness from the Ark asset library.
+
+• Match output length to the ref: request about {suggested_output:g}s. A ref shorter than
+  the generation leaves the tail uncovered, and what the model does there is undefined.
+
+• Attach this as a refs-only shot. Go straight to "make video" and skip the create-frame
+  step — the adapter never sends references alongside a start frame, so a frame-first shot
+  silently drops the depth ref.
+
+{still_guidance}

@@ -397,6 +397,34 @@ def mux_audio(video_path: Path, source: Path, out_path: Path, trim=None) -> Path
     return out_path
 
 
+def trim_copy(
+    info: VideoInfo, out_path: Path, trim: tuple[float, float] | None = None
+) -> Path:
+    """Write the trimmed source segment beside the kit, at full source resolution.
+
+    Deliberately NOT cropped and NOT conformed. The crop is a derived setting recorded in
+    kit.json, so keeping the original framing here is what makes a kit re-convertible later
+    at different settings — a pre-cropped copy would bake in one decision permanently.
+
+    Re-encoded rather than stream-copied: `-c copy` can only cut on keyframes, which would
+    silently shift the in-point away from the motion the kit is built around.
+    """
+    cmd = [_tool("ffmpeg"), "-v", "error", "-y", "-nostdin"]
+    if trim:
+        cmd += ["-ss", f"{trim[0]:.6f}"]
+    cmd += ["-i", str(info.path)]
+    if trim:
+        cmd += ["-t", f"{trim[1] - trim[0]:.6f}"]
+    cmd += [
+        "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+    ]
+    cmd += ["-c:a", "aac", "-b:a", "192k"] if info.has_audio else ["-an"]
+    cmd += [str(out_path)]
+    _run(cmd)
+    return out_path
+
+
 def side_by_side(
     original: np.ndarray, depth: np.ndarray, out_path: Path, fps: float
 ) -> Path:

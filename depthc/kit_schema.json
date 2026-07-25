@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oside.media/schemas/depthc-kit-1.json",
+  "title": "Depth Converter kit manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion", "kitName", "createdAt", "tool", "promptDialect",
+    "tags", "description", "source", "depth", "still", "settings",
+    "suggestedOutputSeconds", "checks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kitName": { "type": "string", "minLength": 1 },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "promptDialect": { "type": "string", "minLength": 1 },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "description": { "type": "string" },
+    "suggestedOutputSeconds": { "type": "number", "minimum": 4, "maximum": 15 },
+
+    "tool": {
+      "type": "object",
+      "required": ["name", "version", "model", "vdaCommit"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "const": "depthc" },
+        "version": { "type": "string" },
+        "model": { "type": "string" },
+        "vdaCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "device": { "type": "string" },
+        "elapsedSeconds": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "source": {
+      "type": "object",
+      "required": ["filename", "sha256", "durationSeconds", "fps", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "trim": {
+          "type": ["array", "null"],
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "crop": { "type": ["string", "null"] }
+      }
+    },
+
+    "depth": {
+      "type": "object",
+      "required": [
+        "filename", "durationSeconds", "fps", "width", "height",
+        "frameCount", "sizeBytes", "pixels"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "const": "depth.mp4" },
+        "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },
+        "fps": { "type": "number", "exclusiveMinimum": 0 },
+        "width": { "type": "integer", "multipleOf": 2 },
+        "height": { "type": "integer", "multipleOf": 2 },
+        "frameCount": { "type": "integer", "exclusiveMinimum": 0 },
+        "sizeBytes": { "type": "integer", "exclusiveMinimum": 0 },
+        "pixels": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "still": {
+      "type": "object",
+      "required": ["filename", "frameIndex", "containsRealFaces", "usage"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "const": "still.png" },
+        "frameIndex": { "type": "integer", "minimum": 0 },
+        "containsRealFaces": { "type": "boolean" },
+        "usage": { "type": "string" }
+      }
+    },
+
+    "settings": {
+      "type": "object",
+      "required": ["resolution", "fps", "invert", "inputSize", "precision", "crop"],
+      "properties": {
+        "resolution": { "type": "string" },
+        "fps": { "type": "string" },
+        "invert": { "type": "boolean" },
+        "inputSize": { "type": "integer", "multipleOf": 14 },
+        "precision": { "type": "string", "enum": ["fp32", "fp16"] },
+        "crop": { "type": "string" },
+        "keepAudio": { "type": "boolean" }
+      }
+    },
+
+    "checks": {
+      "type": "object",
+      "required": ["tier", "findings"],
+      "additionalProperties": false,
+      "properties": {
+        "tier": { "enum": ["PASS", "WARN", "FAIL"] },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["tier", "check", "detail", "remedy"],
+            "additionalProperties": false,
+            "properties": {
+              "tier": { "enum": ["PASS", "WARN", "FAIL"] },
+              "check": { "type": "string" },
+              "detail": { "type": "string" },
+              "remedy": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
