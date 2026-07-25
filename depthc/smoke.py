@@ -112,11 +112,11 @@ def main() -> int:
     # ------------------------------------------------- one real 32-frame window
     print(f"\n{BOLD}Inference{OFF}")
     # 518 is the default short side; must be a multiple of 14 (DINOv2 patch size).
+    # fp32, matching the runtime default — fp16 autocast NaNs out on MPS (engine.py docs).
     x = torch.rand(1, 32, 3, 518, 518, device=device)
     t0 = time.perf_counter()
     with torch.no_grad():
-        with torch.autocast(device_type=device, enabled=(device != "cpu")):
-            depth = model(x)
+        depth = model(x)
     if device == "mps":
         torch.mps.synchronize()
     elapsed = time.perf_counter() - t0
@@ -127,6 +127,20 @@ def main() -> int:
     else:
         fail(f"output shape {tuple(depth.shape)}, expected {expected}")
         problems.append("unexpected model output shape")
+
+    # Shape alone is a worthless gate: the fp16 path returns a perfectly-shaped tensor of
+    # NaN, which casts to an all-black depth video without complaint. Check the values.
+    if torch.isfinite(depth).all():
+        ok(f"output finite, range [{depth.min():.3f}, {depth.max():.3f}]")
+    else:
+        fail("output contains NaN/Inf — the model is producing garbage on this device")
+        problems.append("non-finite model output")
+
+    if float(depth.std()) > 1e-4:
+        ok(f"output varies (std {depth.std():.3f}) — not a constant plane")
+    else:
+        fail("output is a constant plane — not real depth")
+        problems.append("degenerate model output")
 
     ok(f"32-frame window in {elapsed:.2f}s ({elapsed / 32 * 1000:.0f} ms/frame)")
     print(f"  {DIM}→ ~{elapsed / 32 * 240:.0f}s for a 10 s / 24 fps clip{OFF}")

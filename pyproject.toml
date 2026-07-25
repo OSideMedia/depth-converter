@@ -36,4 +36,7 @@ build-backend = "hatchling.build"
 packages = ["depthc"]
 
 [tool.pytest.ini_options]
+# Scoped to tests/ so collection never wanders into vendor/, which ships its own
+# CUDA-only test file that errors at import time on any Mac.
+testpaths = ["tests"]
 markers = ["slow: real-model tests (deselect with '-m \"not slow\"')"]

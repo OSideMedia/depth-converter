@@ -1,0 +1,314 @@
+"""Video probing, decoding, and encoding. All I/O is ours; none is upstream's.
+
+DECODER CHOICE (deviates from PLAN.md §2, deliberately). The plan specified an OpenCV
+`cv2.VideoCapture` frame reader. We pipe raw frames from ffmpeg instead, because the three
+transforms we need on the way in — trim, fps conform, and scale — are exactly what a filter
+graph does deterministically in one pass, and because **ffmpeg auto-applies rotation
+metadata while OpenCV silently ignores it**. Phone footage coming out upright was an
+explicit Phase 1 requirement; getting it for free from the decoder beats hand-rolling a
+rotation branch. OpenCV is still used for image analysis (still selection).
+
+`decord` is deliberately absent (no reliable arm64 macOS wheels).
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+# Seedance reference-input pixel window (PLAN.md §0 constraint table).
+MIN_PIXELS = 409_600
+MAX_PIXELS = 2_086_876
+
+RESOLUTION_PRESETS = {"480p": 854, "720p": 1280, "source": None}
+
+
+class VideoIOError(RuntimeError):
+    """Anything wrong with the input file or an ffmpeg invocation."""
+
+
+def _tool(name: str) -> str:
+    path = shutil.which(name)
+    if not path:
+        raise VideoIOError(f"{name} not found on PATH. Install ffmpeg.")
+    return path
+
+
+def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, capture_output=True, **kw)
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-6:]
+        raise VideoIOError(f"{Path(cmd[0]).name} failed:\n  " + "\n  ".join(tail))
+    return proc
+
+
+@dataclass
+class VideoInfo:
+    """Display-oriented facts about a source file (rotation already applied)."""
+
+    path: Path
+    duration: float
+    fps: float
+    width: int
+    height: int
+    codec: str
+    size_bytes: int
+    rotation: int = 0
+    has_audio: bool = False
+    raw: dict = field(default_factory=dict, repr=False)
+
+    @property
+    def pixels(self) -> int:
+        return self.width * self.height
+
+    @property
+    def size_mb(self) -> float:
+        return self.size_bytes / 1_000_000
+
+    def summary(self) -> str:
+        rot = f", rotated {self.rotation}°" if self.rotation else ""
+        return (
+            f"{self.width}×{self.height} · {self.fps:g} fps · {self.duration:.2f}s · "
+            f"{self.size_mb:.1f} MB · {self.codec}{rot}"
+        )
+
+
+def _parse_fps(rate: str) -> float:
+    if not rate or rate == "0/0":
+        return 0.0
+    if "/" in rate:
+        num, den = rate.split("/")
+        return float(num) / float(den) if float(den) else 0.0
+    return float(rate)
+
+
+def _rotation_of(stream: dict) -> int:
+    """Rotation in degrees from either a display matrix or the legacy rotate tag."""
+    for side in stream.get("side_data_list", []) or []:
+        if "rotation" in side:
+            return int(round(float(side["rotation"]))) % 360
+    tag = (stream.get("tags") or {}).get("rotate")
+    if tag:
+        try:
+            return int(round(float(tag))) % 360
+        except ValueError:
+            pass
+    return 0
+
+
+def probe(path: str | Path) -> VideoInfo:
+    """ffprobe a file. Raises VideoIOError if it has no decodable video stream."""
+    path = Path(path)
+    if not path.is_file():
+        raise VideoIOError(f"No such file: {path}")
+
+    proc = _run(
+        [
+            _tool("ffprobe"), "-v", "error",
+            "-show_streams", "-show_format", "-of", "json", str(path),
+        ]
+    )
+    data = json.loads(proc.stdout)
+    streams = data.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if video is None:
+        raise VideoIOError(f"{path.name} contains no video stream — not a usable clip.")
+
+    rotation = _rotation_of(video)
+    width, height = int(video["width"]), int(video["height"])
+    # A 90/270° rotation means the *displayed* frame is the transpose of the coded one,
+    # and ffmpeg's decoder hands us display orientation.
+    if rotation in (90, 270):
+        width, height = height, width
+
+    duration = float(data.get("format", {}).get("duration") or video.get("duration") or 0)
+    fps = _parse_fps(video.get("avg_frame_rate") or "") or _parse_fps(
+        video.get("r_frame_rate") or ""
+    )
+    if duration <= 0 or fps <= 0:
+        raise VideoIOError(f"{path.name}: could not determine duration/fps — corrupt file?")
+
+    return VideoInfo(
+        path=path,
+        duration=duration,
+        fps=fps,
+        width=width,
+        height=height,
+        codec=video.get("codec_name", "?"),
+        size_bytes=path.stat().st_size,
+        rotation=rotation,
+        has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        raw=data,
+    )
+
+
+def target_size(info: VideoInfo, resolution: str) -> tuple[int, int]:
+    """Scale to a preset by long edge, preserving aspect ratio, forcing even dims."""
+    if resolution not in RESOLUTION_PRESETS:
+        raise VideoIOError(
+            f"Unknown resolution {resolution!r}; choose from {list(RESOLUTION_PRESETS)}"
+        )
+    long_edge = RESOLUTION_PRESETS[resolution]
+    w, h = info.width, info.height
+    if long_edge is not None and max(w, h) > long_edge:
+        scale = long_edge / max(w, h)
+        w, h = round(w * scale), round(h * scale)
+    # libx264 + yuv420p requires even dimensions.
+    return max(2, w - w % 2), max(2, h - h % 2)
+
+
+def resolve_fps(info: VideoInfo, mode: str) -> float:
+    """`conform-24` matches Seedance's own output cadence; `keep` preserves the source."""
+    if mode == "conform-24":
+        return 24.0
+    if mode == "keep":
+        return info.fps
+    try:
+        value = float(mode)
+    except ValueError as e:
+        raise VideoIOError(f"--fps must be 'conform-24', 'keep', or a number (got {mode!r})") from e
+    if value <= 0:
+        raise VideoIOError("--fps must be positive")
+    return value
+
+
+def read_frames(
+    info: VideoInfo,
+    trim: tuple[float, float] | None = None,
+    fps: float | None = None,
+    size: tuple[int, int] | None = None,
+) -> np.ndarray:
+    """Decode to an [N, H, W, 3] uint8 RGB array, trimmed/conformed/scaled in one pass."""
+    width, height = size or (info.width, info.height)
+    cmd = [_tool("ffmpeg"), "-v", "error", "-nostdin"]
+
+    duration = info.duration
+    if trim:
+        start, end = trim
+        start = max(0.0, start)
+        end = min(info.duration, end)
+        if end - start <= 0:
+            raise VideoIOError(f"Empty trim range: {start:.2f}s → {end:.2f}s")
+        duration = end - start
+        # -ss before -i is both fast and frame-accurate in modern ffmpeg.
+        cmd += ["-ss", f"{start:.6f}"]
+
+    cmd += ["-i", str(info.path)]
+    if trim:
+        cmd += ["-t", f"{duration:.6f}"]
+
+    filters = []
+    if fps:
+        filters.append(f"fps={fps:g}")
+    if (width, height) != (info.width, info.height):
+        filters.append(f"scale={width}:{height}:flags=lanczos")
+    if filters:
+        cmd += ["-vf", ",".join(filters)]
+
+    cmd += ["-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+
+    frame_bytes = width * height * 3
+    proc = subprocess.run(cmd, capture_output=True)
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-6:]
+        raise VideoIOError("ffmpeg decode failed:\n  " + "\n  ".join(tail))
+    if not proc.stdout or len(proc.stdout) < frame_bytes:
+        raise VideoIOError(f"Decoded no complete frames from {info.path.name}")
+
+    count = len(proc.stdout) // frame_bytes
+    return np.frombuffer(proc.stdout[: count * frame_bytes], dtype=np.uint8).reshape(
+        count, height, width, 3
+    )
+
+
+def encode_gray(
+    frames: np.ndarray,
+    out_path: str | Path,
+    fps: float,
+    crf: int = 17,
+    preset: str = "medium",
+) -> Path:
+    """Encode [N, H, W] uint8 grayscale to the fixed depth.mp4 spec.
+
+    libx264, yuv420p, +faststart. Feeding `gray` in and asking for `yuv420p` out makes
+    ffmpeg replicate luma across chroma at neutral — the 3-channel grayscale the spec wants.
+    """
+    if frames.ndim != 3:
+        raise VideoIOError(f"Expected [N, H, W] grayscale, got shape {frames.shape}")
+    if frames.dtype != np.uint8:
+        raise VideoIOError(f"Expected uint8 frames, got {frames.dtype}")
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    n, height, width = frames.shape
+    if width % 2 or height % 2:
+        raise VideoIOError(f"Odd dimensions {width}×{height}; libx264/yuv420p needs even.")
+
+    cmd = [
+        _tool("ffmpeg"), "-v", "error", "-y", "-nostdin",
+        "-f", "rawvideo", "-pix_fmt", "gray",
+        "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", "-",
+        "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        str(out_path),
+    ]
+    proc = subprocess.run(cmd, input=frames.tobytes(), capture_output=True)
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-6:]
+        raise VideoIOError("ffmpeg encode failed:\n  " + "\n  ".join(tail))
+    return out_path
+
+
+def mux_audio(video_path: Path, source: Path, out_path: Path, trim=None) -> Path:
+    """Copy the source's audio onto a silent depth video.
+
+    Seedance ignores reference-video audio entirely — this exists so the filmmaker can hear
+    the beat while cutting. Rhythm sync is the @Audio slot's job, not this one.
+    """
+    cmd = [_tool("ffmpeg"), "-v", "error", "-y", "-nostdin", "-i", str(video_path)]
+    if trim:
+        cmd += ["-ss", f"{trim[0]:.6f}", "-t", f"{trim[1] - trim[0]:.6f}"]
+    cmd += [
+        "-i", str(source),
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        "-shortest", "-movflags", "+faststart",
+        str(out_path),
+    ]
+    _run(cmd)
+    return out_path
+
+
+def side_by_side(
+    original: np.ndarray, depth: np.ndarray, out_path: Path, fps: float
+) -> Path:
+    """Render an original | depth comparison MP4 for eyeballing (and socials)."""
+    if original.shape[0] != depth.shape[0]:
+        n = min(original.shape[0], depth.shape[0])
+        original, depth = original[:n], depth[:n]
+    rgb_depth = np.repeat(depth[..., None], 3, axis=-1)
+    stacked = np.concatenate([original, rgb_depth], axis=2)
+
+    n, height, width = stacked.shape[:3]
+    width -= width % 2
+    height -= height % 2
+    stacked = stacked[:, :height, :width]
+
+    cmd = [
+        _tool("ffmpeg"), "-v", "error", "-y", "-nostdin",
+        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", "-",
+        "-c:v", "libx264", "-crf", "20", "-preset", "medium",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        str(out_path),
+    ]
+    proc = subprocess.run(cmd, input=stacked.tobytes(), capture_output=True)
+    if proc.returncode != 0:
+        tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-6:]
+        raise VideoIOError("ffmpeg preview encode failed:\n  " + "\n  ".join(tail))
+    return out_path

@@ -97,6 +97,19 @@ the picture. Gate 0 cannot pass without fixing this.
    patch their files; import their model classes and manage device selection in our wrapper.
 2. `infer_video_depth` uses `torch.autocast(device_type=device)`. MPS autocast needs
    **PyTorch ≥ 2.5** — pin `torch>=2.5` and fp16 works; keep a `--fp32` escape hatch.
+   > **[CORRECTED 2026-07-24, Phase 1] fp16 DOES NOT WORK. The escape hatch is now the
+   > default.** Measured on the target machine (M4 Pro, torch 2.13.0), VDA-Small under
+   > `torch.autocast('mps')`: fp32 → clean, 44 ms/frame; **fp16 → ALL NaN**, 49 ms/frame;
+   > **bf16 → ALL NaN**, 48 ms/frame. Reduced precision is not a speed/quality trade here,
+   > it is broken *and slower*. So `--precision fp32` is the default and `--precision fp16`
+   > is the opt-in, guarded by a finiteness check that auto-retries at fp32.
+   > Two further traps this exposed: (a) the NaN is **sticky** — an fp16 run poisons the
+   > next fp32 run on the same model object until `torch.mps.empty_cache()` is called,
+   > implicating a cached MPS graph rather than arithmetic overflow; (b) NaN casts silently
+   > to 0 in uint8, so an unguarded pipeline exports a plausible-looking **all-black depth
+   > video** rather than failing. `normalize()` now raises `NonFiniteDepth`, and Gate 0's
+   > smoke test asserts finiteness — it originally checked only tensor shape and therefore
+   > **passed green on all-NaN output**.
 3. **Ignore their pinned `requirements.txt`** (CUDA-era: torch==2.1.1, xformers==0.0.23,
    numpy==1.24.0). `xformers` is optional — `motion_module.py` try/excepts the import and
    falls back to plain PyTorch attention. Never install xformers on macOS.
@@ -439,6 +452,33 @@ Key engineering decisions:
   **CLIP A and CLIP B from `TEST CLIPS/` [AMENDED 2026-07-24]** by hand produces upright,
   smooth, obviously-depth MP4s (conformed to 24 fps from 60/29.97) that QuickTime and
   Chrome both play.
+- **✅ GATE 1 PASSED 2026-07-24.** 39 tests green (5 `slow`, real model). CLIP A 60→24 fps
+  (191 frames, 33.2 s) and CLIP B 29.97→24 (195 frames, 34.2 s), both 1280×720 yuv420p
+  with moov-before-mdat verified by atom parse, both decoded by AVFoundation (QuickTime's
+  stack). Depth quality on real footage is excellent — in CLIP B's sword fight both
+  fighters separate cleanly from the archway and **the sword itself resolves**, which is
+  exactly the prop-geometry survival the technique depends on. The 8 s WARN fired for
+  CLIP B (8.1 s) and correctly stayed silent for CLIP A (7.94 s).
+
+  Decisions taken during Phase 1, both documented at their call sites:
+  - **ffmpeg pipe replaces `cv2.VideoCapture` for decode.** Trim + fps conform + scale are
+    one deterministic filter graph, and ffmpeg applies rotation metadata while OpenCV
+    ignores it — so "phone footage comes out upright" is free rather than hand-rolled.
+    OpenCV is retained for image analysis (Phase 2's still selection).
+  - **Upstream's per-window loop is hooked, not reimplemented,** by rebinding `tqdm` inside
+    their module namespace for the duration of a call. This yields both the per-window
+    `empty_cache()` and the progress callback with zero vendor edits and without
+    duplicating their cross-window scale/shift alignment maths.
+
+  **⚠️ NEW ISSUE FOUND BY THE REAL-FOOTAGE CHECK — letterbox bars become a fake near-plane.**
+  CLIP A is matted 2.39:1 inside 16:9. The model reads the flat black bars as *the nearest
+  surface in the scene*: measured over 26% of the frame at mean brightness **160/255**,
+  against **55/255** for the actual content. A depth ref handed to Seedance would therefore
+  carry a large bright slab across the top and bottom of frame — pure noise in the motion
+  channel, and brighter than the subject it is supposed to be following. `cropdetect`
+  identifies the matte cleanly (`crop=1920:800:0:140` on CLIP A). Not in the plan; unhandled
+  in Phase 1; **awaiting Peter's call** on auto-crop vs warn-only, since cropping changes
+  output framing and that is a creative decision.
 
 ### Phase 2 — Seedance Kit + checks (~small)
 - `checks.py` constraint table (§0 values) with PASS/WARN/FAIL tiers and one-line remedies.
