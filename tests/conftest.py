@@ -18,6 +18,20 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolate_user_folders(tmp_path, monkeypatch):
+    """Point every library/inbox/processed path at a temp dir, for EVERY test.
+
+    Not optional hygiene — this is a regression guard. A UI test that ran a real conversion
+    with an empty library field resolved to the *default* `~/Depth_Motion_Library` and wrote
+    kits into the user's actual library, once per suite run. A test suite must never touch
+    real user data, so isolation is autouse rather than something each test remembers.
+    """
+    monkeypatch.setenv("DEPTHC_LIBRARY", str(tmp_path / "library"))
+    monkeypatch.setenv("DEPTHC_INBOX", str(tmp_path / "inbox"))
+    monkeypatch.setenv("DEPTHC_PROCESSED", str(tmp_path / "processed"))
+
+
 def _ffmpeg() -> str:
     path = shutil.which("ffmpeg")
     if not path:

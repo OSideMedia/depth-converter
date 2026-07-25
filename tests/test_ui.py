@@ -123,11 +123,17 @@ def test_convert_rejects_an_over_long_clip(clip_long):
     assert "15s ceiling" in status
 
 
-def test_convert_clamps_an_out_point_past_the_end(clip_3s):
-    """Asking for 0-20s of a 3s clip is a clamp, not an error."""
+@pytest.mark.slow
+def test_convert_clamps_an_out_point_past_the_end(clip_3s, tmp_path):
+    """Asking for 0-20s of a 3s clip is a clamp, not an error.
+
+    Marked slow: this is the one UI test that runs a real conversion. It also passes an
+    explicit library path — an empty one resolves to the user's real Motion Library, which
+    is how this suite silently wrote kits into it.
+    """
     *_, status = ui._convert(
         str(clip_3s), "", "", "720p", "auto", "conform-24", 0, 20,
-        False, True, "auto", 518, "fp32", False, False, "",
+        False, True, "auto", 518, "fp32", False, False, str(tmp_path / "lib"),
     )
     assert "ceiling" not in status
 

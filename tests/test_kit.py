@@ -62,7 +62,7 @@ def test_library_root_precedence(tmp_path, monkeypatch):
     monkeypatch.setenv("DEPTHC_LIBRARY", str(tmp_path / "from_env"))
     assert kitlib.library_root() == tmp_path / "from_env"
     assert kitlib.library_root(tmp_path / "explicit") == tmp_path / "explicit"
-    monkeypatch.delenv("DEPTHC_LIBRARY")
+    monkeypatch.delenv("DEPTHC_LIBRARY", raising=False)
     assert kitlib.library_root() == kitlib.DEFAULT_LIBRARY
 
 
@@ -87,6 +87,7 @@ def test_sha256_is_stable_and_content_sensitive(tmp_path):
 # --------------------------------------------------------------------- inbox workflow
 
 def test_inbox_and_processed_default_into_the_project(monkeypatch):
+    # The autouse isolation fixture sets these; unset to see the real defaults.
     monkeypatch.delenv("DEPTHC_INBOX", raising=False)
     monkeypatch.delenv("DEPTHC_PROCESSED", raising=False)
     assert kitlib.inbox_dir().name == "Inbox"
@@ -415,3 +416,86 @@ def test_library_entry_exposes_summary_fields(tmp_path):
     assert entry.tier == "WARN"
     assert entry.tags == ["sword"]
     assert entry.created.startswith("2026-07-24")
+
+
+# ------------------------------------------------------------- binding.txt & README.txt
+
+def test_render_binding_is_one_line():
+    """It is pasted into a single-line binding field; hard wraps are a nuisance there."""
+    binding = kitlib.render_binding()
+    assert "\n" not in binding
+    assert binding.startswith("the depth motion blueprint")
+    assert "appearance comes entirely from the image references" in binding
+
+
+def test_render_binding_has_no_active_references_block():
+    """Variant A must never carry its own block — the Composer compiles one."""
+    assert "ACTIVE REFERENCES" not in kitlib.render_binding()
+
+
+def test_binding_matches_the_phrase_inside_prompt_txt():
+    """One home for the phrase: prompt.txt and binding.txt cannot drift apart."""
+    prompt = _render()
+    normalised = " ".join(prompt.split())
+    assert kitlib.render_binding() in normalised
+
+
+def test_prompt_has_no_leftover_markers():
+    prompt = _render()
+    assert kitlib.BINDING_OPEN not in prompt
+    assert kitlib.BINDING_CLOSE not in prompt
+    assert "[[" not in prompt
+
+
+def test_render_binding_rejects_unknown_dialect():
+    with pytest.raises(FileNotFoundError):
+        kitlib.render_binding("seedance-9.9")
+
+
+def test_kit_readme_names_the_two_files_to_upload():
+    """The whole point: six files in the folder, only two go to Seedance."""
+    report = check(duration=5.0, width=1280, height=536, fps=24.0,
+                   size_bytes=800_000, still_has_real_faces=True)
+    text = kitlib.render_kit_readme(_manifest(), report, has_preview=True)
+
+    assert "TAKE THESE TWO TO OSIDE" in text
+    assert "1. depth.mp4" in text
+    assert "2. binding.txt" in text
+    assert text.index("TAKE THESE TWO") < text.index("EVERYTHING ELSE")
+
+
+def test_kit_readme_states_the_refs_only_rule():
+    report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000)
+    text = kitlib.render_kit_readme(_manifest(), report)
+    assert "MAKE VIDEO" in text
+    assert "Skip create-frame" in text
+
+
+def test_kit_readme_flags_a_real_face_still_as_local_only():
+    report = check(duration=5.0, width=1280, height=536, fps=24.0,
+                   size_bytes=800_000, still_has_real_faces=True)
+    text = kitlib.render_kit_readme(_manifest(still_has_real_faces=True), report)
+    assert "LOCAL ONLY" in text
+
+
+def test_kit_readme_allows_a_faceless_still_as_a_ref():
+    report = check(duration=5.0, width=1280, height=536, fps=24.0,
+                   size_bytes=800_000, still_has_real_faces=False)
+    text = kitlib.render_kit_readme(_manifest(still_has_real_faces=False), report)
+    assert "may be attached" in text
+    assert "LOCAL ONLY" not in text
+
+
+def test_kit_readme_lists_problems_but_not_passes():
+    report = check(duration=12.0, width=1280, height=536, fps=24.0,
+                   size_bytes=800_000, still_has_real_faces=False)
+    text = kitlib.render_kit_readme(_manifest(), report)
+    assert "NOTES" in text
+    assert "[WARN] duration" in text
+    assert "[PASS]" not in text
+
+
+def test_kit_readme_omits_preview_when_absent():
+    report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000)
+    assert "preview.mp4" not in kitlib.render_kit_readme(_manifest(), report, has_preview=False)
+    assert "preview.mp4" in kitlib.render_kit_readme(_manifest(), report, has_preview=True)

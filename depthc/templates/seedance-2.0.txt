@@ -14,10 +14,12 @@ Paste into the video reference's binding field. Nothing else. The compiler wraps
 does its own @Video numbering.
 ═══════════════════════════════════════════════════════════════════════════════
 
+[[BINDING_A]]
 the depth motion blueprint (grayscale depth map of a real performance) — follow its body
 motion, choreography, camera path, and timing exactly, beat for beat; it carries structure
 only: take no color, texture, clothing, face, lighting, or environment from it; appearance
 comes entirely from the image references
+[[/BINDING_A]]
 
 
 ═══════════════════════════════════════════════════════════════════════════════

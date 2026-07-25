@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from depthc import VDA_COMMIT, __version__
-from depthc.checks import Report, suggested_output_seconds
+from depthc.checks import Report, Tier, suggested_output_seconds
 
 DEFAULT_LIBRARY = Path.home() / "Depth_Motion_Library"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -157,6 +157,35 @@ def write_still(frames: np.ndarray, out_path: Path, index: int | None = None) ->
     return chosen
 
 
+BINDING_OPEN = "[[BINDING_A]]"
+BINDING_CLOSE = "[[/BINDING_A]]"
+
+
+def _load_template(dialect: str) -> str:
+    path = TEMPLATE_DIR / f"{dialect}.txt"
+    if not path.is_file():
+        available = sorted(p.stem for p in TEMPLATE_DIR.glob("*.txt"))
+        raise FileNotFoundError(f"Unknown dialect {dialect!r}. Available: {available}")
+    return path.read_text()
+
+
+def render_binding(dialect: str = DEFAULT_DIALECT) -> str:
+    """Just the Variant A binding phrase, as one paste-ready line.
+
+    Extracted from the template between markers rather than duplicated in Python, so the
+    phrase has exactly one home. The markers are stripped from the rendered prompt.txt.
+
+    Newlines are collapsed: this text goes into a single-line binding field in the
+    Composer, and pasted hard-wrapping is a nuisance there.
+    """
+    body = _load_template(dialect)
+    try:
+        phrase = body.split(BINDING_OPEN)[1].split(BINDING_CLOSE)[0]
+    except IndexError as e:
+        raise ValueError(f"Template {dialect!r} has no {BINDING_OPEN} block") from e
+    return " ".join(phrase.split())
+
+
 def render_prompt(
     *,
     kit_name: str,
@@ -173,11 +202,7 @@ def render_prompt(
     rolling out and its reference syntax may shift; a new dialect must be a new template
     file plus a --dialect flag, with no code change.
     """
-    template_path = TEMPLATE_DIR / f"{dialect}.txt"
-    if not template_path.is_file():
-        available = sorted(p.stem for p in TEMPLATE_DIR.glob("*.txt"))
-        raise FileNotFoundError(f"Unknown dialect {dialect!r}. Available: {available}")
-
+    body = _load_template(dialect)
     still_guidance = (
         "• still.png is LOCAL-ONLY: it is flagged as containing real photographic faces,\n"
         "  which Seedance rejects on image inputs. Use it to judge framing, never as a ref."
@@ -186,7 +211,8 @@ def render_prompt(
         "  @Image composition/look reference. It is never a first_frame parameter."
     )
 
-    return template_path.read_text().format(
+    body = body.replace(BINDING_OPEN + "\n", "").replace(BINDING_CLOSE + "\n", "")
+    return body.format(
         kit_name=kit_name,
         duration=duration,
         width=width,
@@ -196,6 +222,65 @@ def render_prompt(
         suggested_output=suggested_output_seconds(duration),
         still_guidance=still_guidance,
     )
+
+
+def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False) -> str:
+    """The one file to open if you have no idea what this folder is for.
+
+    Every kit ends up with six files and only two of them are things you hand to Seedance.
+    This says which two, in order, at the top.
+    """
+    depth = manifest["depth"]
+    faces = manifest["still"]["containsRealFaces"]
+    tier = report.tier.value
+
+    lines = [
+        manifest["kitName"],
+        "=" * len(manifest["kitName"]),
+        "",
+        manifest.get("description") or "(no description)",
+        "",
+        f"  {depth['width']}x{depth['height']} · {depth['durationSeconds']:g}s · "
+        f"{depth['fps']:g} fps · check: {tier}",
+        f"  from {manifest['source']['filename']}"
+        + (f"  trimmed {manifest['source']['trim'][0]:g}-{manifest['source']['trim'][1]:g}s"
+           if manifest["source"].get("trim") else "  (untrimmed)"),
+        "",
+        "TAKE THESE TWO TO OSIDE",
+        "-----------------------",
+        "  1. depth.mp4    upload as the VIDEO reference",
+        "  2. binding.txt  paste its one line into that reference's binding field",
+        "",
+        "IN THE COMPOSER",
+        "---------------",
+        "  Shotlist -> your shot -> go straight to MAKE VIDEO. Skip create-frame:",
+        "  a depth shot is refs-only, and a start frame silently drops the depth ref.",
+        "  Add your character / location / prop images as the look references.",
+        f"  Ask for about {manifest['suggestedOutputSeconds']:g}s of output.",
+        "",
+        "EVERYTHING ELSE IS REFERENCE, NOT FOR UPLOAD",
+        "--------------------------------------------",
+        "  prompt.txt   the full guidance, plus a standalone block for the Ark console",
+        "  kit.json     manifest: source hash, settings, check results",
+        "  source.mp4   the trimmed source, kept so this can be rebuilt later",
+    ]
+    if has_preview:
+        lines.append("  preview.mp4  original | depth side by side, for eyeballing")
+    lines += [
+        "  still.png    "
+        + ("LOCAL ONLY - has a real face, which Seedance rejects on image inputs"
+           if faces else "may be attached as an @Image look reference"),
+    ]
+
+    problems = [f for f in report.findings if f.tier is not Tier.PASS]
+    if problems:
+        lines += ["", "NOTES", "-----"]
+        for finding in problems:
+            lines.append(f"  [{finding.tier.value}] {finding.check}: {finding.detail}")
+            if finding.remedy:
+                lines.append(f"         {finding.remedy}")
+
+    return "\n".join(lines) + "\n"
 
 
 @dataclass
@@ -225,6 +310,14 @@ class KitPaths:
     @property
     def preview(self) -> Path:
         return self.root / "preview.mp4"
+
+    @property
+    def binding(self) -> Path:
+        return self.root / "binding.txt"
+
+    @property
+    def readme(self) -> Path:
+        return self.root / "README.txt"
 
 
 def build_manifest(

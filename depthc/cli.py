@@ -342,7 +342,9 @@ def kit(
             )
         )
 
-        kitlib.write_manifest(paths, kitlib.build_manifest(
+        paths.binding.write_text(kitlib.render_binding(dialect) + "\n")
+
+        manifest = kitlib.build_manifest(
             kit_name=kit_dir.name,
             source_path=job.info.path,
             source_sha256=kitlib.sha256_file(job.info.path),
@@ -373,7 +375,11 @@ def kit(
             dialect=dialect,
             device=job.result.device,
             elapsed=job.result.elapsed,
-        ))
+        )
+        kitlib.write_manifest(paths, manifest)
+        paths.readme.write_text(
+            kitlib.render_kit_readme(manifest, report, has_preview=preview)
+        )
 
         if zip_output:
             kitlib.zip_kit(kit_dir)
