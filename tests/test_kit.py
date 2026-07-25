@@ -499,3 +499,53 @@ def test_kit_readme_omits_preview_when_absent():
     report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000)
     assert "preview.mp4" not in kitlib.render_kit_readme(_manifest(), report, has_preview=False)
     assert "preview.mp4" in kitlib.render_kit_readme(_manifest(), report, has_preview=True)
+
+
+# --------------------------------------------------------------------------- the Outbox
+
+def test_default_output_is_the_project_outbox(monkeypatch):
+    """Finals belong beside Inbox/ and Processed/, not buried in the home folder."""
+    monkeypatch.delenv("DEPTHC_LIBRARY", raising=False)
+    assert kitlib.library_root() == kitlib.PROJECT_ROOT / "Outbox"
+    assert kitlib.DEFAULT_LIBRARY.name == "Outbox"
+
+
+def test_index_names_the_two_files_to_upload(tmp_path):
+    _write_kit(tmp_path, "Sword-duel_001", ["sword"])
+    text = kitlib.write_outbox_index(tmp_path).read_text()
+    assert "depth.mp4" in text and "binding.txt" in text
+    assert "do not upload" in text
+
+
+def test_index_lists_every_kit(tmp_path):
+    _write_kit(tmp_path, "A_001", ["x"])
+    _write_kit(tmp_path, "B_001", ["y"], tier="FAIL")
+    text = kitlib.write_outbox_index(tmp_path).read_text()
+    assert "A_001" in text and "B_001" in text
+    assert "2 kits" in text
+    assert "FAIL" in text
+
+
+def test_index_on_an_empty_outbox_says_so(tmp_path):
+    text = kitlib.write_outbox_index(tmp_path).read_text()
+    assert "nothing here yet" in text
+
+
+def test_index_is_rewritten_not_appended(tmp_path):
+    _write_kit(tmp_path, "A_001", ["x"])
+    kitlib.write_outbox_index(tmp_path)
+    first = (tmp_path / "INDEX.txt").read_text()
+    kitlib.write_outbox_index(tmp_path)
+    assert (tmp_path / "INDEX.txt").read_text() == first
+
+
+def test_index_creates_the_outbox_if_missing(tmp_path):
+    target = tmp_path / "brand_new"
+    assert kitlib.write_outbox_index(target).is_file()
+
+
+def test_index_file_is_not_mistaken_for_a_kit(tmp_path):
+    """library_list globs */kit.json, so a loose INDEX.txt must not appear as a kit."""
+    _write_kit(tmp_path, "A_001", ["x"])
+    kitlib.write_outbox_index(tmp_path)
+    assert [e.name for e in kitlib.library_list(tmp_path)] == ["A_001"]

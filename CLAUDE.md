@@ -36,8 +36,12 @@ bundles for no real gain over doing it here.
    was caught by looking at a picture, not by any test.
 6. Report the tier and hand over the kit path.
 
-Kits land in `~/Depth_Motion_Library/<Tags>_NNN/`. `--archive` moves the source to
+Kits land in **`Outbox/<Tags>_NNN/`** inside the project — not in the home folder.
+`Outbox/INDEX.txt` is regenerated on every build. `--archive` moves the source to
 `Processed/` on PASS/WARN; a FAIL deliberately stays in `Inbox/`.
+
+Each kit carries `README.txt` (what to do) and `binding.txt` (the Variant A phrase alone,
+one line, ready to paste). Those plus `depth.mp4` are the only files Peter needs to touch.
 
 ## Laws — do not violate
 

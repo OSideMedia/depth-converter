@@ -25,9 +25,13 @@ import numpy as np
 from depthc import VDA_COMMIT, __version__
 from depthc.checks import Report, Tier, suggested_output_seconds
 
-DEFAULT_LIBRARY = Path.home() / "Depth_Motion_Library"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Finished kits live in the project, beside Inbox/ and Processed/ — one visible place for
+# work in, work out, and originals. An earlier default of ~/Depth_Motion_Library buried the
+# deliverables in the home folder, away from the workflow they belong to.
+DEFAULT_LIBRARY = PROJECT_ROOT / "Outbox"
 DEFAULT_DIALECT = "seedance-2.0"
 KIT_MANIFEST = "kit.json"
 
@@ -411,6 +415,58 @@ def zip_kit(kit_dir: Path, out_path: Path | None = None) -> Path:
         str(target.with_suffix("")), "zip", root_dir=kit_dir.parent, base_dir=kit_dir.name
     )
     return Path(archive)
+
+
+def write_outbox_index(root: Path | None = None) -> Path:
+    """Rewrite `Outbox/INDEX.txt` — the answer to "what's finished and what do I use?".
+
+    Regenerated from the kit.json files on every build, so it can never drift from what is
+    actually on disk. Delete it and the next build brings it back.
+    """
+    root = Path(root) if root else library_root()
+    root.mkdir(parents=True, exist_ok=True)
+    entries = library_list(root)
+
+    lines = [
+        "FINISHED DEPTH MOTION KITS",
+        "==========================",
+        "",
+        "Each folder below is one finished kit. Open its README.txt for instructions.",
+        "",
+        "For every kit, the only two files you hand to Seedance are:",
+        "    depth.mp4     upload as the VIDEO reference",
+        "    binding.txt   paste its one line into that reference's binding field",
+        "",
+        "Everything else in a kit folder is reference or archive — do not upload it.",
+        "",
+    ]
+
+    if not entries:
+        lines.append("(nothing here yet — drop clips in Inbox/ and run: depthc inbox)")
+        text = "\n".join(lines) + "\n"
+        (root / "INDEX.txt").write_text(text)
+        return root / "INDEX.txt"
+
+    lines.append(f"{len(entries)} kit{'s' if len(entries) != 1 else ''}:")
+    lines.append("")
+    for entry in entries:
+        depth = entry.manifest.get("depth", {})
+        source = entry.manifest.get("source", {})
+        trim = source.get("trim")
+        lines += [
+            f"  {entry.name}",
+            f"      {depth.get('width', '?')}x{depth.get('height', '?')} · "
+            f"{entry.duration:g}s · check: {entry.tier}",
+            f"      from {source.get('filename', '?')}"
+            + (f", trimmed {trim[0]:g}-{trim[1]:g}s" if trim else ""),
+        ]
+        if entry.manifest.get("description"):
+            lines.append(f"      {entry.manifest['description']}")
+        lines.append("")
+
+    text = "\n".join(lines)
+    (root / "INDEX.txt").write_text(text)
+    return root / "INDEX.txt"
 
 
 @dataclass

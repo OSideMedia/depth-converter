@@ -313,7 +313,7 @@ def _convert(
             },
             report=report, device=result.device, elapsed=result.elapsed,
         ))
-        kitlib.zip_kit(kit_dir)
+        kitlib.write_outbox_index(root)
 
         progress(1.0, desc="done")
         status = (
@@ -449,8 +449,9 @@ def build() -> gr.Blocks:
                         with gr.Row():
                             reveal_btn = gr.Button("Reveal in Finder")
                             zip_note = gr.Markdown(
-                                '<span class="depthc-note">A .zip is written beside every '
-                                "kit folder.</span>"
+                                '<span class="depthc-note">Kits land in <b>Outbox/</b>. '
+                                "Take <b>depth.mp4</b> and <b>binding.txt</b> to OSIDE; "
+                                "the kit's README.txt has the steps.</span>"
                             )
 
                 video.change(_probe_readout, video, [readout, start, end])

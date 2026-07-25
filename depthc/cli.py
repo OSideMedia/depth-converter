@@ -16,7 +16,7 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Convert a reference clip into a Seedance-ready depth motion kit.",
 )
-library_app = typer.Typer(no_args_is_help=True, help="Browse the Motion Library.")
+library_app = typer.Typer(no_args_is_help=True, help="Browse finished kits in Outbox/.")
 app.add_typer(library_app, name="library")
 
 BOLD, DIM, GREEN, YELLOW, RED, OFF = (
@@ -268,7 +268,7 @@ def kit(
     precision: str = typer.Option("fp32", "--precision", help="fp32 | fp16"),
     dialect: str = typer.Option("seedance-2.0", "--dialect", help="Prompt template to render"),
     library: Optional[Path] = typer.Option(
-        None, "--library", help="Motion Library root (default $DEPTHC_LIBRARY or ~/Depth_Motion_Library)"
+        None, "--library", help="Kit output root (default Outbox/ in the project)"
     ),
     archive: bool = typer.Option(
         False,
@@ -381,6 +381,8 @@ def kit(
             kitlib.render_kit_readme(manifest, report, has_preview=preview)
         )
 
+        kitlib.write_outbox_index(root)
+
         if zip_output:
             kitlib.zip_kit(kit_dir)
 
@@ -468,7 +470,7 @@ def ui(
 @library_app.command("list")
 def library_list_cmd(
     tag: Optional[str] = typer.Option(None, "--tag", help="Only kits carrying this tag"),
-    library: Optional[Path] = typer.Option(None, "--library", help="Motion Library root"),
+    library: Optional[Path] = typer.Option(None, "--library", help="Kit output root (default Outbox/)"),
 ) -> None:
     """List kits in the Motion Library."""
     from depthc import kit as kitlib

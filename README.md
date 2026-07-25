@@ -46,8 +46,13 @@ Verify the toolchain at any time:
 
 ## Usage — the inbox loop
 
-The primary path. Drop clips in `Inbox/`, work through them, kits land in the Motion
-Library and the sources file themselves into `Processed/`.
+The primary path. Three folders in the project, and nothing to hunt for:
+
+```
+Inbox/      ← drop reference clips here
+Outbox/     ← finished kits land here      (start at INDEX.txt)
+Processed/  ← sources file themselves here once converted
+```
 
 ```bash
 # 1. triage what's waiting — what each clip is, whether it needs trimming
@@ -102,16 +107,26 @@ Runs on port **7861** — chosen to stay clear of OSIDE's dev server on 3000. Pi
 `~/.depthc-ui.pid`, log at `~/Library/Logs/depthc-ui.log`. Starting while already running
 just focuses the existing tab rather than launching a second server.
 
-Each conversion produces a kit folder containing `depth.mp4`, `still.png`, `prompt.txt`,
-`kit.json`, and a copy of the trimmed `source.mp4`.
+### The Outbox
 
-### The Motion Library
+Finished kits land in `Outbox/` — override with `--library` or `$DEPTHC_LIBRARY`. Each kit
+is one folder named from its tags plus an auto-incrementing index
+(`Sword-duel_Two-fighters_001/`), and `Outbox/INDEX.txt` lists them all, regenerated on
+every build so it cannot drift from what is on disk.
 
-Kits land in `~/Depth_Motion_Library/` — override with `--library` or `$DEPTHC_LIBRARY`.
-Each kit is one folder named from its tags plus an auto-incrementing index
-(`Sword-fight_Tracking-orbit_001/`). There is no database and never will be: the folder tree
-and the `kit.json` files *are* the index, so kits stay portable, greppable, and repairable
-with a text editor.
+There is no database and never will be: the folder tree and the `kit.json` files *are* the
+index, so kits stay portable, greppable, and repairable with a text editor.
+
+**From each kit you take exactly two files to OSIDE:**
+
+| file | what to do with it |
+|---|---|
+| `depth.mp4` | upload as the **video** reference |
+| `binding.txt` | paste its one line into that reference's **binding field** |
+
+Every kit also carries a `README.txt` saying precisely that, plus the refs-only rule and
+the suggested output length. Everything else in the folder — `prompt.txt`, `kit.json`,
+`source.mp4`, `preview.mp4`, `still.png` — is reference or archive, not for upload.
 
 `source.mp4` is stored trimmed but **uncropped**, at source resolution — the crop is
 recorded in `kit.json` as a setting, so a kit can always be re-converted at different
@@ -146,12 +161,12 @@ dialect is a new template file plus `--dialect`, with no code change.
 
 1. **Curate** — find the clip with the camera move or choreography you want.
 2. **Trim** — cut to the **3–8 s sweet spot**, one clear motion signal only.
-3. **Convert** — run `depthc kit`; it renders locally and lands in the Motion Library.
+3. **Convert** — run `depthc kit`; it renders locally and lands in `Outbox/`.
 4. **Attach** — in OSIDE: Shotlist → pick the shot → go straight to **"make video"**,
    **skipping the create-frame step**. A depth-motion shot is a refs-only shot: the adapter
    never sends references alongside a start frame, so a frame-first shot would silently drop
    the depth ref. In Composer, add your character/location/prop image refs (the look), upload
-   `depth.mp4` as the video ref (the motion), and paste the binding phrase from `prompt.txt`.
+   `depth.mp4` as the video ref (the motion), and paste the line from `binding.txt`.
 5. **Fire** — generate.
 
 **Resolution guidance.** The depth ref is always ≤720p-class; it's a motion guide, not

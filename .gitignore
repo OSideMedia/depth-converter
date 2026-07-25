@@ -18,5 +18,7 @@ out/
 # Working folders: keep the folders and their notes, never the media
 Inbox/*
 Processed/*
+Outbox/*
 !Inbox/README.txt
 !Processed/README.txt
+!Outbox/README.txt
