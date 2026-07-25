@@ -27,10 +27,12 @@ from depthc.checks import Report, suggested_output_seconds
 
 DEFAULT_LIBRARY = Path.home() / "Depth_Motion_Library"
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIALECT = "seedance-2.0"
 KIT_MANIFEST = "kit.json"
 
 STILL_SEARCH_FRAMES = 24
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mpg", ".mpeg", ".webm"}
 
 
 def library_root(override: str | Path | None = None) -> Path:
@@ -39,6 +41,49 @@ def library_root(override: str | Path | None = None) -> Path:
         return Path(override).expanduser()
     env = os.environ.get("DEPTHC_LIBRARY")
     return Path(env).expanduser() if env else DEFAULT_LIBRARY
+
+
+def inbox_dir(override: str | Path | None = None) -> Path:
+    """Where clips are dropped for conversion. `Inbox/` in the project by default."""
+    if override:
+        return Path(override).expanduser()
+    env = os.environ.get("DEPTHC_INBOX")
+    return Path(env).expanduser() if env else PROJECT_ROOT / "Inbox"
+
+
+def processed_dir(override: str | Path | None = None) -> Path:
+    """Where sources are filed once a kit has been built from them."""
+    if override:
+        return Path(override).expanduser()
+    env = os.environ.get("DEPTHC_PROCESSED")
+    return Path(env).expanduser() if env else PROJECT_ROOT / "Processed"
+
+
+def inbox_clips(root: Path | None = None) -> list[Path]:
+    """Video files waiting in the inbox, oldest first. Dotfiles ignored."""
+    root = Path(root) if root else inbox_dir()
+    if not root.is_dir():
+        return []
+    clips = [
+        p for p in root.iterdir()
+        if p.is_file() and p.suffix.lower() in VIDEO_SUFFIXES and not p.name.startswith(".")
+    ]
+    return sorted(clips, key=lambda p: p.stat().st_mtime)
+
+
+def archive_source(source: Path, destination: Path | None = None) -> Path:
+    """Move a converted source into Processed/, never overwriting an existing file."""
+    target_dir = Path(destination) if destination else processed_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    target = target_dir / source.name
+    stem, suffix = source.stem, source.suffix
+    counter = 2
+    while target.exists():
+        target = target_dir / f"{stem}_{counter}{suffix}"
+        counter += 1
+
+    return Path(shutil.move(str(source), str(target)))
 
 
 def slugify(text: str) -> str:

@@ -84,6 +84,94 @@ def test_sha256_is_stable_and_content_sensitive(tmp_path):
     assert len(kitlib.sha256_file(a)) == 64
 
 
+# --------------------------------------------------------------------- inbox workflow
+
+def test_inbox_and_processed_default_into_the_project(monkeypatch):
+    monkeypatch.delenv("DEPTHC_INBOX", raising=False)
+    monkeypatch.delenv("DEPTHC_PROCESSED", raising=False)
+    assert kitlib.inbox_dir().name == "Inbox"
+    assert kitlib.processed_dir().name == "Processed"
+    assert kitlib.inbox_dir().parent == kitlib.PROJECT_ROOT
+
+
+def test_inbox_and_processed_honour_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEPTHC_INBOX", str(tmp_path / "in"))
+    monkeypatch.setenv("DEPTHC_PROCESSED", str(tmp_path / "done"))
+    assert kitlib.inbox_dir() == tmp_path / "in"
+    assert kitlib.processed_dir() == tmp_path / "done"
+
+
+def test_inbox_clips_finds_videos_only(tmp_path):
+    for name in ("a.mp4", "b.MOV", "c.mkv", "notes.txt", "sheet.csv"):
+        (tmp_path / name).write_bytes(b"x")
+    found = {p.name for p in kitlib.inbox_clips(tmp_path)}
+    assert found == {"a.mp4", "b.MOV", "c.mkv"}
+
+
+def test_inbox_clips_ignores_dotfiles(tmp_path):
+    """.DS_Store and macOS resource forks live in every real folder."""
+    (tmp_path / "real.mp4").write_bytes(b"x")
+    (tmp_path / "._real.mp4").write_bytes(b"x")
+    (tmp_path / ".DS_Store").write_bytes(b"x")
+    assert [p.name for p in kitlib.inbox_clips(tmp_path)] == ["real.mp4"]
+
+
+def test_inbox_clips_ignores_subfolders(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "nested.mp4").write_bytes(b"x")
+    (tmp_path / "top.mp4").write_bytes(b"x")
+    assert [p.name for p in kitlib.inbox_clips(tmp_path)] == ["top.mp4"]
+
+
+def test_inbox_clips_on_missing_folder_is_empty(tmp_path):
+    assert kitlib.inbox_clips(tmp_path / "nope") == []
+
+
+def test_inbox_clips_are_oldest_first(tmp_path):
+    import os
+    import time
+
+    for index, name in enumerate(("third.mp4", "first.mp4", "second.mp4")):
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        os.utime(path, (time.time() + index, time.time() + index))
+    assert [p.name for p in kitlib.inbox_clips(tmp_path)] == \
+        ["third.mp4", "first.mp4", "second.mp4"]
+
+
+def test_archive_source_moves_the_file(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"data")
+    destination = tmp_path / "done"
+
+    moved = kitlib.archive_source(source, destination)
+    assert moved == destination / "clip.mp4"
+    assert moved.read_bytes() == b"data"
+    assert not source.exists()
+
+
+def test_archive_source_never_overwrites(tmp_path):
+    """Two clips of the same name from different shoots must both survive."""
+    destination = tmp_path / "done"
+    destination.mkdir()
+    (destination / "clip.mp4").write_bytes(b"original")
+
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"newer")
+    moved = kitlib.archive_source(source, destination)
+
+    assert moved.name == "clip_2.mp4"
+    assert (destination / "clip.mp4").read_bytes() == b"original"
+    assert moved.read_bytes() == b"newer"
+
+
+def test_archive_source_creates_the_destination(tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"x")
+    moved = kitlib.archive_source(source, tmp_path / "brand" / "new")
+    assert moved.is_file()
+
+
 # ----------------------------------------------------------------------- still picking
 
 def test_sharpest_frame_skips_a_blurred_first_frame():

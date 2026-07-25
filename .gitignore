@@ -14,3 +14,9 @@ checkpoints/
 TEST CLIPS/
 out/
 *.zip
+
+# Working folders: keep the folders and their notes, never the media
+Inbox/*
+Processed/*
+!Inbox/README.txt
+!Processed/README.txt

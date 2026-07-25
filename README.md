@@ -44,23 +44,51 @@ Verify the toolchain at any time:
 ./.tools/uv run python -m depthc.smoke
 ```
 
-## Usage
+## Usage — the inbox loop
+
+The primary path. Drop clips in `Inbox/`, work through them, kits land in the Motion
+Library and the sources file themselves into `Processed/`.
 
 ```bash
-# the headline command: probe → convert → check → package into the Motion Library
-./.tools/uv run depthc kit "myclip.mov" --trim 2.0 8.0 --tags "sword-fight,tracking-orbit"
+# 1. triage what's waiting — what each clip is, whether it needs trimming
+./.tools/uv run depthc inbox
 
-# just inspect a file
-./.tools/uv run depthc probe "myclip.mov"
+# 2. build a kit from one clip and archive the source
+./.tools/uv run depthc kit "Inbox/CLIP C.mp4" \
+    --trim 1.0 6.0 \
+    --tags "walk toward camera,tracking pull-back" \
+    --desc "single clean motion signal before secondary figures enter" \
+    --preview --archive
 
-# browse the library
-./.tools/uv run depthc library list --tag sword-fight
-
-# local web UI
-./.tools/uv run depthc ui
+# 3. browse what you've built
+./.tools/uv run depthc library list --tag "tracking pull-back"
 ```
 
-### The desktop apps
+`--archive` moves the source to `Processed/` after a PASS or WARN. A **FAIL deliberately
+stays in `Inbox/`** so a rejected clip stays visible.
+
+**Between steps 1 and 2 sits the only real judgement call: which 3–8 s beat to keep.**
+Watch the clip first — a contact sheet is enough:
+
+```bash
+ffmpeg -i "Inbox/CLIP C.mp4" -vf "fps=1,scale=320:-1,tile=5x2" -frames:v 1 sheet.png
+```
+
+On the clip above that showed a second set of figures walking in at 6 s — a competing
+motion signal — which is what set the out-point at 6.0.
+
+```bash
+# other commands
+./.tools/uv run depthc probe "myclip.mov"     # inspect one file
+./.tools/uv run depthc ui                      # secondary: local web UI
+```
+
+### The web UI and desktop apps — secondary
+
+The Gradio UI is a convenience surface, not the main path. It converts one clip at a time
+and adds a server, a port, and two app bundles; the inbox loop above does everything it
+does, plus batches, and puts the trim decision somewhere a human (or an agent that can
+actually watch the clip) can reason about it.
 
 ```bash
 bash scripts/build_launchers.sh          # installs into /Applications

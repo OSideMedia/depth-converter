@@ -270,6 +270,12 @@ def kit(
     library: Optional[Path] = typer.Option(
         None, "--library", help="Motion Library root (default $DEPTHC_LIBRARY or ~/Depth_Motion_Library)"
     ),
+    archive: bool = typer.Option(
+        False,
+        "--archive",
+        help="Move the source into Processed/ after a successful kit. Skipped on FAIL, so a "
+        "rejected clip stays in the inbox where you can see it.",
+    ),
     preview: bool = typer.Option(False, "--preview", help="Also write preview.mp4 into the kit"),
     zip_output: bool = typer.Option(False, "--zip", help="Also write <kit>.zip beside the folder"),
     keep_audio: bool = typer.Option(False, "--keep-audio", help="Mux source audio onto depth.mp4"),
@@ -382,8 +388,64 @@ def kit(
 
     typer.echo(f"\n{BOLD}{kit_dir.name}{OFF}  {DIM}{kit_dir}{OFF}")
     typer.echo(checks.format_report(report))
+
     if not report.ok:
+        if archive:
+            typer.echo(f"{DIM}not archived — a FAIL stays in the inbox.{OFF}")
         raise typer.Exit(1)
+
+    if archive:
+        moved = kitlib.archive_source(input)
+        typer.echo(f"{DIM}source → {moved}{OFF}")
+
+
+@app.command()
+def inbox(
+    path: Optional[Path] = typer.Option(None, "--inbox", help="Inbox folder to scan"),
+) -> None:
+    """Triage the clips waiting in the inbox.
+
+    Reports what each one is and what it needs, so the trim call can be made before any
+    conversion is run. Converts nothing — deciding which 3-8s beat carries the motion is a
+    judgement, not a default.
+    """
+    from depthc import kit as kitlib
+    from depthc.video_io import VideoIOError, detect_crop, probe as probe_file
+
+    root = kitlib.inbox_dir(path)
+    clips = kitlib.inbox_clips(root)
+    if not clips:
+        typer.echo(f"Inbox is empty: {root}")
+        return
+
+    typer.echo(f"{BOLD}{len(clips)} clip{'s' if len(clips) != 1 else ''} in {root}{OFF}\n")
+    for clip in clips:
+        try:
+            info = probe_file(clip)
+        except VideoIOError as e:
+            typer.echo(f"{RED}✗{OFF} {clip.name}\n    {e}")
+            continue
+
+        typer.echo(f"{BOLD}{clip.name}{OFF}")
+        typer.echo(f"    {info.summary()}")
+
+        matte = detect_crop(info)
+        if matte:
+            typer.echo(
+                f"    {DIM}matte {matte} → {matte.width}×{matte.height} "
+                f"({matte.removed_fraction(info) * 100:.0f}% removed automatically){OFF}"
+            )
+
+        if info.duration < 2:
+            typer.echo(f"    {RED}under the 2s minimum — unusable as a video reference{OFF}")
+        elif info.duration > 8:
+            typer.echo(
+                f"    {YELLOW}needs trimming{OFF} — {info.duration:.1f}s is past the 3-8s "
+                f"sweet spot. Pick the single clearest motion beat."
+            )
+        else:
+            typer.echo(f"    {GREEN}usable whole{OFF} — inside the 3-8s sweet spot.")
+        typer.echo()
 
 
 @app.command()
