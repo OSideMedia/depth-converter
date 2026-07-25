@@ -107,12 +107,22 @@ def probe(path: str | Path) -> VideoInfo:
     if not path.is_file():
         raise VideoIOError(f"No such file: {path}")
 
-    proc = _run(
-        [
-            _tool("ffprobe"), "-v", "error",
-            "-show_streams", "-show_format", "-of", "json", str(path),
-        ]
-    )
+    try:
+        proc = _run(
+            [
+                _tool("ffprobe"), "-v", "error",
+                "-show_streams", "-show_format", "-of", "json", str(path),
+            ]
+        )
+    except VideoIOError as e:
+        # Don't leak raw ffprobe output at the user for the commonest mistake of all —
+        # handing the tool something that simply isn't a video.
+        if "Invalid data found" in str(e):
+            raise VideoIOError(
+                f"{path.name} is not a video file (ffprobe could not read it)."
+            ) from e
+        raise
+
     data = json.loads(proc.stdout)
     streams = data.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)

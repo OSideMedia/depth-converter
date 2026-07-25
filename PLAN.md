@@ -551,6 +551,43 @@ does not collide with OSIDE dev (3000) — e.g. 7861 — and record it in README
   `DOCS/`; no unhandled exceptions in console for: happy path, >15 s clip, non-video
   file, cancel-and-retry. Launcher apps verified: double-click start → UI opens;
   double-click stop → server gone.
+- **✅ GATE 3 PASSED 2026-07-25.** 156 tests green. Real browser run-through: CLIP B
+  uploaded through the page produced `CLIP-B_001` — a complete, schema-valid kit
+  (1280×720, 8.125 s @ 24 fps, WARN, 32.8 s on MPS) with the constraint report rendered
+  in-page. Library tab lists all six kits with correct PASS/WARN/FAIL tiers. Screenshot at
+  `DOCS/ui-convert-tab.jpg`.
+  - **Launcher pair verified end to end from `/Applications`:** double-click start → UI up
+    in ~3 s → double-click stop → listener gone, pidfile removed, port unreachable. Built
+    by `scripts/build_launchers.sh` (re-runnable). Port **7861**, pidfile
+    `~/.depthc-ui.pid`, log `~/Library/Logs/depthc-ui.log`. The `arch -arm64` exec line is
+    in place per §0.4, and the venv Python and torch are both arm64-only binaries with
+    `mps available: True` confirmed through the launcher's exact exec path.
+  - **The pidfile alone is not enough — validated by accident.** The launcher's recorded
+    child PID (56468) differed from the process actually holding the port (56471), and an
+    earlier manual `pkill` killed a `uv` parent while its Python child kept listening,
+    leaving a stale socket that answered TCP but not HTTP and blocked the next start. The
+    stop app therefore sweeps the port with `lsof` after honouring the pidfile, escalating
+    to `-9`. Keep that sweep.
+
+  Three UI defects found and fixed during the run-through:
+  - Gradio's Markdown/HTML blocks and secondary buttons ship a light fill, which rendered
+    as **white slabs on the near-black page**. Fixed in the theme (`button_secondary_*`,
+    table and label fills) rather than by piling on `!important`.
+  - An **empty** `gr.HTML` renders as a bare slab. The trim readout is now seeded with
+    "Load a clip to set the range." — no empty block, and a more useful default.
+  - **An in-point equal to the out-point silently converted the whole clip.** The guard
+    tested `end > start` before clamping, so an empty range fell through as "no trim" and
+    the user got a full conversion they never asked for. Now clamped first, then rejected
+    with an explicit message.
+  - Also: a non-video upload leaked raw ffprobe output ("Invalid data found when
+    processing input") at the user; `probe()` now says "<name> is not a video file".
+
+  **Known limitation, not a product fault:** CDP `Page.captureScreenshot` times out on this
+  page once hardware-decoded video elements are loaded (three at once after a conversion:
+  source, depth, and the 2560×720 side-by-side). The page stays fully responsive — the
+  accessibility tree and the server both answer instantly, and the conversion completes
+  normally — so this only affects automated capture, not use. Screenshots of loaded-video
+  state need a manual grab.
 
 ### Phase 4 — Live-fire verification (HUMAN-GATED — do not execute autonomously)
 **LAW (mirrors OSIDE): nothing fires against a paid API automatically.** This phase is a

@@ -60,6 +60,20 @@ Verify the toolchain at any time:
 ./.tools/uv run depthc ui
 ```
 
+### The desktop apps
+
+```bash
+bash scripts/build_launchers.sh          # installs into /Applications
+```
+
+Creates **Depth Converter.app** (start) and **Depth Stop.app** (shut down), mirroring the
+OSIDE Studio pair. Double-click to start: the server comes up in about 3 seconds and a
+browser tab opens. Double-click Stop to shut it down.
+
+Runs on port **7861** — chosen to stay clear of OSIDE's dev server on 3000. Pidfile at
+`~/.depthc-ui.pid`, log at `~/Library/Logs/depthc-ui.log`. Starting while already running
+just focuses the existing tab rather than launching a second server.
+
 Each conversion produces a kit folder containing `depth.mp4`, `still.png`, `prompt.txt`,
 `kit.json`, and a copy of the trimmed `source.mp4`.
 

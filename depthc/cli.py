@@ -386,6 +386,17 @@ def kit(
         raise typer.Exit(1)
 
 
+@app.command()
+def ui(
+    port: int = typer.Option(7861, "--port", help="Chosen to avoid OSIDE's dev server on 3000"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a tab"),
+) -> None:
+    """Launch the local web UI."""
+    from depthc.ui import launch
+
+    launch(port=port, open_browser=not no_browser)
+
+
 @library_app.command("list")
 def library_list_cmd(
     tag: Optional[str] = typer.Option(None, "--tag", help="Only kits carrying this tag"),

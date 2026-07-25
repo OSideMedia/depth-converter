@@ -118,6 +118,17 @@ def clip_static(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def clip_long(tmp_path_factory) -> Path:
+    """20 s — over Seedance's 15 s reference ceiling.
+
+    Tiny and low-rate on purpose: it exists to be *rejected* before any inference happens,
+    so encode cost is all it ever costs.
+    """
+    path = tmp_path_factory.mktemp("clips") / "long.mp4"
+    return _make_clip(path, seconds=20.0, fps=6, width=96, height=96)
+
+
+@pytest.fixture(scope="session")
 def clip_letterboxed(tmp_path_factory) -> Path:
     """320×240 with a 40 px black matte top and bottom — content is 320×160.
 
