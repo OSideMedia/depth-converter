@@ -114,13 +114,33 @@ Append below. What adhered, what drifted, what prompt wording changed, and the c
 | Sword-duel_002 | ANNA + WILLIAM | **1080p** | $2.29 | **partial** | **+32%** | r = +0.721 |
 | Sword-duel_002 | ANNA + WILLIAM | **1080p** | $2.29 | **ignored** | **+31%** | r = **−0.056** |
 | Sword-duel_002 | ANNA + WILLIAM | **4K** | — | **adhered** | +6% | r = +0.747 |
+| Sword-duel_HD_001 | ANNA + WILLIAM | **1080p** (1080p ref) | $2.29 | **ignored** | **+22%** | r = +0.107 |
 
-Total spend ~$8.70. Per-kit detail lives in each kit's `result.json`.
+Total spend ~$11.00. Per-kit detail lives in each kit's `result.json`.
 
 ## THE RESOLUTION LAW — shoot 720p or 4K, never 1080p
 
-**1080p is 0 for 2. Every other tier is 4 for 4.** This is the single most operationally
-important thing the run found, and it cost $4.58 to learn.
+**1080p is 0 for 3. Every other tier is 4 for 4.** (Fisher exact p ≈ 0.029.) This is the
+single most operationally important thing these runs found, and it cost $6.87 to learn.
+
+**The HD-ref experiment (2026-07-25 evening) killed the two remaining alternative
+explanations.** A 1920×1080 depth ref of the identical window (energy 4.39 vs the 720p
+ref's 4.40) was fired at 1080p output, with the prompt explicitly saying "fighting with
+swords": r = +0.107 at zero lag with no peak at any lag, energy +22%, invented camera
+movement (share 0.27 vs the ref's 0.17). The swords appeared in the opening — the prompt's
+doing — then shrank to a dagger by 2 s and were gone by 3.5 s, the identical dissolution
+signature. So the failure is NOT ref-vs-output resolution mismatch and NOT prompt
+vagueness. Three seeds, two ref resolutions, two prompt phrasings: **the native 1080p lane
+itself mistreats video references.**
+
+**Why "4K works" does not contradict this** (research, 2026-07-25): the Seedance 1.0
+technical report documents the family as a cascade — base generation plus a diffusion
+refiner for higher tiers — and no 2.0 report exists. On Ark's price card 1080p carries a
+per-token SURCHARGE over 720p (+10%) while 4K is ~43% CHEAPER per token; that pricing shape
+fits 4K being super-resolution over a lower-res base pass. If so, "4K adhered" means "the
+base lane adhered again, then got upscaled" — 4K never disproved a resolution effect, it
+routed around the broken lane. Treat 4K as the premium master path and 720p as the
+iteration path; there is no reason left to buy 1080p for depth-motion work.
 
 Both 1080p generations, on independent seeds (`2133440621`, `197983437`), came back carrying
 **+31% and +32% more motion than the reference asked for**, with the props failing — swords

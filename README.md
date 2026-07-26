@@ -294,22 +294,27 @@ two identities, a location and the depth video, four channels holding at once.
 
 ### Shoot 720p or 4K. Never 1080p.
 
-The one hard operational rule the live run produced, and it cost $4.58 to find:
+The one hard operational rule the live runs produced, and it cost $6.87 to find:
 
 | tier | fires | motion vs reference | props |
 |---|---|---|---|
 | 720p | 3 | +8% | ✅ |
-| **1080p** | **2** | **+31%, +32%** | ❌ dissolve, then absent |
+| **1080p** | **3** | **+31%, +32%, +22%** | ❌ dissolve, shrink, vanish |
 | 4K | 1 | +6% | ✅ |
 
-Both 1080p runs, on independent seeds, came back carrying roughly a third more motion than the
-reference asked for — and over-following is what destroys pictures. A blade survives a lunge;
-it does not survive a lunge rendered 50% too fast. One of the two ignored the reference
-outright (r = −0.056) and invented its own push-in.
+**1080p is 0 for 3, across three seeds, two reference resolutions, and two prompt
+phrasings.** The third run was the controlled experiment: a 1920×1080 depth ref of the
+identical window (so ref-vs-output mismatch was off the table) with "fighting with swords"
+stated outright in the prompt — and it still ignored the reference (r = +0.107 at zero lag,
+no peak at any lag), ran +22% hot, invented camera movement, and dissolved the swords by
+3.5 s after the prompt conjured them for the opening. Over-following and prop loss are the
+lane's signature; a blade survives a lunge, not a lunge rendered a third too fast.
 
-4K is the proof that this is not a resolution gradient: a 720p reference driving nine times the
-pixels should be the worst case if coarseness were the mechanism, and it was the best. Whatever
-happens is inside the provider's 1080p lane and isn't visible from here.
+4K adhering does not contradict this: the Seedance family is documented (1.0 technical
+report) as a cascade — base generation plus a diffusion refiner — and Ark prices 4K ~43%
+cheaper per token than 1080p, which fits 4K being super-resolution over a lower-res base
+pass. "4K works" most likely means the base lane worked again and the refiner scaled it.
+The fault sits inside the provider's native 1080p lane and isn't fixable from here.
 
 **Judge adherence by motion ratio first, correlation second.** They disagreed on this run and
 the ratio was right: ranked by correlation, 4K sits barely above the broken 1080p; ranked by

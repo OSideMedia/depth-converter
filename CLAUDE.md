@@ -81,11 +81,12 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
 
 ## Firing a kit — the rules the live run produced
 
-- **720p or 4K. NEVER 1080p.** 1080p is 0/2 across independent seeds, both runs carrying
-  +31/32% more motion than the reference with the props failing (swords dissolving, then gone
-  entirely); one ignored the ref outright at r = −0.056. 720p (×3) and 4K held to +6–8% and
-  kept the swords. 4K rules out a resolution gradient — a 720p ref driving 9× the pixels
-  should be worst if coarseness were the cause, and it was best.
+- **720p or 4K. NEVER 1080p.** 1080p is 0/3 (three seeds, two ref resolutions, two prompt
+  phrasings; +31/32/22% excess motion, props dissolving every time; the HD-ref control run
+  ignored its ref at r = +0.107). Ref-resolution matching and explicit prompts do NOT fix
+  it — the native 1080p lane itself mistreats video refs. 4K adhering is consistent with 4K
+  being SR over a lower-res base pass (cascade architecture + its cheaper per-token price),
+  so iterate at 720p, master at 4K, never buy 1080p for depth-motion work.
 - **Judge by motion ratio first, correlation second.** They disagreed and the ratio was right:
   over-following is what smears bodies and dissolves props, and correlation cannot see it.
 - **One identity per body in the ref.** The ref sets the head-count and beats any text lock.
