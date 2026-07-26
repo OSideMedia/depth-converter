@@ -184,8 +184,10 @@ So any adherence report must lead with **energy ratio vs the reference**, and tr
 correlation as the timing companion. That ordering would have flagged the first 1080p as bad
 before it was watched.
 
-**How adherence was measured.** The generated video was run back through this same converter
-and its depth-space motion profile correlated against the reference's, bucket for bucket. The
+**How adherence was measured.** (Since v0.5.0 this is a command — `depthc compare <kit>
+<generated.mp4>` — with the ratio-first ordering built in.) The generated video was run back
+through this same converter and its depth-space motion profile correlated against the
+reference's, bucket for bucket. The
 figure is the Pearson r of the two energy envelopes at zero lag, with ±0.5 s and ±1.0 s lags
 computed as controls. On the two-character run the sparklines came out identical bar for bar —
 `▆▆▆▆█▆██▆▆` on both sides — and camera share matched at 0.16 against 0.17.

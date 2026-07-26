@@ -201,6 +201,25 @@ end of the reference is undefined. `depthc kit` snaps trims to that grid by defa
 (`--no-snap` to opt out), holding the in-point and moving the out-point where the source
 allows.
 
+### Measuring what a fire actually did
+
+```bash
+./.tools/uv run depthc compare Sword-duel_Two-fighters_002 ~/Desktop/oside-<id>.mp4
+```
+
+Runs the generated video back through the same depth pipeline and compares its motion
+envelope with the reference's — the exact Gate-4 measurement, computed identically every
+time instead of re-derived by hand per fire. The report leads with the **energy ratio**
+(over-following is what smears bodies and dissolves props, and correlation cannot see it —
+adherent runs sit at +6–8%, the three 1080p failures ran +22–32%), then the **zero-lag
+correlation** with ±0.5/±1.0 s controls (a real alignment peaks at zero and collapses
+off-zero), then the camera share on both sides. The ratio is computed on the overlapping
+duration only, so a generation that legally outruns a short ref doesn't poison it.
+
+It ends with a *suggested* verdict (`adhered` / `partial` / `ignored` / `late`) and a
+ready-to-paste `depthc result` command. The suggestion is a heuristic calibrated on the
+measured fires — watch the clip, then record what actually happened.
+
 ### Recording what a fire actually did
 
 ```bash

@@ -38,9 +38,12 @@ bundles for no real gain over doing it here.
    was caught by looking at a picture, not by any test. Every kit now ships `sheet.png` for
    exactly this.
 6. Report the tier, the motion energy, and the kit path.
-7. After Peter fires it: `depthc result <kit> --verdict … --notes "…"`. A generation is the
-   only evidence that says whether any of this works and it costs money; unrecorded, the
-   finding has to be re-derived. Ask for it.
+7. After Peter fires it: `depthc compare <kit> <downloaded.mp4>` measures adherence the
+   Gate-4 way (energy ratio FIRST, zero-lag correlation second, suggested verdict at the
+   end) — never re-derive that math by hand. Then `depthc result <kit> --verdict … --notes
+   "…"` with the measured numbers. A generation is the only evidence that says whether any
+   of this works and it costs money; unrecorded, the finding has to be re-derived. Ask for
+   both.
 
 ## Motion is the measurement that matters
 

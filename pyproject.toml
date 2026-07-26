@@ -1,6 +1,6 @@
 [project]
 name = "depthc"
-version = "0.4.0"
+version = "0.5.0"
 description = "Convert a reference clip into a Seedance-ready depth motion kit"
 readme = "README.md"
 requires-python = ">=3.11"

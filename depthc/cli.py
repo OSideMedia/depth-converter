@@ -715,6 +715,83 @@ def result(
 
 
 @app.command()
+def compare(
+    kit_name: str = typer.Argument(..., help="Kit folder name, or a path to one"),
+    generated: Path = typer.Argument(..., help="The video that came back from firing that kit"),
+    resolution: str = typer.Option("720p", "--resolution", help="Depth pass size for the generated clip"),
+    input_size: int = typer.Option(518, "--input-size", help="Inference short side, multiple of 14"),
+    precision: str = typer.Option("fp32", "--precision", help="fp32 | fp16"),
+    library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
+) -> None:
+    """Measure whether a generation followed its kit — energy ratio first, correlation second.
+
+    Runs the generated video back through the same depth pipeline and compares its motion
+    envelope with the reference's, the Gate-4 way, computed identically every time. The
+    ratio is judged FIRST (over-following is what destroys pictures and correlation cannot
+    see it), the zero-lag correlation second, and the human verdict last: watch the clip,
+    then record it with `depthc result`.
+    """
+    import numpy as np
+
+    from depthc import compare as comparelib, engine, kit as kitlib, motion as motionlib
+    from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
+
+    root = kitlib.library_root(library)
+    kit_dir = Path(kit_name) if Path(kit_name).is_dir() else root / kit_name
+    depth_path = kit_dir / "depth.mp4"
+    if not depth_path.is_file():
+        _die(f"No kit at {kit_dir} (expected a depth.mp4 inside)")
+
+    try:
+        ref_info = probe_file(depth_path)
+        ref_frames = read_frames(ref_info, fps=24.0)
+        ref_gray = ref_frames.mean(axis=3).astype(np.uint8)
+        ref_profile = motionlib.measure(ref_gray, 24.0)
+
+        gen_info = probe_file(generated)
+        typer.echo(f"{BOLD}{generated.name}{OFF}  {DIM}{gen_info.summary()}{OFF}")
+        size = target_size(gen_info, resolution)
+        frames = read_frames(gen_info, fps=24.0, size=size)
+
+        device = engine.pick_device()
+        if device == "cpu":
+            _warn("MPS unavailable — running on CPU. This will be slow.")
+        total = engine.expected_windows(frames.shape[0])
+        with typer.progressbar(length=total, label="depth") as bar:
+            seen = {"n": 0}
+
+            def on_window(done: int, _total: int) -> None:
+                bar.update(done - seen["n"])
+                seen["n"] = done
+
+            result = engine.infer(
+                frames, 24.0, input_size=input_size, precision=precision,
+                device=device, on_window=on_window,
+                on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}"),
+            )
+        gen_profile = motionlib.measure(result.frames, 24.0)
+    except VideoIOError as e:
+        _die(str(e))
+    except engine.NonFiniteDepth as e:
+        _die(str(e))
+    except KeyboardInterrupt:
+        typer.echo("\ncancelled", err=True)
+        raise typer.Exit(130)
+
+    comparison = comparelib.compare_profiles(ref_profile, gen_profile)
+    typer.echo("")
+    typer.echo(comparelib.render(comparison, kit_dir.name, generated.name))
+    typer.echo("")
+    typer.echo(f"{DIM}record it:{OFF}")
+    typer.echo(
+        f'{DIM}  ./.tools/uv run depthc result "{kit_name}" --verdict {comparison.suggestion} '
+        f'--surface oside --seconds {comparison.overlap_seconds:g} \\\n'
+        f'      --notes "ratio {comparison.ratio if comparison.ratio is not None else "n/a"}'
+        f' r0={comparison.r0 if comparison.r0 is not None else "n/a"} — <what you saw>"{OFF}'
+    )
+
+
+@app.command()
 def ui(
     port: int = typer.Option(7861, "--port", help="Chosen to avoid OSIDE's dev server on 3000"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a tab"),
