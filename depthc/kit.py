@@ -216,16 +216,25 @@ def render_prompt(
     )
 
     body = body.replace(BINDING_OPEN + "\n", "").replace(BINDING_CLOSE + "\n", "")
-    return body.format(
-        kit_name=kit_name,
-        duration=duration,
-        width=width,
-        height=height,
-        fps=fps,
-        version=__version__,
-        suggested_output=suggested_output_seconds(duration),
-        still_guidance=still_guidance,
-    )
+    try:
+        return body.format(
+            kit_name=kit_name,
+            duration=duration,
+            width=width,
+            height=height,
+            fps=fps,
+            version=__version__,
+            suggested_output=suggested_output_seconds(duration),
+            still_guidance=still_guidance,
+        )
+    except (KeyError, IndexError, ValueError) as e:
+        # str.format treats every brace as a placeholder, so a template carrying literal
+        # JSON (a plausible shape for a future Seedance dialect) dies here — after the
+        # paid inference, if nothing checked it earlier. Name the file and the fix.
+        raise ValueError(
+            f"templates/{dialect}.txt is not renderable ({e!r}): literal {{ or }} must be "
+            f"doubled ({{{{ }}}}), and placeholders must be from the documented set."
+        ) from e
 
 
 def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False) -> str:

@@ -10,6 +10,10 @@ from typing import Optional, Tuple
 import typer
 
 from depthc import __version__
+# Deliberately imported eagerly (it is torch-free): SetupIncomplete is the most likely
+# FIRST-run failure, and every command that loads the model must turn it into its
+# hand-written "Run: bash scripts/setup.sh" message rather than a traceback.
+from depthc.vendor_path import SetupIncomplete
 
 app = typer.Typer(
     add_completion=False,
@@ -100,6 +104,21 @@ def _convert(
     if not quiet:
         typer.echo(f"{BOLD}{info.path.name}{OFF}  {DIM}{info.summary()}{OFF}")
 
+    # An impossible trim is a typo, not a request. Rejected BEFORE snapping: snap_trim
+    # exists to land a legal span on the output grid, and given a negative span or a
+    # window past the end of the file it would instead manufacture a valid-looking clip
+    # the user never asked for (--trim 10 5 became a 10-14s kit; --trim 20 25 on a 15s
+    # source relocated to 10-15s).
+    if trim:
+        start, end = trim
+        if start < 0 or end <= start:
+            _die(f"--trim {start:g} {end:g} is not a window (need 0 ≤ start < end).")
+        if end > info.duration + 0.05:
+            _die(
+                f"--trim {start:g} {end:g} runs past the end of the clip "
+                f"({info.duration:.2f}s)."
+            )
+
     # The 15s law is enforced on the trim AS GIVEN, before snapping. Snapping exists to land
     # a legal span on the output grid, never to shorten an illegal one: the old order let
     # snap_trim clamp a 20s trim to 15s silently, so this gate could not fire and
@@ -182,7 +201,7 @@ def probe(input: Path = typer.Argument(..., help="Video file to inspect")) -> No
     try:
         info = probe_file(input)
         matte = detect_crop(info)
-    except VideoIOError as e:
+    except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
 
     typer.echo(f"{BOLD}{info.path.name}{OFF}")
@@ -236,13 +255,29 @@ def convert(
     from depthc import engine
     from depthc.video_io import VideoIOError, encode_gray, mux_audio, side_by_side
 
+    # Every encode runs ffmpeg -y, so a collision with the source is silent and fatal:
+    # `--out clip.mp4` on clip.mp4 would replace the original footage with its depth pass.
+    # Checked against every path this command writes, before any inference is paid for.
+    out_path = Path(out) if out else input.with_name(f"{input.stem}_depth.mp4")
+    source = input.resolve()
+    writes = [out_path]
+    if keep_audio:
+        writes.append(out_path.with_name(f"{out_path.stem}_audio{out_path.suffix}"))
+    if preview:
+        writes.append(out_path.with_name(f"{out_path.stem}_preview.mp4"))
+    for path in writes:
+        if path.resolve() == source:
+            _die(
+                f"--out would overwrite the source clip itself ({input.name}). "
+                f"Pick a different output name."
+            )
+
     try:
         job = _convert(
             input, trim=trim, resolution=resolution, fps=fps, crop=crop, invert=invert,
             input_size=input_size, precision=precision, allow_long=allow_long,
         )
 
-        out_path = Path(out) if out else input.with_name(f"{input.stem}_depth.mp4")
         encode_gray(job.result.frames, out_path, job.result.fps)
 
         if keep_audio:
@@ -258,7 +293,7 @@ def convert(
             side_by_side(job.frames, job.result.frames, preview_path, job.result.fps)
             typer.echo(f"  preview  {preview_path}")
 
-    except VideoIOError as e:
+    except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
     except engine.NonFiniteDepth as e:
         _die(f"{e}\n  --precision fp32 is the default; if that also fails, the MPS backend "
@@ -346,6 +381,12 @@ def kit(
             _die(f"--still expects auto, first, or a frame number (got {still!r})")
     try:
         kitlib.render_binding(dialect)
+        # Render the WHOLE template with stand-in values, not just the binding block: a
+        # stray brace anywhere in it kills render_prompt after the inference otherwise.
+        kitlib.render_prompt(
+            kit_name="preflight", duration=5.0, width=1280, height=720, fps=24.0,
+            still_has_real_faces=False, dialect=dialect,
+        )
     except (FileNotFoundError, ValueError) as e:
         _die(str(e))
 
@@ -371,6 +412,7 @@ def kit(
             _warn(f"depth.mp4 exceeded {checks.MAX_FILE_MB:g} MB — re-encoding at crf 20.")
             encode_gray(job.result.frames, paths.depth, job.result.fps, crf=20)
 
+        audio_kept = False
         if keep_audio and job.info.has_audio:
             tmp = paths.depth.with_name("depth_audio.mp4")
             mux_audio(paths.depth, job.info.path, tmp, trim=trim)
@@ -382,6 +424,7 @@ def kit(
                 )
             else:
                 tmp.replace(paths.depth)
+                audio_kept = True
         elif keep_audio:
             _warn("--keep-audio: source has no audio track.")
 
@@ -405,7 +448,14 @@ def kit(
             for name, (transform, description) in motionlib.VARIANTS.items():
                 frames = transform(job.result.frames)
                 filename = f"{name}.mp4"
-                encode_gray(frames, paths.variants / filename, job.result.fps)
+                variant_path = paths.variants / filename
+                encode_gray(frames, variant_path, job.result.fps)
+                # Same size gate as the base ref: every variant is presented as
+                # uploadable, and Seedance's cap does not care which file it was.
+                # (Edges especially — Canny flicker compresses badly.)
+                if variant_path.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
+                    _warn(f"variants/{filename} exceeded {checks.MAX_FILE_MB:g} MB — re-encoding at crf 20.")
+                    encode_gray(frames, variant_path, job.result.fps, crf=20)
                 variant_blocks.append({
                     "name": name,
                     "filename": filename,
@@ -467,8 +517,9 @@ def kit(
                 "precision": job.result.dtype,
                 "crop": crop,
                 # What actually happened, not what was asked: --keep-audio on a silent
-                # source keeps nothing, and a rebuild from kit.json must not claim it did.
-                "keepAudio": keep_audio and job.info.has_audio,
+                # source keeps nothing — and neither does a mux discarded for pushing the
+                # file over the size cap. A rebuild from kit.json must not claim either.
+                "keepAudio": audio_kept,
             },
             report=report,
             dialect=dialect,
@@ -488,7 +539,7 @@ def kit(
         if zip_output:
             kitlib.zip_kit(kit_dir)
 
-    except (VideoIOError, FileNotFoundError, ValueError) as e:
+    except (VideoIOError, FileNotFoundError, ValueError, SetupIncomplete) as e:
         _abandon_kit(kit_dir)
         _die(str(e))
     except engine.NonFiniteDepth as e:
@@ -593,7 +644,7 @@ def scout(
                 input, target, scout_fps=scout_fps, long_edge=long_edge, on_window=on_window
             )
         _print_scout(input, result, indent="  ")
-    except VideoIOError as e:
+    except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
     except KeyboardInterrupt:
         typer.echo("\ncancelled", err=True)
@@ -657,7 +708,7 @@ def inbox(
             try:
                 result = motionlib.scout_clip(clip, target)
                 _print_scout(clip, result)
-            except (VideoIOError, ValueError) as e:
+            except (VideoIOError, ValueError, SetupIncomplete) as e:
                 typer.echo(f"    {YELLOW}scout failed:{OFF} {e}")
         typer.echo()
 
@@ -718,6 +769,10 @@ def result(
 def compare(
     kit_name: str = typer.Argument(..., help="Kit folder name, or a path to one"),
     generated: Path = typer.Argument(..., help="The video that came back from firing that kit"),
+    variant: Optional[str] = typer.Option(
+        None, "--variant",
+        help="Which ref was actually fired (contrast|invert|midgrey|edges); default the base",
+    ),
     resolution: str = typer.Option("720p", "--resolution", help="Depth pass size for the generated clip"),
     input_size: int = typer.Option(518, "--input-size", help="Inference short side, multiple of 14"),
     precision: str = typer.Option("fp32", "--precision", help="fp32 | fp16"),
@@ -731,27 +786,61 @@ def compare(
     see it), the zero-lag correlation second, and the human verdict last: watch the clip,
     then record it with `depthc result`.
     """
-    import numpy as np
-
     from depthc import compare as comparelib, engine, kit as kitlib, motion as motionlib
-    from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
+    from depthc.video_io import (
+        VideoIOError, detect_crop, probe as probe_file, read_frames, target_size,
+    )
 
     root = kitlib.library_root(library)
     kit_dir = Path(kit_name) if Path(kit_name).is_dir() else root / kit_name
-    depth_path = kit_dir / "depth.mp4"
-    if not depth_path.is_file():
-        _die(f"No kit at {kit_dir} (expected a depth.mp4 inside)")
+    if variant:
+        depth_path = kit_dir / "variants" / f"{variant}.mp4"
+        if not depth_path.is_file():
+            _die(
+                f"No {variant!r} variant in {kit_dir} — compare against the ref that was "
+                f"actually fired (this kit has: "
+                f"{', '.join(sorted(p.stem for p in (kit_dir / 'variants').glob('*.mp4'))) or 'no variants'})"
+            )
+    else:
+        depth_path = kit_dir / "depth.mp4"
+        if not depth_path.is_file():
+            _die(f"No kit at {kit_dir} (expected a depth.mp4 inside)")
 
     try:
+        # The ref decode is capped: the motion metric lives on a 160 px analysis grid, so
+        # decoding a 4K master at native size buys nothing and costs gigabytes.
+        # measure() takes RGB directly — no full-array float64 channel-mean intermediate.
         ref_info = probe_file(depth_path)
-        ref_frames = read_frames(ref_info, fps=24.0)
-        ref_gray = ref_frames.mean(axis=3).astype(np.uint8)
-        ref_profile = motionlib.measure(ref_gray, 24.0)
+        ref_size = target_size(ref_info, "480p")
+        ref_frames = read_frames(ref_info, fps=24.0, size=ref_size)
+        ref_profile = motionlib.measure(ref_frames, 24.0)
 
         gen_info = probe_file(generated)
         typer.echo(f"{BOLD}{generated.name}{OFF}  {DIM}{gen_info.summary()}{OFF}")
-        size = target_size(gen_info, resolution)
-        frames = read_frames(gen_info, fps=24.0, size=size)
+        # The generation gets the same courtesies the kit build gave the reference:
+        # matte bars stripped (a letterboxed download otherwise measures its bars as the
+        # brightest moving surface), and the decode trimmed to the ref's length so the
+        # depth normalisation covers only the stretch actually being judged — an extreme
+        # in an excluded tail must not compress the greys of the overlap.
+        gen_rect = detect_crop(gen_info)
+        if gen_rect:
+            typer.echo(f"{DIM}matte on the generation: cropping to {gen_rect.width}×{gen_rect.height}{OFF}")
+        gen_full_seconds = gen_info.duration
+        gen_trim = (0.0, ref_info.duration) if gen_info.duration > ref_info.duration else None
+        size = target_size(gen_info, resolution, crop=gen_rect)
+        frames = read_frames(gen_info, trim=gen_trim, fps=24.0, size=size, crop=gen_rect)
+
+        geometry_note = None
+        ref_aspect = ref_info.width / ref_info.height
+        gen_w, gen_h = (
+            (gen_rect.width, gen_rect.height) if gen_rect else (gen_info.width, gen_info.height)
+        )
+        gen_aspect = gen_w / gen_h
+        if abs(gen_aspect - ref_aspect) / ref_aspect > 0.02:
+            geometry_note = (
+                f"ref framed {ref_info.width}×{ref_info.height} "
+                f"({ref_aspect:.2f}:1) vs generation {gen_w}×{gen_h} ({gen_aspect:.2f}:1)"
+            )
 
         device = engine.pick_device()
         if device == "cpu":
@@ -770,7 +859,7 @@ def compare(
                 on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}"),
             )
         gen_profile = motionlib.measure(result.frames, 24.0)
-    except VideoIOError as e:
+    except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
     except engine.NonFiniteDepth as e:
         _die(str(e))
@@ -778,9 +867,17 @@ def compare(
         typer.echo("\ncancelled", err=True)
         raise typer.Exit(130)
 
-    comparison = comparelib.compare_profiles(ref_profile, gen_profile)
+    comparison = comparelib.compare_profiles(
+        ref_profile, gen_profile,
+        gen_full_seconds=gen_full_seconds,
+        geometry_note=geometry_note,
+    )
     typer.echo("")
-    typer.echo(comparelib.render(comparison, kit_dir.name, generated.name))
+    typer.echo(comparelib.render(
+        comparison,
+        kit_dir.name + (f" [{variant}]" if variant else ""),
+        generated.name,
+    ))
     typer.echo("")
     typer.echo(f"{DIM}record it:{OFF}")
     typer.echo(

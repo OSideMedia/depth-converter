@@ -214,7 +214,16 @@ time instead of re-derived by hand per fire. The report leads with the **energy 
 adherent runs sit at +6–8%, the three 1080p failures ran +22–32%), then the **zero-lag
 correlation** with ±0.5/±1.0 s controls (a real alignment peaks at zero and collapses
 off-zero), then the camera share on both sides. The ratio is computed on the overlapping
-duration only, so a generation that legally outruns a short ref doesn't poison it.
+duration only — the generation's decode is trimmed to the ref's length before inference,
+so neither an excluded tail's motion nor its depth extremes can poison the numbers.
+
+The generation gets the same geometry courtesies the kit build gave the reference: matte
+bars are detected and stripped, and if the framing still differs from the ref's (a 2.39:1
+kit fired into a 16:9 output), the report flags the ratio as framing-biased and lets the
+timing correlation carry the verdict — the frame-share energy metric moves ~34% on that
+aspect change alone, more than the entire adhered-vs-failed band. If you fired a variant
+rather than the base ref, say so: `--variant edges` compares against the file that was
+actually uploaded.
 
 It ends with a *suggested* verdict (`adhered` / `partial` / `ignored` / `late`) and a
 ready-to-paste `depthc result` command. The suggestion is a heuristic calibrated on the

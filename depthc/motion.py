@@ -362,7 +362,12 @@ class MotionProfile:
             ]
         if self.deltas.size < 3:
             return []
-        limit = max(SPIKE_FLOOR, self.median * SPIKE_MULTIPLE)
+        # The multiple self-normalises (deltas and median scale with the frame interval
+        # together) but the absolute floor does not: calibrated at 24 fps, it sits ~2.5×
+        # too high at 60 fps, where per-gap deltas shrink by the same factor — a real cut
+        # would slide under an unscaled 8.0 and ship inside the ref undetected.
+        floor = SPIKE_FLOOR * (24.0 / self.fps) if self.fps > 0 else SPIKE_FLOOR
+        limit = max(floor, self.median * SPIKE_MULTIPLE)
         return [round(i / self.fps, 2) for i, d in enumerate(self.deltas) if d > limit]
 
     def as_dict(self) -> dict:

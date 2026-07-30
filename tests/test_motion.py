@@ -377,3 +377,20 @@ def test_contact_sheet_handles_fewer_frames_than_tiles(tmp_path):
 def test_contact_sheet_refuses_an_empty_clip(tmp_path):
     with pytest.raises(ValueError):
         m.contact_sheet(np.zeros((0, 90, 160), dtype=np.uint8), 24.0, tmp_path / "x.png")
+
+
+def test_spike_floor_scales_with_fps():
+    """2026-07-30 council audit pin: the absolute SPIKE_FLOOR was calibrated at 24 fps.
+    At 60 fps per-gap deltas shrink by 24/60, so an unscaled 8.0 floor sat ~2.5× too
+    high and a real hard cut shipped inside the ref undetected."""
+    # A quiet 60 fps clip with one cut-sized jump: 4.0 is a clear cut at 60 fps
+    # (equivalent to 10.0 at 24 fps) yet sits under the unscaled floor of 8.0.
+    deltas = np.full(120, 0.4, dtype=np.float32)
+    deltas[60] = 4.0
+    profile = m.MotionProfile(fps=60.0, deltas=deltas)
+    assert profile.spikes == [pytest.approx(1.0)]
+
+    # The same shape expressed at 24 fps agrees — the rule is rate-invariant now.
+    deltas24 = np.full(48, 1.0, dtype=np.float32)
+    deltas24[24] = 10.0
+    assert m.MotionProfile(fps=24.0, deltas=deltas24).spikes == [pytest.approx(1.0)]

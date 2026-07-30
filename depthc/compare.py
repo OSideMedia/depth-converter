@@ -79,6 +79,11 @@ class Comparison:
     gen_camera: float | None = None
     suggestion: str = "partial"
     reasons: list[str] = field(default_factory=list)
+    # Set when the two clips were not measured on comparable framing (aspect mismatch).
+    # The frame-share energy metric is biased by framing alone (~34% between 2.39:1 and
+    # 16:9 — motion.py's UNITS note), so the ratio must not drive the verdict; the lag
+    # correlation compares each envelope's SHAPE against itself over time and survives.
+    geometry_note: str | None = None
 
     @property
     def r0(self) -> float | None:
@@ -102,6 +107,7 @@ class Comparison:
             "genCameraShare": self.gen_camera,
             "suggestion": self.suggestion,
             "reasons": self.reasons,
+            "geometryNote": self.geometry_note,
         }
 
 
@@ -118,23 +124,51 @@ def _pearson(a: np.ndarray, b: np.ndarray) -> float | None:
     return round(float(np.corrcoef(a, b)[0, 1]), 3)
 
 
-def _buckets(profile: MotionProfile, seconds: float) -> np.ndarray:
-    """The 0.5 s energy envelope over the first `seconds` of a profile."""
-    step = max(1, int(round(BUCKET_SECONDS * profile.fps)))
+def _overlap_deltas(profile: MotionProfile, seconds: float) -> np.ndarray:
+    """The raw per-gap deltas over the first `seconds` of a profile."""
     limit = int(round(seconds * profile.fps))
-    deltas = profile.deltas[:limit]
+    return profile.deltas[:limit]
+
+
+def _buckets(profile: MotionProfile, seconds: float) -> np.ndarray:
+    """The 0.5 s energy envelope over the first `seconds` of a profile.
+
+    FULL buckets only. A clip is almost never an exact multiple of the bucket, and the
+    trailing partial bucket — sometimes a single frame gap — used to vote in the lag
+    correlation with the same weight as twelve. The envelope exists for TIMING; the energy
+    ratio is computed from the raw deltas, where every frame gap already weighs equally.
+    """
+    step = max(1, int(round(BUCKET_SECONDS * profile.fps)))
+    deltas = _overlap_deltas(profile, seconds)
     return np.array(
-        [float(deltas[i:i + step].mean()) for i in range(0, deltas.size, step)],
+        [float(deltas[i:i + step].mean()) for i in range(0, deltas.size - step + 1, step)],
         dtype=np.float64,
     )
 
 
-def compare_profiles(ref: MotionProfile, gen: MotionProfile) -> Comparison:
+def compare_profiles(
+    ref: MotionProfile,
+    gen: MotionProfile,
+    *,
+    ref_full_seconds: float | None = None,
+    gen_full_seconds: float | None = None,
+    geometry_note: str | None = None,
+) -> Comparison:
     """Compare a generation's depth-motion profile against its reference's.
 
     Both profiles must be measured at the same fps (the kit pipeline guarantees 24); this
     is asserted rather than resampled, because resampling is exactly where the historical
     ratio bug came from.
+
+    The energy ratio comes from the RAW deltas over the overlap — every frame gap weighs
+    equally, so a clip that is not a whole multiple of the bucket cannot skew it. Buckets
+    exist only for the lag correlation, and only full ones vote there.
+
+    `ref_full_seconds` / `gen_full_seconds`: the clips' true durations when the caller
+    decoded less than the whole file (the CLI trims the generation's decode to the ref's
+    length so normalisation happens over the overlap only — a depth extreme in an excluded
+    tail must not compress the greys of the part being judged). The tails in the report
+    stay honest either way.
     """
     if abs(ref.fps - gen.fps) > 0.01:
         raise ValueError(
@@ -143,13 +177,17 @@ def compare_profiles(ref: MotionProfile, gen: MotionProfile) -> Comparison:
         )
 
     overlap = min(ref.seconds, gen.seconds)
+    rd = _overlap_deltas(ref, overlap)
+    gd = _overlap_deltas(gen, overlap)
+    m = min(rd.size, gd.size)
+    rd, gd = rd[:m], gd[:m]
     rb = _buckets(ref, overlap)
     gb = _buckets(gen, overlap)
     n = min(rb.size, gb.size)
     rb, gb = rb[:n], gb[:n]
 
-    ref_energy = round(float(rb.mean()), 3) if n else 0.0
-    gen_energy = round(float(gb.mean()), 3) if n else 0.0
+    ref_energy = round(float(rd.mean()), 3) if m else 0.0
+    gen_energy = round(float(gd.mean()), 3) if m else 0.0
     ratio = round(gen_energy / ref_energy, 3) if ref_energy > 0 else None
 
     lags = []
@@ -160,30 +198,48 @@ def compare_profiles(ref: MotionProfile, gen: MotionProfile) -> Comparison:
         b = gb[k:] if k >= 0 else gb[: n + k]
         lags.append(LagPoint(seconds=k * BUCKET_SECONDS, r=_pearson(a, b)))
 
+    # One ceiling for both sparklines: each scaled to its own peak, a +30% over-follow
+    # draws bars identical to the ref's — the one picture in the report would hide the
+    # very amplitude difference the report says to judge first.
+    spark_top = float(max(rb.max() if n else 0.0, gb.max() if n else 0.0)) or None
+    ref_seconds = ref.seconds if ref_full_seconds is None else ref_full_seconds
+    gen_seconds = gen.seconds if gen_full_seconds is None else gen_full_seconds
+
     comparison = Comparison(
         ref_energy=ref_energy,
         gen_energy=gen_energy,
         ratio=ratio,
         overlap_seconds=round(overlap, 2),
-        ref_tail_seconds=round(max(0.0, ref.seconds - overlap), 2),
-        gen_tail_seconds=round(max(0.0, gen.seconds - overlap), 2),
-        ref_spark=sparkline(list(rb)),
-        gen_spark=sparkline(list(gb)),
+        ref_tail_seconds=round(max(0.0, ref_seconds - overlap), 2),
+        gen_tail_seconds=round(max(0.0, gen_seconds - overlap), 2),
+        ref_spark=sparkline(list(rb), ceiling=spark_top),
+        gen_spark=sparkline(list(gb), ceiling=spark_top),
         lags=lags,
         ref_camera=ref.camera,
         gen_camera=gen.camera,
+        geometry_note=geometry_note,
     )
     comparison.suggestion, comparison.reasons = _suggest(comparison)
     return comparison
 
 
 def _suggest(c: Comparison) -> tuple[str, list[str]]:
-    """The heuristic verdict — ratio first, correlation second, human always last."""
+    """The heuristic verdict — ratio first, correlation second, human always last.
+
+    Unless the geometries were not comparable: then the ratio is framing-biased and only
+    the correlation votes, and the reasons say so up front.
+    """
     reasons: list[str] = []
     r0, best = c.r0, c.best_lag
 
     over = c.ratio is not None and c.ratio > RATIO_HIGH
     under = c.ratio is not None and c.ratio < RATIO_LOW
+    if c.geometry_note:
+        over = under = False
+        reasons.append(
+            f"energy ratio NOT judged: {c.geometry_note} — the frame-share metric is "
+            f"biased by framing alone; timing correlation carries the verdict"
+        )
     if over:
         reasons.append(
             f"{(c.ratio - 1) * 100:+.0f}% energy — over-following, the artifact signature "
@@ -241,6 +297,8 @@ def render(c: Comparison, kit_name: str, generated_name: str, colour: bool = Tru
 
     if c.ratio is None:
         band, tint = "reference envelope is flat", red
+    elif c.geometry_note:
+        band, tint = "RATIO UNRELIABLE — framing mismatch", red
     elif c.ratio > RATIO_HIGH:
         band, tint = "OVER-FOLLOWING — the artifact signature", red
     elif c.ratio < RATIO_LOW:
@@ -259,6 +317,10 @@ def render(c: Comparison, kit_name: str, generated_name: str, colour: bool = Tru
         ),
         f"           {dim}judge this first: over-following smears bodies and dissolves "
         f"props, and correlation cannot see it{off}",
+        *(
+            [f"  GEOMETRY {red}{c.geometry_note}{off}"]
+            if c.geometry_note else []
+        ),
         "  TIMING   "
         + " · ".join(
             (f"{bold}" if p.seconds == 0 else "")

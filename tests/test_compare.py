@@ -107,3 +107,50 @@ def test_render_is_plain_text_without_colour_and_leads_with_energy():
     assert "ENERGY" in lines[1]  # ratio before timing, always
     assert "TIMING" in text
     assert "suggested verdict" in text
+
+
+# ------------------------------------------------------- 2026-07-30 council audit pins
+
+def test_partial_tail_bucket_cannot_skew_the_ratio():
+    """A 119-delta clip (every real 5s/24fps decode) must not weight its 11-delta tail
+    like a full bucket. Energy comes from the raw deltas; buckets are timing-only."""
+    deltas = np.repeat(np.array(ENVELOPE, dtype=np.float32), STEP)[:-1]  # 119 deltas
+    ref = MotionProfile(fps=24.0, deltas=deltas)
+    gen = MotionProfile(fps=24.0, deltas=deltas * 1.05)
+    comp = c.compare_profiles(ref, gen)
+    assert comp.ratio == pytest.approx(1.05, abs=0.005)  # the true per-gap ratio
+    # and the envelope kept only FULL buckets: 119 // 12 = 9
+    assert len(c._buckets(ref, ref.seconds)) == 9
+
+
+def test_geometry_note_takes_the_ratio_out_of_the_verdict():
+    """An aspect mismatch biases frame-share energy ~34% (motion.py UNITS): a perfectly
+    adherent generation must not be downgraded for a ratio the framing manufactured."""
+    biased = [v * 0.74 for v in ENVELOPE]  # the measured 2.39:1-vs-16:9 shape
+    plain = c.compare_profiles(profile(ENVELOPE), profile(biased))
+    assert plain.suggestion != "adhered"  # without the note, the bias reads as under-following
+
+    noted = c.compare_profiles(
+        profile(ENVELOPE), profile(biased),
+        geometry_note="ref 2.39:1 vs generation 16:9",
+    )
+    assert noted.suggestion == "adhered"
+    assert any("NOT judged" in reason for reason in noted.reasons)
+    assert "RATIO UNRELIABLE" in c.render(noted, "Kit_001", "gen.mp4", colour=False)
+
+
+def test_sparklines_share_one_ceiling():
+    """A +30% over-follow used to draw glyph-identical bars (each spark scaled to its
+    own peak) directly under the line saying amplitude is what to judge first."""
+    hot = [v * 1.3 for v in ENVELOPE]
+    comp = c.compare_profiles(profile(ENVELOPE), profile(hot))
+    assert comp.ref_spark != comp.gen_spark
+
+
+def test_gen_full_seconds_keeps_the_reported_tail_honest():
+    """The CLI trims the generation's decode to the ref's length; the report must still
+    say how far the generation actually ran past the reference."""
+    comp = c.compare_profiles(
+        profile(ENVELOPE), profile(ENVELOPE), gen_full_seconds=8.0
+    )
+    assert comp.gen_tail_seconds == pytest.approx(8.0 - comp.overlap_seconds, abs=0.05)

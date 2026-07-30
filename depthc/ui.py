@@ -214,6 +214,7 @@ def _convert(
     if not video:
         return (*blank[:5], "Drop a clip in first.")
 
+    kit_dir = None  # allocated mid-build; the failure handlers below must clean it up
     try:
         info = probe(video)
 
@@ -238,6 +239,19 @@ def _convert(
                 f"Trim to a single motion signal — 3–8s follows best.",
             )
 
+        warnings: list[str] = []
+        # Same snap rule as the CLI, same order (after the 15s law): a ref that is not a
+        # whole number of seconds guarantees the generation runs past its end. The gate
+        # must not depend on which surface produced the kit — a slider lands on 4.8s just
+        # as easily as a typed trim does.
+        window = trim if trim else (0.0, info.duration)
+        snapped, snap_note = checks.snap_trim(window[0], window[1], info.duration)
+        if snap_note:
+            trim = snapped
+            start, end = snapped
+            span = end - start
+            warnings.append(snap_note)
+
         progress(0.02, desc="probing")
         crop_rect = (
             None if crop_mode == "none"
@@ -255,7 +269,6 @@ def _convert(
         def on_window(done: int, _t: int) -> None:
             progress(0.1 + 0.75 * (done / max(1, total)), desc=f"depth {done}/{total}")
 
-        warnings: list[str] = []
         result = engine.infer(
             frames, out_fps, input_size=int(input_size), precision=precision,
             invert=invert, on_window=on_window, on_warn=warnings.append,
@@ -274,6 +287,7 @@ def _convert(
         if paths.depth.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
             warnings.append(f"depth.mp4 over {checks.MAX_FILE_MB:g} MB — re-encoded at crf 20.")
             encode_gray(result.frames, paths.depth, result.fps, crf=20)
+        audio_kept = False
         if keep_audio and info.has_audio:
             tmp = paths.depth.with_name("depth_audio.mp4")
             from depthc.video_io import mux_audio
@@ -287,6 +301,7 @@ def _convert(
                 )
             else:
                 tmp.replace(paths.depth)
+                audio_kept = True
 
         still_index = None if still_mode == "auto" else 0
         chosen = kitlib.write_still(frames, paths.still, index=still_index)
@@ -329,7 +344,9 @@ def _convert(
             settings={
                 "resolution": resolution, "fps": fps_mode, "invert": invert,
                 "inputSize": int(input_size), "precision": result.dtype,
-                "crop": crop_mode, "keepAudio": keep_audio,
+                # What actually happened, not what was asked — a rebuild from kit.json
+                # must not claim an audio track the file does not carry (CLI parity).
+                "crop": crop_mode, "keepAudio": audio_kept,
             },
             report=report, device=result.device, elapsed=result.elapsed,
             motion=motionlib.manifest_block(depth_motion, source_motion),
@@ -362,11 +379,26 @@ def _convert(
         )
 
     except (VideoIOError, FileNotFoundError, ValueError) as e:
+        _abandon_kit(kit_dir)
         return (*blank[:5], f"{e}")
     except engine.NonFiniteDepth as e:
+        _abandon_kit(kit_dir)
         return (*blank[:5], f"{e}")
     except Exception:  # noqa: BLE001 - a UI must never die silently on an unknown fault
+        _abandon_kit(kit_dir)
         return (*blank[:5], f"Unexpected error:\n{traceback.format_exc(limit=3)}")
+
+
+def _abandon_kit(kit_dir) -> None:
+    """Remove a kit folder whose manifest never got written (CLI parity).
+
+    A kit without kit.json is invisible to the library and INDEX.txt but still burns its
+    numbered slot and looks like a real kit in Finder.
+    """
+    import shutil
+
+    if kit_dir is not None and kit_dir.is_dir() and not (kit_dir / kitlib.KIT_MANIFEST).exists():
+        shutil.rmtree(kit_dir, ignore_errors=True)
 
 
 # ------------------------------------------------------------------------------ library
@@ -479,8 +511,9 @@ def build() -> gr.Blocks:
                             reveal_btn = gr.Button("Reveal in Finder")
                             zip_note = gr.Markdown(
                                 '<span class="depthc-note">Kits land in <b>Outbox/</b>. '
-                                "Take <b>depth.mp4</b> and <b>binding.txt</b> to OSIDE; "
-                                "the kit's README.txt has the steps.</span>"
+                                "OSIDE upload uses <b>depth.mp4</b> only — no binding "
+                                "phrase (binding.txt is for other surfaces); the kit's "
+                                "README.txt has the steps.</span>"
                             )
 
                 video.change(_probe_readout, video, [readout, start, end])
