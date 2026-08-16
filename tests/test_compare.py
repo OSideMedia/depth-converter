@@ -154,3 +154,86 @@ def test_gen_full_seconds_keeps_the_reported_tail_honest():
         profile(ENVELOPE), profile(ENVELOPE), gen_full_seconds=8.0
     )
     assert comp.gen_tail_seconds == pytest.approx(8.0 - comp.overlap_seconds, abs=0.05)
+
+
+# ------------------------------------------------- structure layers: regions + camera path
+
+from depthc import motion as m  # noqa: E402
+from tests.test_motion import moving_clip, panning_clip, still_clip  # noqa: E402
+
+
+def _mirror(clip: np.ndarray) -> np.ndarray:
+    return clip[:, :, ::-1].copy()
+
+
+def test_the_envelope_cannot_tell_a_crossing_from_its_mirror_but_regions_can():
+    """The blindness the layer was built for: same beat, opposite direction."""
+    clip = moving_clip(72, speed=5)
+    ref = m.measure(clip, 24.0, with_flow=False)
+    gen = m.measure(_mirror(clip), 24.0, with_flow=False)
+    comp = c.compare_profiles(ref, gen)
+    # Full-frame: indistinguishable — ratio 1.0, r0 1.0, "adhered".
+    assert comp.ratio == pytest.approx(1.0, abs=0.01)
+    assert comp.r0 == pytest.approx(1.0, abs=0.01)
+    assert comp.suggestion == "adhered"
+    # Regions: the mirrored control wins and the report names it.
+    assert comp.structure_r is not None and comp.mirror_r is not None
+    assert comp.mirror_r > comp.structure_r
+    assert comp.mirrored
+    assert any("MIRRORED" in r for r in comp.reasons)
+    # ...without moving the calibrated verdict.
+    assert comp.suggestion == "adhered"
+
+
+def test_the_same_crossing_agrees_with_itself_in_every_region():
+    clip = moving_clip(72, speed=5)
+    ref = m.measure(clip, 24.0, with_flow=False)
+    comp = c.compare_profiles(ref, m.measure(clip.copy(), 24.0, with_flow=False))
+    assert comp.structure_r == pytest.approx(1.0, abs=0.01)
+    assert not comp.mirrored
+    # Weights sum to one over the cells the ref actually used.
+    assert sum(sum(row) for row in comp.region_weights) == pytest.approx(1.0, abs=0.01)
+
+
+def test_regions_are_skipped_on_bare_profiles_and_when_switched_off():
+    bare = profile(ENVELOPE)
+    assert c.compare_profiles(bare, bare).region_r is None
+    clip = moving_clip(48, speed=5)
+    ref = m.measure(clip, 24.0, with_flow=False)
+    assert c.compare_profiles(ref, ref, regions=False).region_r is None
+    assert c.compare_profiles(ref, ref, camera_path=False).ref_path is None
+
+
+def test_opposite_pans_have_opposite_labels_and_a_negative_direction_cosine():
+    ref = m.measure(panning_clip(72), 24.0)
+    gen = m.measure(panning_clip(72, speed=-4), 24.0)
+    comp = c.compare_profiles(ref, gen)
+    assert comp.path_judged is True  # a pan is a camera-path ref
+    assert comp.ref_path["label"] == "pans left"
+    assert comp.gen_path["label"] == "pans right"
+    assert comp.path_cos is not None and comp.path_cos < -0.9
+    same = c.compare_profiles(ref, m.measure(panning_clip(72), 24.0))
+    assert same.path_cos == pytest.approx(1.0, abs=0.01)
+
+
+def test_the_path_is_not_judged_on_a_body_ref():
+    """On a subject-motion ref the median flow is noise: name it, do not score it."""
+    ref = m.measure(moving_clip(48, speed=6), 24.0)
+    gen = m.measure(moving_clip(48, speed=6), 24.0)
+    comp = c.compare_profiles(ref, gen)
+    assert comp.path_judged is False
+    assert comp.path_cos is None
+    assert comp.ref_path is not None  # still named
+
+
+def test_render_carries_the_structure_lines_and_the_dict_round_trips():
+    import json
+
+    clip = moving_clip(72, speed=5)
+    ref = m.measure(clip, 24.0)
+    comp = c.compare_profiles(ref, m.measure(_mirror(clip), 24.0))
+    text = c.render(comp, "kit", "gen.mp4", colour=False)
+    assert "REGIONS" in text and "PATH" in text and "MIRRORED" in text
+    payload = json.loads(json.dumps(comp.as_dict()))
+    assert payload["mirrored"] is True
+    assert len(payload["regionR"]) == 3 and len(payload["regionR"][0]) == 3

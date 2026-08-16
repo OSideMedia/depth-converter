@@ -124,6 +124,23 @@
           }
         },
         "spikeSeconds": { "type": "array", "items": { "type": "number" } },
+        "regionEnergy": {
+          "description": "3x3 per-cell energy, rows top-to-bottom, cols left-to-right; same units as energy. Null on profiles measured before v0.7.0.",
+          "type": ["array", "null"],
+          "items": { "type": "array", "items": { "type": "number", "minimum": 0 } }
+        },
+        "cameraPath": {
+          "description": "Mean median-flow camera path over the moving gaps, grid px/frame. dx>0 = pixels move right = camera pans left. Null when the flow pass was skipped.",
+          "type": ["object", "null"],
+          "required": ["dx", "dy", "radial", "label"],
+          "additionalProperties": false,
+          "properties": {
+            "dx": { "type": "number" },
+            "dy": { "type": "number" },
+            "radial": { "type": "number" },
+            "label": { "type": "string" }
+          }
+        },
         "sourceEnergy": { "type": "number", "minimum": 0 },
         "retention": { "type": ["number", "null"], "minimum": 0 },
         "grid": { "type": "string" },

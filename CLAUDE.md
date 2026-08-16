@@ -40,7 +40,11 @@ bundles for no real gain over doing it here.
 6. Report the tier, the motion energy, and the kit path.
 7. After Peter fires it: `depthc compare <kit> <downloaded.mp4>` measures adherence the
    Gate-4 way (energy ratio FIRST, zero-lag correlation second, suggested verdict at the
-   end) — never re-derive that math by hand. Then `depthc result <kit> --verdict … --notes
+   end) — never re-derive that math by hand. The REGIONS (3×3 placement + mirrored
+   control) and PATH (camera direction) lines under it are uncalibrated structure signals:
+   read them, quote them in the notes, but they do not vote — when a fire is MIRRORED or
+   the path cosine is negative, that is a by-eye finding to record, not a verdict the tool
+   made. Then `depthc result <kit> --verdict … --notes
    "…"` with the measured numbers. A generation is the only evidence that says whether any
    of this works and it costs money; unrecorded, the finding has to be re-derived. Ask for
    both.

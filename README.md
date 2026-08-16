@@ -225,6 +225,18 @@ aspect change alone, more than the entire adhered-vs-failed band. If you fired a
 rather than the base ref, say so: `--variant edges` compares against the file that was
 actually uploaded.
 
+Below the envelope come two **structure** lines (v0.7.0) for what a full-frame mean cannot
+see — a left→right crossing and its mirror image draw the same sparkline and correlate at
+r = 1.0. **REGIONS** repeats the zero-lag correlation cell by cell on a 3×3 grid, weighted
+by where the ref's energy actually sits, and runs the same check against the horizontally
+*mirrored* generation: when the mirror wins clearly, the report says `MIRRORED — moves the
+other way`. **PATH** names the median-flow camera move on both sides in camera terms
+(`pans left, pushes in`) and, when the ref is a camera-path ref, scores direction agreement
+as a cosine; on a body ref it is named but not judged. Both are **uncalibrated** — no
+measured fire has been scored on them yet — so they inform your read and never move the
+suggested verdict. `--no-regions` / `--no-camera-path` switch them off. The kit manifest
+now also records `regionEnergy` and `cameraPath` for the ref itself.
+
 It ends with a *suggested* verdict (`adhered` / `partial` / `ignored` / `late`) and a
 ready-to-paste `depthc result` command. The suggestion is a heuristic calibrated on the
 measured fires — watch the clip, then record what actually happened.

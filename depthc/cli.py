@@ -777,6 +777,14 @@ def compare(
     input_size: int = typer.Option(518, "--input-size", help="Inference short side, multiple of 14"),
     precision: str = typer.Option("fp32", "--precision", help="fp32 | fp16"),
     library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
+    regions: bool = typer.Option(
+        True, "--regions/--no-regions",
+        help="Per-cell (3x3) zero-lag correlation + mirrored control — WHERE the motion sits",
+    ),
+    camera_path: bool = typer.Option(
+        True, "--camera-path/--no-camera-path",
+        help="Median-flow camera path (pan/tilt/push) on both sides — WHICH WAY the frame moves",
+    ),
 ) -> None:
     """Measure whether a generation followed its kit — energy ratio first, correlation second.
 
@@ -784,7 +792,8 @@ def compare(
     envelope with the reference's, the Gate-4 way, computed identically every time. The
     ratio is judged FIRST (over-following is what destroys pictures and correlation cannot
     see it), the zero-lag correlation second, and the human verdict last: watch the clip,
-    then record it with `depthc result`.
+    then record it with `depthc result`. The REGIONS and PATH lines (placement and
+    direction — what the full-frame envelope cannot see) are reported and never vote.
     """
     from depthc import compare as comparelib, engine, kit as kitlib, motion as motionlib
     from depthc.video_io import (
@@ -871,6 +880,8 @@ def compare(
         ref_profile, gen_profile,
         gen_full_seconds=gen_full_seconds,
         geometry_note=geometry_note,
+        regions=regions,
+        camera_path=camera_path,
     )
     typer.echo("")
     typer.echo(comparelib.render(

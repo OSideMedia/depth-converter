@@ -394,3 +394,80 @@ def test_spike_floor_scales_with_fps():
     deltas24 = np.full(48, 1.0, dtype=np.float32)
     deltas24[24] = 10.0
     assert m.MotionProfile(fps=24.0, deltas=deltas24).spikes == [pytest.approx(1.0)]
+
+
+# ------------------------------------------------------------- structure: regions + path
+
+def test_region_means_are_on_the_energy_scale_and_cover_the_grid():
+    """The pixel-weighted mean of the cells IS the full-frame energy — same units, no gap."""
+    clip = moving_clip(24, speed=6)
+    grid = m.analysis_gray(clip).astype("float32")
+    difference = np.abs(np.diff(grid, axis=0))
+    regions = m.region_means(difference)
+    assert regions.shape == (23, m.REGION_ROWS, m.REGION_COLS)
+    h, w = grid.shape[1:]
+    rows, cols = m._region_edges(h, m.REGION_ROWS), m._region_edges(w, m.REGION_COLS)
+    weights = np.array([[(rows[r + 1] - rows[r]) * (cols[c + 1] - cols[c]) for c in range(3)]
+                        for r in range(3)], dtype="float64") / (h * w)
+    assert (regions * weights).sum(axis=(1, 2)) == pytest.approx(difference.mean(axis=(1, 2)), abs=1e-3)
+
+
+def test_a_left_to_right_crossing_lights_the_columns_in_order():
+    """The whole point of the layer: placement over time, which the mean throws away."""
+    profile = m.measure(moving_clip(72, speed=5), 24.0, with_flow=False)
+    buckets = profile.region_buckets(0.5)
+    assert buckets is not None and buckets.shape[1:] == (3, 3)
+    columns = buckets.sum(axis=1)  # [buckets, cols]
+    left_peak, right_peak = int(columns[:, 0].argmax()), int(columns[:, 2].argmax())
+    assert left_peak < right_peak
+
+
+def test_region_energy_is_none_on_a_bare_profile():
+    assert m.MotionProfile(fps=24.0, deltas=np.ones(24, dtype="float32")).region_energy is None
+    assert m.MotionProfile(fps=24.0, deltas=np.ones(24, dtype="float32")).camera_path is None
+
+
+def test_a_pan_names_its_direction():
+    """np.roll(+speed) moves pixels RIGHT, which is the camera panning LEFT."""
+    profile = m.measure(panning_clip(), 24.0, with_flow=True)
+    path = profile.camera_path
+    assert path is not None and path["label"] == "pans left"
+    assert path["dx"] > m.PATH_STILL and abs(path["dy"]) < m.PATH_STILL
+    reverse = m.measure(panning_clip(speed=-4), 24.0, with_flow=True).camera_path
+    assert reverse is not None and reverse["label"] == "pans right"
+
+
+def test_a_zoom_reads_as_a_push_and_not_as_a_pan():
+    """A pure scale-up expands the picture: radial > 0, no translation to name."""
+    import cv2
+
+    base = textured()
+    h, w = base.shape
+    frames = []
+    for i in range(24):
+        scale = 1.0 + 0.012 * i
+        matrix = cv2.getRotationMatrix2D((w / 2, h / 2), 0.0, scale)
+        frames.append(cv2.warpAffine(base, matrix, (w, h), borderMode=cv2.BORDER_REFLECT))
+    path = m.measure(np.stack(frames), 24.0, with_flow=True).camera_path
+    assert path is not None
+    assert path["radial"] > m.PATH_RADIAL_STILL
+    assert "pushes in" in path["label"] and "pans" not in path["label"]
+
+
+def test_camera_share_is_unchanged_by_the_flow_refactor():
+    """camera_share and camera_share_from(flow_series) must agree to the digit."""
+    clip = panning_clip()
+    assert m.camera_share(clip) == m.camera_share_from(m.flow_series(clip))
+    still = still_clip(8)
+    assert m.camera_share(still) == 0.0
+    assert m.measure(still, 24.0).camera_path == {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
+
+
+def test_path_label_vocabulary():
+    assert m.path_label(0.0, 0.0, 0.0) == "static"
+    assert m.path_label(0.5, 0.1, 0.0) == "pans left"
+    assert m.path_label(-0.5, 0.1, 0.0) == "pans right"
+    assert m.path_label(0.1, 0.5, 0.0) == "tilts up"
+    assert m.path_label(0.1, -0.5, 0.0) == "tilts down"
+    assert m.path_label(0.0, 0.0, -0.2) == "pulls out"
+    assert m.path_label(0.5, 0.0, 0.2) == "pans left, pushes in"

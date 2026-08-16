@@ -25,6 +25,24 @@ The ratio is computed on the OVERLAPPING duration only: output length is integer
 with a 4 s floor, so a generation legally outruns a short ref, and whatever it does past
 the end of the reference is the model's own invention — counting it would poison the ratio.
 
+TWO MORE LAYERS, REPORTED BUT NOT VOTING (v0.7.0): the envelope above is a full-frame
+mean, blind to WHERE the motion sits and WHICH WAY the frame moves — a left→right crossing
+and its mirror image draw the same sparkline and correlate at r=1.0.
+
+3.  REGIONS — the same zero-lag correlation, cell by cell on a 3x3 grid, weighted by where
+    the ref's energy actually sits. A control against the horizontally MIRRORED generation
+    catches the specific failure the mean cannot: the beat landed on time but the subject
+    went the other way. Named as a finding when the mirror wins clearly.
+
+4.  CAMERA PATH — the median-flow translation (dx, dy) plus a radial push/pull term, bucketed
+    and compared as a direction series (cosine similarity), with both paths named in camera
+    terms ("pans left, pushes in"). Judged only when the ref is a camera-path ref: on a body
+    ref the median flow is estimator noise with no direction worth comparing.
+
+These two are UNCALIBRATED — no measured fire has been scored on them yet — so they inform
+the human's read and never move the suggested verdict. When fires accumulate, thresholds go
+in beside RATIO_* / R_* with the same "calibrated on N fires of <date>" honesty.
+
 THE SUGGESTION IS A HEURISTIC, NOT A VERDICT. A human watches the clip and records what
 actually happened (`depthc result`); this module only guarantees the numbers are computed
 consistently. The thresholds are calibrated on the seven measured fires of 2026-07-25 and
@@ -37,7 +55,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from depthc.motion import MotionProfile, sparkline
+from depthc.motion import REGION_COLS, REGION_ROWS, MotionProfile, path_label, sparkline
 
 BUCKET_SECONDS = 0.5
 # Lags measured in buckets: ±1.0 s in 0.5 s steps. Wider lags on a 5 s clip leave too few
@@ -52,6 +70,11 @@ RATIO_HIGH = 1.20    # over this is the over-following artifact signature
 R_ADHERED = 0.75     # zero-lag r at or above this tracks timing beat for beat
 R_IGNORED = 0.30     # below this the ref did essentially nothing
 R_LATE = 0.60        # an off-zero peak this strong, with a dead zero, means "late"
+
+# Structure layers — reported, not voting (uncalibrated; see the module docstring).
+MIRROR_MARGIN = 0.30       # mirrored regions must beat direct by this much to be named
+MIRROR_MIN_R = 0.50        # ...and be a real alignment in their own right
+PATH_JUDGE_SHARE = 0.30    # ref camera share below this = a body ref; path not judged
 
 
 @dataclass
@@ -84,6 +107,24 @@ class Comparison:
     # 16:9 — motion.py's UNITS note), so the ratio must not drive the verdict; the lag
     # correlation compares each envelope's SHAPE against itself over time and survives.
     geometry_note: str | None = None
+    # --- structure layers (None = not measured / not requested) ---
+    region_r: list[list[float | None]] | None = None   # 3x3 zero-lag r per cell
+    region_weights: list[list[float]] | None = None    # ref energy share per cell
+    structure_r: float | None = None                   # ref-energy-weighted mean of region_r
+    mirror_r: float | None = None                      # same, against the mirrored generation
+    ref_path: dict | None = None                       # {dx, dy, radial, label}
+    gen_path: dict | None = None
+    path_cos: float | None = None                      # cosine of the bucketed path series
+    path_judged: bool | None = None                    # False = ref is a body ref
+
+    @property
+    def mirrored(self) -> bool:
+        """The generation moved the OTHER way: mirrored regions align, direct ones do not."""
+        return (
+            self.mirror_r is not None and self.structure_r is not None
+            and self.mirror_r >= MIRROR_MIN_R
+            and self.mirror_r - self.structure_r >= MIRROR_MARGIN
+        )
 
     @property
     def r0(self) -> float | None:
@@ -108,6 +149,15 @@ class Comparison:
             "suggestion": self.suggestion,
             "reasons": self.reasons,
             "geometryNote": self.geometry_note,
+            "regionR": self.region_r,
+            "regionWeights": self.region_weights,
+            "structureR": self.structure_r,
+            "mirrorR": self.mirror_r,
+            "mirrored": self.mirrored,
+            "refPath": self.ref_path,
+            "genPath": self.gen_path,
+            "pathCos": self.path_cos,
+            "pathJudged": self.path_judged,
         }
 
 
@@ -146,6 +196,78 @@ def _buckets(profile: MotionProfile, seconds: float) -> np.ndarray:
     )
 
 
+def _region_layer(
+    ref: MotionProfile, gen: MotionProfile, seconds: float
+) -> tuple[list[list[float | None]], list[list[float]], float | None, float | None] | None:
+    """Per-cell zero-lag r, ref energy weights, weighted r, and the mirrored-gen weighted r.
+
+    Weighting by the ref's energy share is what makes this a placement signal: a cell the
+    ref never used has nothing to correlate and must not vote as loudly as the cell the
+    subject actually crossed. Cells whose envelope is flat on either side (r=None) are
+    dropped and the weights renormalised over the rest.
+    """
+    rb = ref.region_buckets(BUCKET_SECONDS)
+    gb = gen.region_buckets(BUCKET_SECONDS)
+    if rb is None or gb is None:
+        return None
+    limit = int(round(seconds / BUCKET_SECONDS))
+    n = min(rb.shape[0], gb.shape[0], limit)
+    if n <= 0:
+        return None
+    rb, gb = rb[:n], gb[:n]
+    total = float(rb.sum())
+    weights = (rb.sum(axis=0) / total) if total > 0 else np.zeros((REGION_ROWS, REGION_COLS))
+
+    def weighted(other: np.ndarray) -> tuple[list[list[float | None]], float | None]:
+        table: list[list[float | None]] = []
+        num = den = 0.0
+        for r in range(REGION_ROWS):
+            row: list[float | None] = []
+            for c in range(REGION_COLS):
+                value = _pearson(rb[:, r, c], other[:, r, c])
+                row.append(value)
+                if value is not None and weights[r, c] > 0:
+                    num += value * float(weights[r, c])
+                    den += float(weights[r, c])
+            table.append(row)
+        return table, (round(num / den, 3) if den > 0 else None)
+
+    table, structure = weighted(gb)
+    _, mirror = weighted(gb[:, :, ::-1])
+    weight_table = [[round(float(w), 3) for w in row] for row in weights]
+    return table, weight_table, structure, mirror
+
+
+def _path_series(profile: MotionProfile, seconds: float) -> np.ndarray | None:
+    """[buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`."""
+    if profile.path is None or not profile.path.size:
+        return None
+    step = max(1, int(round(BUCKET_SECONDS * profile.fps)))
+    path = profile.path[: int(round(seconds * profile.fps))]
+    n = path.shape[0] - step + 1
+    if n <= 0:
+        return None
+    return np.stack([path[i:i + step].mean(axis=0) for i in range(0, n, step)])
+
+
+def _path_summary(series: np.ndarray) -> dict:
+    moving = np.any(series != 0, axis=1)
+    if not moving.any():
+        return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
+    dx, dy, radial = (float(v) for v in series[moving].mean(axis=0))
+    return {"dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
+            "label": path_label(dx, dy, radial)}
+
+
+def _cosine(a: np.ndarray, b: np.ndarray) -> float | None:
+    """Cosine similarity of two flattened series; None when either has no direction."""
+    a, b = a.ravel().astype(np.float64), b.ravel().astype(np.float64)
+    na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+    if na < 1e-9 or nb < 1e-9:
+        return None
+    return round(float(a @ b / (na * nb)), 3)
+
+
 def compare_profiles(
     ref: MotionProfile,
     gen: MotionProfile,
@@ -153,6 +275,8 @@ def compare_profiles(
     ref_full_seconds: float | None = None,
     gen_full_seconds: float | None = None,
     geometry_note: str | None = None,
+    regions: bool = True,
+    camera_path: bool = True,
 ) -> Comparison:
     """Compare a generation's depth-motion profile against its reference's.
 
@@ -169,6 +293,9 @@ def compare_profiles(
     length so normalisation happens over the overlap only — a depth extreme in an excluded
     tail must not compress the greys of the part being judged). The tails in the report
     stay honest either way.
+
+    `regions` / `camera_path` switch the structure layers (v0.7.0) on or off; both are
+    reported alongside the verdict and never move it.
     """
     if abs(ref.fps - gen.fps) > 0.01:
         raise ValueError(
@@ -219,6 +346,22 @@ def compare_profiles(
         gen_camera=gen.camera,
         geometry_note=geometry_note,
     )
+    if regions:
+        layer = _region_layer(ref, gen, overlap)
+        if layer is not None:
+            (comparison.region_r, comparison.region_weights,
+             comparison.structure_r, comparison.mirror_r) = layer
+
+    if camera_path:
+        rp, gp = _path_series(ref, overlap), _path_series(gen, overlap)
+        if rp is not None and gp is not None:
+            n = min(rp.shape[0], gp.shape[0])
+            rp, gp = rp[:n], gp[:n]
+            comparison.ref_path = _path_summary(rp)
+            comparison.gen_path = _path_summary(gp)
+            comparison.path_judged = ref.camera is not None and ref.camera >= PATH_JUDGE_SHARE
+            comparison.path_cos = _cosine(rp, gp) if comparison.path_judged else None
+
     comparison.suggestion, comparison.reasons = _suggest(comparison)
     return comparison
 
@@ -229,6 +372,18 @@ def _suggest(c: Comparison) -> tuple[str, list[str]]:
     Unless the geometries were not comparable: then the ratio is framing-biased and only
     the correlation votes, and the reasons say so up front.
     """
+    suggestion, reasons = _suggest_envelope(c)
+    if c.mirrored:
+        reasons.append(
+            f"MIRRORED — regions align against the flipped generation (r={c.mirror_r:+.3f}) "
+            f"and not directly (r={c.structure_r:+.3f}): the beat is on time but the subject "
+            f"went the other way; the envelope cannot see this, so the verdict above does "
+            f"not include it — judge it by eye"
+        )
+    return suggestion, reasons
+
+
+def _suggest_envelope(c: Comparison) -> tuple[str, list[str]]:
     reasons: list[str] = []
     r0, best = c.r0, c.best_lag
 
@@ -327,13 +482,14 @@ def render(c: Comparison, kit_name: str, generated_name: str, colour: bool = Tru
             + f"{p.seconds:+.1f}s r={p.r:+.3f}".replace("+0.0s", " 0.0s")
             + (f"{off}" if p.seconds == 0 else "")
             if p.r is not None
-            else f"{p.seconds:+.1f}s r=—"
+            else f"{p.seconds:+.1f}s r=—".replace("+0.0s", " 0.0s")
             for p in c.lags
         ),
         f"  CAMERA   ref "
         + (f"{c.ref_camera * 100:.0f}%" if c.ref_camera is not None else "—")
         + " whole-frame · gen "
         + (f"{c.gen_camera * 100:.0f}%" if c.gen_camera is not None else "—"),
+        *_render_structure(c, bold, dim, off, red),
         "",
         f"  ref {c.ref_spark}",
         f"  gen {c.gen_spark}   {dim}({c.overlap_seconds:g}s overlap"
@@ -352,3 +508,45 @@ def render(c: Comparison, kit_name: str, generated_name: str, colour: bool = Tru
         f"happened.{off}"
     )
     return "\n".join(lines)
+
+
+def _cell(value: float | None) -> str:
+    return f"{value:+.2f}" if value is not None else "   — "
+
+
+def _render_structure(c: Comparison, bold: str, dim: str, off: str, red: str) -> list[str]:
+    """The REGIONS and PATH lines — the placement and direction the envelope cannot see."""
+    lines: list[str] = []
+    if c.region_r is not None:
+        head = "  REGIONS  "
+        if c.structure_r is not None:
+            head += f"weighted r {bold}{c.structure_r:+.3f}{off}"
+        else:
+            head += "weighted r —"
+        if c.mirror_r is not None:
+            head += f" · mirrored {c.mirror_r:+.3f}"
+        if c.mirrored:
+            head += f"   {red}MIRRORED — moves the other way{off}"
+        lines.append(head)
+        for r in range(REGION_ROWS):
+            cells = " ".join(_cell(v) for v in c.region_r[r])
+            weights = " ".join(
+                f"{w * 100:3.0f}%" for w in (c.region_weights[r] if c.region_weights else [])
+            )
+            lines.append(f"           {cells}   {dim}{weights}{off}")
+        lines.append(
+            f"           {dim}zero-lag r per cell, rows top→bottom · ref energy share "
+            f"beside · uncalibrated, informs the read, does not vote{off}"
+        )
+    if c.ref_path is not None and c.gen_path is not None:
+        line = f"  PATH     ref {c.ref_path['label']} · gen {c.gen_path['label']}"
+        if c.path_judged:
+            line += (
+                f" · direction cos {bold}{c.path_cos:+.3f}{off}"
+                if c.path_cos is not None else " · direction cos —"
+            )
+        else:
+            share = f"{c.ref_camera * 100:.0f}%" if c.ref_camera is not None else "unmeasured"
+            line += f"   {dim}not judged: ref is a body ref ({share} whole-frame){off}"
+        lines.append(line)
+    return lines

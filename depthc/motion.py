@@ -100,6 +100,15 @@ LOW_RETENTION = 0.25      # depth energy / source energy below this = in-plane m
 NOISE_RETENTION = 1.20    # depth energy ABOVE source energy = depth flicker, not choreography
 CAMERA_DOMINANT = 0.60    # median-flow share above this = a camera-path ref, not a body one
 
+# --- structure: WHERE the motion sits and WHICH WAY the frame moves (v0.7.0) ---------------
+# The full-frame envelope is blind to placement and direction: a subject crossing left→right
+# and the same subject crossing right→left draw the same sparkline. These two layers keep
+# the geometry the mean throws away, on the same analysis grid, from the same passes.
+REGION_ROWS = 3           # the 3x3 region grid; cells are equal splits of the analysis grid
+REGION_COLS = 3
+PATH_STILL = 0.10         # grid px per frame; a median flow below this has no direction to name
+PATH_RADIAL_STILL = 0.05  # px per frame of expansion/contraction below this is not a zoom
+
 SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
 SPARK_DEAD = "·"
 
@@ -144,14 +153,114 @@ def frame_stats(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     Both come from one pass over the same difference. The mean is the motion signal; the
     fraction is what tells a cut apart from a lunge — see CUT_FRACTION above.
     """
+    return frame_stats_regions(frames)[:2]
+
+
+def _region_edges(size: int, cells: int) -> list[int]:
+    """Integer cell boundaries that cover `size` exactly, largest remainder spread evenly."""
+    return [round(size * i / cells) for i in range(cells + 1)]
+
+
+def region_means(difference: np.ndarray) -> np.ndarray:
+    """Per-cell mean of a [gaps,H,W] difference stack -> [gaps, REGION_ROWS, REGION_COLS].
+
+    The cells are equal splits of the analysis grid, so a cell's mean is on the SAME scale
+    as the full-frame energy (grey levels per frame per pixel) and the full-frame mean is
+    the pixel-weighted mean of the cells. Which cell carries the motion is what tells a
+    left→right crossing from a right→left one; the full-frame mean cannot.
+    """
+    if difference.ndim != 3:
+        raise ValueError(f"Expected [gaps,H,W], got {difference.shape}")
+    gaps, height, width = difference.shape
+    rows = _region_edges(height, REGION_ROWS)
+    cols = _region_edges(width, REGION_COLS)
+    out = np.zeros((gaps, REGION_ROWS, REGION_COLS), dtype=np.float32)
+    for r in range(REGION_ROWS):
+        for c in range(REGION_COLS):
+            cell = difference[:, rows[r]:rows[r + 1], cols[c]:cols[c + 1]]
+            if cell.shape[1] and cell.shape[2]:
+                out[:, r, c] = cell.mean(axis=(1, 2))
+    return out
+
+
+def frame_stats_regions(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`frame_stats` plus the per-region means, all from the one difference pass."""
     grid = analysis_gray(frames).astype(np.float32)
     if grid.shape[0] < 2:
-        return np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.float32)
+        empty = np.zeros(0, dtype=np.float32)
+        return empty, empty, np.zeros((0, REGION_ROWS, REGION_COLS), dtype=np.float32)
     difference = np.abs(np.diff(grid, axis=0))
     return (
         difference.mean(axis=(1, 2)),
         (difference > CUT_LEVEL).mean(axis=(1, 2)).astype(np.float32),
+        region_means(difference),
     )
+
+
+@dataclass
+class FlowSeries:
+    """Dense-flow summary per frame gap, on the analysis grid, in grid px per frame.
+
+    `path[:, 0:2]` is the median flow vector (dx, dy) — every pixel moving together, i.e.
+    the camera translation; `path[:, 2]` is the RADIAL component: the mean projection of
+    the flow onto the outward unit vector from the frame centre. Positive = the picture
+    expands (push-in / zoom-in), negative = it contracts (pull-out). `residual` is the mean
+    flow magnitude around the median — the subject moving inside the frame. `moving`
+    marks the gaps above the static floor; on the others every figure is written as 0.0
+    because flow on a still frame is estimator noise with no direction (see camera_share).
+    """
+
+    path: np.ndarray = field(repr=False)      # [gaps, 3]  dx, dy, radial
+    residual: np.ndarray = field(repr=False)  # [gaps]
+    moving: np.ndarray = field(repr=False)    # [gaps] bool
+
+    @property
+    def gaps(self) -> int:
+        return int(self.moving.size)
+
+
+def flow_series(frames: np.ndarray, fps: float = 24.0) -> FlowSeries:
+    """One Farneback pass per moving frame gap; everything flow-derived reads from this.
+
+    `fps` scales the static floor: STATIC_FLOOR is calibrated at 24 fps and raw per-gap
+    deltas grow with the frame interval (see camera_share for why the floor exists at all).
+    """
+    import cv2
+
+    grid = analysis_gray(frames)
+    gaps = max(0, grid.shape[0] - 1)
+    path = np.zeros((gaps, 3), dtype=np.float32)
+    residual = np.zeros(gaps, dtype=np.float32)
+    moving = np.zeros(gaps, dtype=bool)
+    if gaps == 0:
+        return FlowSeries(path=path, residual=residual, moving=moving)
+
+    floor = STATIC_FLOOR * (24.0 / fps) if fps > 0 else STATIC_FLOOR
+    deltas = np.abs(np.diff(grid.astype(np.float32), axis=0)).mean(axis=(1, 2))
+    height, width = grid.shape[1:]
+    ys, xs = np.mgrid[0:height, 0:width].astype(np.float32)
+    rx, ry = xs - (width - 1) / 2.0, ys - (height - 1) / 2.0
+    norm = np.hypot(rx, ry)
+    norm[norm == 0] = 1.0
+    rx, ry = rx / norm, ry / norm
+
+    for index, (previous, current) in enumerate(zip(grid[:-1], grid[1:])):
+        if deltas[index] <= floor:
+            continue
+        flow = cv2.calcOpticalFlowFarneback(
+            previous, current, None,
+            pyr_scale=0.5, levels=3, winsize=15, iterations=3,
+            poly_n=5, poly_sigma=1.2, flags=0,
+        )
+        median = np.median(flow.reshape(-1, 2), axis=0)
+        centred = flow - median
+        moving[index] = True
+        path[index, 0], path[index, 1] = float(median[0]), float(median[1])
+        # Radial expansion is measured on the flow AROUND the median: a pure pan has no
+        # zoom in it, and leaving the translation in would book part of it as radial.
+        path[index, 2] = float((centred[..., 0] * rx + centred[..., 1] * ry).mean())
+        residual[index] = float(np.hypot(*centred.transpose(2, 0, 1)).mean())
+    return FlowSeries(path=path, residual=residual, moving=moving)
 
 
 def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
@@ -170,38 +279,40 @@ def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     HONEST LIMIT: a median *translation* is the only camera motion this separates cleanly. A
     zoom, orbit or roll moves pixels in opposing directions, so its median is near zero and it
     books as subject motion. Treat a high number as "definitely camera", a low one as "not a
-    simple camera translation" rather than "definitely subject".
-
-    `fps` scales the static floor: STATIC_FLOOR is calibrated at 24 fps, and raw per-gap
-    deltas grow with the frame interval — at the scout's 12 fps a gap that is static by the
-    24 fps definition reads twice as large and would otherwise vote flow again, which is
-    exactly the noise dilution the exclusion was built to stop.
+    simple camera translation" rather than "definitely subject". (The radial term in
+    `flow_series` names a zoom/push separately, but does not fold it into this share — the
+    share's thresholds were calibrated without it.)
     """
-    import cv2
+    return camera_share_from(flow_series(frames, fps))
 
-    grid = analysis_gray(frames)
-    if grid.shape[0] < 2:
+
+def camera_share_from(flow: FlowSeries) -> float:
+    """The share, computed from an existing flow pass (identical numbers to camera_share)."""
+    if not flow.moving.any():
         return 0.0
+    camera = np.hypot(flow.path[flow.moving, 0], flow.path[flow.moving, 1])
+    subject = flow.residual[flow.moving]
+    total = float(camera.mean() + subject.mean())
+    return round(float(camera.mean()) / total, 3) if total > 0 else 0.0
 
-    floor = STATIC_FLOOR * (24.0 / fps) if fps > 0 else STATIC_FLOOR
-    deltas = np.abs(np.diff(grid.astype(np.float32), axis=0)).mean(axis=(1, 2))
-    camera, subject = [], []
-    for index, (previous, current) in enumerate(zip(grid[:-1], grid[1:])):
-        if deltas[index] <= floor:
-            continue
-        flow = cv2.calcOpticalFlowFarneback(
-            previous, current, None,
-            pyr_scale=0.5, levels=3, winsize=15, iterations=3,
-            poly_n=5, poly_sigma=1.2, flags=0,
-        )
-        median = np.median(flow.reshape(-1, 2), axis=0)
-        camera.append(float(np.hypot(*median)))
-        subject.append(float(np.hypot(*(flow - median).transpose(2, 0, 1)).mean()))
 
-    if not camera:
-        return 0.0
-    total = float(np.mean(camera) + np.mean(subject))
-    return round(float(np.mean(camera)) / total, 3) if total > 0 else 0.0
+def path_label(dx: float, dy: float, radial: float) -> str:
+    """Name a mean camera path in camera terms, from the pixel motion it produced.
+
+    Pixels moving RIGHT means the camera panned LEFT; pixels moving DOWN, a tilt UP;
+    expansion, a push-in. Translation and radial are named independently ("pans left,
+    pushes in"). Below the floors it is "static". This is a translation-and-zoom
+    vocabulary by construction — an orbit or a roll has no honest name here.
+    """
+    parts = []
+    if np.hypot(dx, dy) >= PATH_STILL:
+        if abs(dx) >= abs(dy):
+            parts.append("pans left" if dx > 0 else "pans right")
+        else:
+            parts.append("tilts up" if dy > 0 else "tilts down")
+    if abs(radial) >= PATH_RADIAL_STILL:
+        parts.append("pushes in" if radial > 0 else "pulls out")
+    return ", ".join(parts) if parts else "static"
 
 
 def sparkline(values, floor: float = STATIC_FLOOR, ceiling: float | None = None) -> str:
@@ -255,6 +366,11 @@ class MotionProfile:
     # Collapsing the two made a genuine zero drop the motion-type finding entirely.
     camera: float | None = None
     changed: np.ndarray | None = field(default=None, repr=False)
+    # Structure layers (v0.7.0). None = not measured (a bare-delta profile, or a manifest
+    # read back). regions: [gaps, REGION_ROWS, REGION_COLS] per-cell energy; path: the
+    # FlowSeries.path [gaps, 3] (dx, dy, radial) with zeros on static gaps.
+    regions: np.ndarray | None = field(default=None, repr=False)
+    path: np.ndarray | None = field(default=None, repr=False)
 
     # ------------------------------------------------------------------ scalars
     @property
@@ -370,6 +486,40 @@ class MotionProfile:
         limit = max(floor, self.median * SPIKE_MULTIPLE)
         return [round(i / self.fps, 2) for i, d in enumerate(self.deltas) if d > limit]
 
+    # ---------------------------------------------------------------- structure
+    @property
+    def region_energy(self) -> list[list[float]] | None:
+        """Mean energy per cell over the whole clip, rows top→bottom, cols left→right."""
+        if self.regions is None or not self.regions.size:
+            return None
+        return [[round(float(v), 3) for v in row] for row in self.regions.mean(axis=0)]
+
+    def region_buckets(self, bucket_seconds: float | None = None) -> np.ndarray | None:
+        """[buckets, rows, cols] mean per cell per FULL bucket (partial tail dropped)."""
+        if self.regions is None or not self.regions.size:
+            return None
+        step = max(1, int(round((bucket_seconds or self.bucket_seconds) * self.fps)))
+        n = self.regions.shape[0] - step + 1
+        if n <= 0:
+            return np.zeros((0, REGION_ROWS, REGION_COLS), dtype=np.float32)
+        return np.stack(
+            [self.regions[i:i + step].mean(axis=0) for i in range(0, n, step)]
+        )
+
+    @property
+    def camera_path(self) -> dict | None:
+        """Mean camera path over the MOVING gaps: dx, dy, radial (grid px/frame) + label."""
+        if self.path is None or not self.path.size:
+            return None
+        moving = np.any(self.path != 0, axis=1)
+        if not moving.any():
+            return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
+        dx, dy, radial = (float(v) for v in self.path[moving].mean(axis=0))
+        return {
+            "dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
+            "label": path_label(dx, dy, radial),
+        }
+
     def as_dict(self) -> dict:
         dead = self.dead_stretch
         return {
@@ -384,6 +534,8 @@ class MotionProfile:
             "sparkline": self.spark,
             "deadStretch": dead.as_dict() if dead else None,
             "spikeSeconds": self.spikes,
+            "regionEnergy": self.region_energy,
+            "cameraPath": self.camera_path,
             # v2: aspect-preserving grid. Energy means agree with v1's fixed "160x90";
             # the flow-based cameraShare is the figure that may differ on non-16:9 kits.
             "grid": f"long-edge {GRID_LONG_EDGE} (aspect-preserving, v2)",
@@ -395,12 +547,15 @@ def measure(frames: np.ndarray, fps: float, with_flow: bool = True) -> MotionPro
     """Profile one clip. `with_flow=False` skips the optical-flow pass on very long clips."""
     if fps <= 0:
         raise ValueError("fps must be positive")
-    deltas, changed = frame_stats(frames)
+    deltas, changed, regions = frame_stats_regions(frames)
+    flow = flow_series(frames, fps) if with_flow else None
     return MotionProfile(
         fps=float(fps),
         deltas=deltas,
         changed=changed,
-        camera=camera_share(frames, fps) if with_flow else None,
+        camera=camera_share_from(flow) if flow is not None else None,
+        regions=regions,
+        path=flow.path if flow is not None else None,
     )
 
 
