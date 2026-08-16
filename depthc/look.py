@@ -219,6 +219,62 @@ def pick_keyframes(frames: np.ndarray, fps: float, max_frames: int = MAX_KEYFRAM
     return mids
 
 
+
+# ---------------------------------------------------------------------------- swatch words
+
+def swatch_hint(lab: list[float], share: float) -> str:
+    """A COARSE, honest descriptor for authoring — lightness / temperature / saturation.
+    A hint beside the hex, never the prose itself (a mechanical name proved too coarse)."""
+    L, a, b = lab
+    light = ("deep" if L < 30 else "dark" if L < 45 else "mid" if L < 65 else "light" if L < 80 else "pale")
+    temp = "cool" if b < -5 else "warm" if b > 5 else "neutral"
+    c = float(np.hypot(a, b))
+    sat = "greyed" if c < 8 else "muted" if c < 25 else "saturated"
+    return f"{share:.0%} · {light}, {temp}, {sat}"
+
+
+def style_constant_block(palette: list["Swatch"], frames: list["FrameLook"], keys: dict[str, int],
+                         warmth: float, chroma: float, detail: float, dark_share: float, source: str) -> dict:
+    """A paste-ready block in OSIDE's StyleConstant shape (lib/prompter/styleConstant.ts).
+
+    Only the measurable part is filled — `color.hex` (top-3 shares, the 60:30:10 slots) —
+    every prose field is EMPTY on purpose and the `hints` say what the sheet shows, so the
+    author (person or agent) writes positive, observable prose from evidence instead of
+    inventing structure. Nothing here compiles until the words are written.
+    """
+    top = palette[:3]
+    Ls = [f.luma_mean for f in frames]
+    key_parts = ", ".join(f"{k} ×{v}" for k, v in keys.items() if v)
+    override = ""
+    if keys.get("high-key", 0) and (keys.get("low-key", 0) or dark_share > 0.25):
+        override = " — mixed keys: give the high-key scenes their own lighting pick, do not let the global palette darken them"
+    elif keys.get("high-key", 0) == 0:
+        override = " — no high-key shot in the reference: a bright scene in the film needs its own lighting pick (LOOK-DNA-AB gate lesson)"
+    slot = ("dominant", "secondary", "accent")
+    return {
+        "name": f"{source} look",
+        "presetId": "",
+        "mediumLock": "",
+        "anchor": "",
+        "lightingLaw": "",
+        "color": {"dominant": "", "secondary": "", "accent": "", "hex": [s.hex for s in top]},
+        "continuity": "",
+        "hints": {
+            "color": [f"{n}: {s.hex} — {swatch_hint(s.lab, s.share)}" for n, s in zip(slot, top)],
+            "palette_rest": [f"{s.hex} — {swatch_hint(s.lab, s.share)}" for s in palette[3:]],
+            "key": f"{key_parts} (L* {min(Ls):.0f}–{max(Ls):.0f}), dark share {dark_share:.0%}{override}",
+            "warmth": f"b* {warmth:+.1f} — {'warm bias' if warmth > 2 else 'cool bias' if warmth < -2 else 'neutral'}",
+            "chroma": f"{chroma:.1f} — {'restrained' if chroma < 12 else 'moderate' if chroma < 25 else 'saturated'}",
+            "detail": f"{detail:.1f} edge mean — {'sparse' if detail < 15 else 'moderate' if detail < 30 else 'dense ornament'}",
+        },
+        "authoring": (
+            "Prose fields are EMPTY on purpose. Read sheet.jpg and write POSITIVE, observable prose: "
+            "mediumLock (what the image IS), anchor (light/lens/era, no names), lightingLaw, "
+            "color.dominant/secondary/accent as material + light words, continuity (palette pins, design locks). "
+            "Then paste into OSIDE › Look tab › Style Constant. Keep the key per scene."
+        ),
+    }
+
 # ---------------------------------------------------------------------------- the look
 
 @dataclass
@@ -261,6 +317,10 @@ class Look:
                 "lighting": "", "materials": "", "era": "", "juxtaposition": "",
                 "forbiddenList": [],
             },
+            # OSIDE lib/prompter/styleConstant.ts — paste-ready; hexes measured, prose authored
+            "styleConstant": style_constant_block(
+                self.palette, self.frames, self.keys, self.warmth, self.chroma, self.detail, self.dark_share, self.source
+            ),
             # the Stage-1 lesson: a look is the palette PLUS a per-shot key, never the palette alone
             "perShotKey": {str(f.index): f.key for f in self.frames},
             "notes": self.notes,
@@ -392,6 +452,13 @@ def render_look(look: Look) -> str:
             f"  [{f.index}] {f.t:5.1f}s  {f.key:8}  L* {f.luma_mean:4.0f}  dark {f.dark_share:.0%}  "
             f"b* {f.warmth:+.1f}  detail {f.detail:.1f}  " + " ".join(s.hex for s in f.palette[:4])
         )
+    sc = style_constant_block(look.palette, look.frames, look.keys, look.warmth, look.chroma, look.detail,
+                              look.dark_share, look.source)
+    lines.append("  STYLE CONSTANT (paste-ready, prose empty on purpose)")
+    for h in sc["hints"]["color"]:
+        lines.append(f"    {h}")
+    lines.append(f"    key      {sc['hints']['key']}")
+    lines.append(f"    warmth   {sc['hints']['warmth']} · chroma {sc['hints']['chroma']} · detail {sc['hints']['detail']}")
     lines.append("  words: authored, not derived — read the sheet, name the colours and materials, keep the key per shot.")
     return "\n".join(lines)
 

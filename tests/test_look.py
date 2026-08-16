@@ -97,3 +97,29 @@ def test_render_never_says_verdict():
     text = L.render_look(look) + L.render_compare(look, L.compare_frames(look, [solid(SKY)], [0.0]), "x", None)
     for word in ("adhered", "matched", "PASS", "verdict:"):
         assert word not in text
+
+
+def test_style_constant_block_is_paste_ready_and_unauthored():
+    look = L.build_look([solid(WHITE), split(WARM_IVORY, SLATE), solid(NEAR_BLACK)], [0.0, 1.0, 2.0], "clip", 3.0)
+    d = json.loads(json.dumps(look.as_dict()))
+    sc = d["styleConstant"]
+    # OSIDE StyleConstant field names, exactly
+    for k in ("name", "presetId", "mediumLock", "anchor", "lightingLaw", "color", "continuity"):
+        assert k in sc
+    assert set(sc["color"]) == {"dominant", "secondary", "accent", "hex"}
+    # measured part filled: top-3 hexes in share order
+    assert sc["color"]["hex"] == [s["hex"] for s in d["global"]["palette"][:3]]
+    # authored part EMPTY on purpose
+    for k in ("mediumLock", "anchor", "lightingLaw", "continuity"):
+        assert sc[k] == ""
+    assert sc["color"]["dominant"] == "" and sc["color"]["accent"] == ""
+    # hints guide the author and carry the mixed-key advisory
+    assert len(sc["hints"]["color"]) == 3 and "dominant:" in sc["hints"]["color"][0]
+    assert "high-key" in sc["hints"]["key"] and "lighting pick" in sc["hints"]["key"]
+    assert "EMPTY on purpose" in sc["authoring"]
+
+
+def test_swatch_hint_words():
+    assert L.swatch_hint([90.0, 0.0, 0.0], 0.5) == "50% · pale, neutral, greyed"
+    assert L.swatch_hint([40.0, 5.0, 30.0], 0.2) == "20% · dark, warm, saturated"
+    assert L.swatch_hint([55.0, -2.0, -12.0], 0.1) == "10% · mid, cool, muted"

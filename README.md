@@ -278,7 +278,12 @@ are measured, the WORDS (lighting, materials, era, forbidden list) are left empt
 purpose — the live fire that this came from showed the words are the lever and that a
 mechanical hex→name step is too coarse (OSIDE's rendered a measured ivory/slate palette
 as "light orange, light orange, muted orange"). Read the sheet, name the colours and
-materials, keep the key per shot.
+materials, keep the key per shot. v0.9.1 adds a paste-ready `styleConstant` block in
+OSIDE's Style Constant shape (Look tab › Style Constant): `color.hex` = the top-3 measured
+swatches (the 60:30:10 slots), every prose field empty on purpose, and `hints` — a coarse
+lightness/temperature/saturation word per swatch, the key range with a mixed-key or
+no-high-key advisory, warmth, chroma, detail — so the author fills blanks from evidence
+instead of inventing structure. Flow: `depthc look` → author the words → paste.
 
 Why the key rides per shot: LIVEFIRE-2026-08-16-LOOK-DNA-AB (OSIDE) put a DNA distilled
 from four reference keyframes against a generic prompt on two image models; the DNA won

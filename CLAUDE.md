@@ -61,7 +61,9 @@ bundles for no real gain over doing it here.
    sheet, never derive them, and carry the per-shot key (a global palette darkened a
    high-key shot on two models, LOOK-DNA-AB 2026-08-16). After a fire,
    `depthc look-compare <look.json> <still|clip>` gives distances (+ drift on a clip);
-   quote them, they do not vote.
+   quote them, they do not vote. `look.json` also carries a paste-ready `styleConstant`
+   block (OSIDE Look tab › Style Constant): hexes filled, prose empty, hints beside —
+   author, then paste; there is deliberately no OSIDE import door.
 
 ## Motion is the measurement that matters
 
