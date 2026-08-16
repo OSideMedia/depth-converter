@@ -1058,6 +1058,7 @@ def look_compare(
     look_json: Optional[Path] = typer.Argument(None, help="A look.json written by `depthc look` (optional with --manifest when the manifest carries a look block)"),
     candidate: Optional[Path] = typer.Argument(None, help="A generated still or clip"),
     manifest: Optional[Path] = typer.Option(None, "--manifest", help="An OSIDE DaVinci package manifest.json — score every videos/*.mp4 in it (drift gauge)"),
+    emit_cdl: bool = typer.Option(False, "--emit-cdl", help="With --manifest: write look-cdl.json beside the manifest — one measured ASC CDL per clip for resolve-mcp apply_look"),
     against: Optional[int] = typer.Option(None, "--against", help="Compare to this keyframe index instead of the global look"),
     fps: float = typer.Option(1.0, "--fps", help="Sample rate for a clip"),
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
@@ -1113,10 +1114,18 @@ def look_compare(
             except (VideoIOError, SetupIncomplete, OSError) as e:
                 scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error=str(e).splitlines()[0][:80]))
         scores = looklib.flag_outliers(scores)
+        cdl_path = None
+        if emit_cdl:
+            cdl_path = base / "look-cdl.json"
+            cdl_path.write_text(json.dumps(looklib.cdl_manifest(ref, scores, str(manifest)), indent=2) + "\n")
         if as_json:
-            typer.echo(json.dumps({"look": ref.source, "manifest": str(manifest), "clips": [s.as_dict() for s in scores]}, indent=2))
+            typer.echo(json.dumps({"look": ref.source, "manifest": str(manifest), "clips": [s.as_dict() for s in scores],
+                                   **({"cdl": str(cdl_path)} if cdl_path else {})}, indent=2))
             return
         typer.echo(looklib.render_package(ref, scores))
+        if cdl_path:
+            n_id = sum(1 for c in looklib.cdl_manifest(ref, scores, str(manifest))["clips"] if c.get("identity"))
+            typer.echo(f"  → {cdl_path}  (one heuristic CDL per clip; {n_id} identity)")
         return
 
     if look_json is None or candidate is None:

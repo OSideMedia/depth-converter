@@ -307,6 +307,15 @@ package mean on palette / ΔL* / Δb* / Δchroma, and only when the spread is no
 That is a triage list — look here first — not a verdict; the same eight Stage-2 takes flagged
 exactly the two furthest-palette clips and the one that wandered warm.
 
+`--emit-cdl` (v0.11.0, piece 3b) additionally writes `look-cdl.json` beside the manifest —
+one ASC CDL per clip (slope/offset/power/saturation) that pulls that clip's MEASURED mean
+ΔL* / Δb* / Δchroma back toward the look. HEURISTIC v1, uncalibrated and labelled so in
+the file: offset carries exposure and temperature, saturation carries chroma, slope and
+power stay 1 — a starting balance for the colourist, never a creative grade and never a
+palette fix. resolve-mcp's `apply_look` reads this file and puts each CDL on node 1 of
+its clip. On the wandering Stage-2 take it reproduced the hand-derived Resolve grade
+(offset −0.06, cooler, saturation 0.81 vs 0.78 by hand).
+
 ### Recording what a fire actually did
 
 ```bash

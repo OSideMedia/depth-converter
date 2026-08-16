@@ -65,7 +65,9 @@ bundles for no real gain over doing it here.
    block (OSIDE Look tab › Style Constant): hexes filled, prose empty, hints beside —
    author, then paste; there is deliberately no OSIDE import door.
    `depthc look-compare --manifest <pkg>/manifest.json` scores a whole DaVinci package
-   (look-travels drift gauge): per-clip distances + RELATIVE outliers = a triage list.
+   (look-travels drift gauge): per-clip distances + RELATIVE outliers = a triage list;
+   `--emit-cdl` writes look-cdl.json (one HEURISTIC per-clip ASC CDL) for resolve-mcp
+   apply_look — starting balance only, never palette content.
 
 ## Motion is the measurement that matters
 

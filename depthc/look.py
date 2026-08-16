@@ -596,3 +596,59 @@ def render_package(look: Look, scores: list[ClipScore]) -> str:
             f"outliers {sum(1 for s in ok if s.outlier)}/{len(ok)}"
         )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------- per-clip CDL (look travels)
+
+CDL_SCHEMA = "oside-look-cdl/1"
+# HEURISTIC v1 — uncalibrated, marked as such. Maps a clip's measured mean deltas from the
+# look (ΔL*, Δb*, Δchroma) to an ASC CDL that pulls it back: offset carries exposure and
+# temperature, saturation carries chroma; slope and power stay 1 (a starting balance,
+# not a curve). Verified once in Resolve 2026-08-16 (t2v_palace_A: ΔL* +12→+1, Δb* +2→0)
+# with the same shape. a* (green–magenta) is deliberately NOT corrected.
+# ponytail: linear-in-delta gains; a fitted map if a colourist ever finds it under/over-shoots
+CDL_K_LUMA = 0.006        # offset per L* unit  (ΔL* +12 → −0.07)
+CDL_K_TEMP = 0.008        # r/b offset per b* unit
+CDL_K_SAT = 0.6           # saturation pull per unit of Δchroma/ref_chroma
+CDL_SAT_MIN, CDL_SAT_MAX = 0.5, 1.5
+CDL_OFFSET_MAX = 0.25
+
+
+def cdl_from_deltas(d_luma: float, d_warmth: float, d_chroma: float, ref_chroma: float) -> dict:
+    """ASC CDL (slope, offset, power, saturation) that pulls a clip with these mean deltas toward the look."""
+    base = float(np.clip(-d_luma * CDL_K_LUMA, -CDL_OFFSET_MAX, CDL_OFFSET_MAX))
+    temp = float(np.clip(d_warmth * CDL_K_TEMP, -CDL_OFFSET_MAX, CDL_OFFSET_MAX))
+    offset = [round(base - temp, 4), round(base, 4), round(base + temp, 4)]
+    sat = float(np.clip(1.0 - CDL_K_SAT * d_chroma / max(ref_chroma, 8.0), CDL_SAT_MIN, CDL_SAT_MAX))
+    return {"slope": [1.0, 1.0, 1.0], "offset": offset, "power": [1.0, 1.0, 1.0], "saturation": round(sat, 3)}
+
+
+def cdl_is_identity(cdl: dict, tol: float = 0.005) -> bool:
+    return all(abs(v) < tol for v in cdl["offset"]) and abs(cdl["saturation"] - 1.0) < tol
+
+
+def cdl_manifest(look: Look, scores: list[ClipScore], manifest_path: str) -> dict:
+    """The look-cdl.json written beside a package manifest — one measured CDL per clip."""
+    clips = []
+    for s in scores:
+        if s.error:
+            clips.append({"file": s.file, "error": s.error})
+            continue
+        cdl = cdl_from_deltas(s.luma, s.warmth, s.chroma, look.chroma)
+        clips.append({
+            "file": s.file, "label": s.label,
+            "measured": {"palette": round(s.palette, 1), "luma": round(s.luma, 1), "warmth": round(s.warmth, 1),
+                          "chroma": round(s.chroma, 1), "key_track": s.key_track, "outlier": s.outlier},
+            "cdl": cdl, "identity": cdl_is_identity(cdl),
+        })
+    return {
+        "schema": CDL_SCHEMA,
+        "look": look.source,
+        "manifest": manifest_path,
+        "derivation": (
+            "HEURISTIC v1, uncalibrated: offset = −ΔL*·0.006 (all channels) ∓ Δb*·0.008 (r/b), "
+            "saturation = 1 − 0.6·Δchroma/ref_chroma, slope/power 1. Scope: key, temperature, saturation — "
+            "never palette content. A starting balance for the colourist, applied to node 1 by resolve-mcp apply_look."
+        ),
+        "clips": clips,
+    }

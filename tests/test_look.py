@@ -147,3 +147,25 @@ def test_flag_outliers_needs_three_clips_and_ignores_tiny_spread():
     assert not any(s.outlier for s in L.flag_outliers(two))
     same = [L.score_clip(ref, [split(WARM_IVORY, SLATE)], [0], f"{i}", f"{i}") for i in range(4)]
     assert not any(s.outlier for s in L.flag_outliers(same))
+
+
+def test_cdl_from_deltas_direction_and_clamps():
+    # too bright & too warm & too saturated → darker, cooler (r down, b up), desaturated
+    c = L.cdl_from_deltas(12.0, 4.0, 4.0, 11.0)
+    assert c["offset"][1] < 0 and c["offset"][0] < c["offset"][2] and c["saturation"] < 1
+    assert c["slope"] == [1.0, 1.0, 1.0] and c["power"] == [1.0, 1.0, 1.0]
+    # on-look clip → identity
+    assert L.cdl_is_identity(L.cdl_from_deltas(0.0, 0.0, 0.0, 11.0))
+    # absurd deltas clamp
+    x = L.cdl_from_deltas(200.0, -200.0, 500.0, 11.0)
+    assert abs(x["offset"][1]) <= L.CDL_OFFSET_MAX and L.CDL_SAT_MIN <= x["saturation"] <= L.CDL_SAT_MAX
+
+
+def test_cdl_manifest_shape():
+    ref = L.build_look([split(WARM_IVORY, SLATE)], [0.0], "ref", 0.0)
+    scores = [L.score_clip(ref, [split(SKY, WHITE)], [0], "videos/a.mp4", "1/1"),
+              L.ClipScore("videos/b.mp4", "1/2", 0, 0, 0, 0, 0, 0, "", error="unreadable")]
+    m = L.cdl_manifest(ref, scores, "/pkg/manifest.json")
+    assert m["schema"] == L.CDL_SCHEMA and "HEURISTIC" in m["derivation"]
+    assert m["clips"][0]["cdl"]["saturation"] and m["clips"][0]["identity"] is False
+    assert m["clips"][1] == {"file": "videos/b.mp4", "error": "unreadable"}
