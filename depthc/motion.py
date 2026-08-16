@@ -108,6 +108,12 @@ REGION_ROWS = 3           # the 3x3 region grid; cells are equal splits of the a
 REGION_COLS = 3
 PATH_STILL = 0.10         # grid px per frame; a median flow below this has no direction to name
 PATH_RADIAL_STILL = 0.05  # px per frame of expansion/contraction below this is not a zoom
+# A push/pull moves EVERY side of the frame outward/inward. The radial term is recorded only
+# when all four quadrants agree in sign and each clears this share of the still floor;
+# otherwise a lone subject walking toward the lens (one quadrant, radial by accident) would
+# be booked as a camera move. Found on the first describe smoke: a box crossing frame read
+# "pulls out … pushes in" on a locked-off camera.
+PATH_RADIAL_QUADRANT = 0.5
 
 SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
 SPARK_DEAD = "·"
@@ -243,6 +249,12 @@ def flow_series(frames: np.ndarray, fps: float = 24.0) -> FlowSeries:
     norm = np.hypot(rx, ry)
     norm[norm == 0] = 1.0
     rx, ry = rx / norm, ry / norm
+    half_h, half_w = height // 2, width // 2
+    quadrants = (
+        (slice(0, half_h), slice(0, half_w)), (slice(0, half_h), slice(half_w, None)),
+        (slice(half_h, None), slice(0, half_w)), (slice(half_h, None), slice(half_w, None)),
+    )
+    quadrant_floor = PATH_RADIAL_STILL * PATH_RADIAL_QUADRANT
 
     for index, (previous, current) in enumerate(zip(grid[:-1], grid[1:])):
         if deltas[index] <= floor:
@@ -258,7 +270,15 @@ def flow_series(frames: np.ndarray, fps: float = 24.0) -> FlowSeries:
         path[index, 0], path[index, 1] = float(median[0]), float(median[1])
         # Radial expansion is measured on the flow AROUND the median: a pure pan has no
         # zoom in it, and leaving the translation in would book part of it as radial.
-        path[index, 2] = float((centred[..., 0] * rx + centred[..., 1] * ry).mean())
+        # And it is recorded only when COHERENT — all four quadrants expanding (or all
+        # contracting): see PATH_RADIAL_QUADRANT.
+        radial_field = centred[..., 0] * rx + centred[..., 1] * ry
+        radial = float(radial_field.mean())
+        per_quadrant = [float(radial_field[q].mean()) for q in quadrants]
+        coherent = all(
+            np.sign(q) == np.sign(radial) and abs(q) >= quadrant_floor for q in per_quadrant
+        )
+        path[index, 2] = radial if coherent else 0.0
         residual[index] = float(np.hypot(*centred.transpose(2, 0, 1)).mean())
     return FlowSeries(path=path, residual=residual, moving=moving)
 

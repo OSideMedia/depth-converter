@@ -241,6 +241,24 @@ It ends with a *suggested* verdict (`adhered` / `partial` / `ignored` / `late`) 
 ready-to-paste `depthc result` command. The suggestion is a heuristic calibrated on the
 measured fires — watch the clip, then record what actually happened.
 
+### Describing a clip that has no kit
+
+```bash
+./.tools/uv run depthc describe ~/Desktop/oside-<id>.mp4          # depth pass, same grid as a kit
+./.tools/uv run depthc describe ~/Desktop/oside-<id>.mp4 --rgb    # fast, no model, picture itself
+```
+
+`compare` needs the kit that drove a generation. A shot fired from text alone has none —
+`describe` (v0.8.0) runs the clip through the same depth pass and says what moved and
+which way, in prompt words: the camera over time (`pans left 0–1.5s; pushes in 2–3.5s`,
+or `locked off`), where the strongest motion sits and travels (`frame-left → frame-right`,
+`starts 1s in`, hottest cell), and the energy shape. So "did it follow the prompt's
+direction?" becomes: read the prompt, read this, do they agree. `--json` for a
+machine-readable block. Uncalibrated, description only — it cannot tell whether the moving
+thing is the one the prompt named; that stays a by-eye call. The radial push/pull term is
+recorded only when all four quadrants of the frame agree, so a subject walking toward the
+lens is not booked as a camera move.
+
 ### Recording what a fire actually did
 
 ```bash

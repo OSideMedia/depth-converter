@@ -765,6 +765,97 @@ def result(
     typer.echo(f"{DIM}{kit_dir / 'result.json'}{OFF}")
 
 
+def _depth_profile(info, resolution: str, input_size: int, precision: str,
+                   trim_seconds: float | None = None):
+    """Decode a clip (matte stripped, optionally trimmed), run the depth pass, profile it.
+
+    Shared by `compare` (the generation side) and `describe`, so a lone clip is measured on
+    exactly the frames and grid a compare would use — the same-frames law that the ratio
+    bug taught. Returns (crop_rect, MotionProfile at 24 fps).
+    """
+    from depthc import engine, motion as motionlib
+    from depthc.video_io import detect_crop, read_frames, target_size
+
+    rect = detect_crop(info)
+    if rect:
+        typer.echo(f"{DIM}matte detected: cropping to {rect.width}×{rect.height}{OFF}")
+    trim = (0.0, trim_seconds) if trim_seconds is not None else None
+    size = target_size(info, resolution, crop=rect)
+    frames = read_frames(info, trim=trim, fps=24.0, size=size, crop=rect)
+
+    device = engine.pick_device()
+    if device == "cpu":
+        _warn("MPS unavailable — running on CPU. This will be slow.")
+    total = engine.expected_windows(frames.shape[0])
+    with typer.progressbar(length=total, label="depth") as bar:
+        seen = {"n": 0}
+
+        def on_window(done: int, _total: int) -> None:
+            bar.update(done - seen["n"])
+            seen["n"] = done
+
+        result = engine.infer(
+            frames, 24.0, input_size=input_size, precision=precision,
+            device=device, on_window=on_window,
+            on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}"),
+        )
+    return rect, motionlib.measure(result.frames, 24.0)
+
+
+@app.command()
+def describe(
+    clip: Path = typer.Argument(..., help="Any video — typically a generation fired from text alone"),
+    resolution: str = typer.Option("720p", "--resolution", help="Depth pass size"),
+    input_size: int = typer.Option(518, "--input-size", help="Inference short side, multiple of 14"),
+    precision: str = typer.Option("fp32", "--precision", help="fp32 | fp16"),
+    rgb: bool = typer.Option(
+        False, "--rgb",
+        help="Skip the depth pass and describe the picture itself (fast, no model; NOT "
+             "comparable with kit/compare figures, which are depth-space)",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
+) -> None:
+    """Describe a lone clip's motion in prompt words — no kit needed.
+
+    `compare` needs the kit that drove a generation. A shot fired from text alone has none;
+    this runs it through the same depth pass and says what moved and which way — camera
+    (pans left, pushes in, over time), where the strongest motion sits and travels, and the
+    energy shape — so "did it follow the prompt's direction?" becomes: read the prompt,
+    read this, do they agree. Uncalibrated, description only; whether the moving thing is
+    the one the prompt named is still a by-eye call.
+    """
+    import json
+
+    from depthc import describe as describelib, engine, motion as motionlib
+    from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
+
+    try:
+        info = probe_file(clip)
+        if not as_json:
+            typer.echo(f"{BOLD}{clip.name}{OFF}  {DIM}{info.summary()}{OFF}")
+        if rgb:
+            frames = read_frames(info, fps=24.0, size=target_size(info, "480p"))
+            profile = motionlib.measure(frames, 24.0)
+        else:
+            _, profile = _depth_profile(info, resolution, input_size, precision)
+    except (VideoIOError, SetupIncomplete) as e:
+        _die(str(e))
+    except engine.NonFiniteDepth as e:
+        _die(str(e))
+    except KeyboardInterrupt:
+        typer.echo("\ncancelled", err=True)
+        raise typer.Exit(130)
+
+    description = describelib.describe(profile)
+    if as_json:
+        payload = description.as_dict()
+        payload["space"] = "rgb" if rgb else "depth"
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    typer.echo("")
+    typer.echo(describelib.render(description, clip.name, space="rgb" if rgb else "depth"))
+
+
 @app.command()
 def compare(
     kit_name: str = typer.Argument(..., help="Kit folder name, or a path to one"),
@@ -796,9 +887,7 @@ def compare(
     direction — what the full-frame envelope cannot see) are reported and never vote.
     """
     from depthc import compare as comparelib, engine, kit as kitlib, motion as motionlib
-    from depthc.video_io import (
-        VideoIOError, detect_crop, probe as probe_file, read_frames, target_size,
-    )
+    from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
 
     root = kitlib.library_root(library)
     kit_dir = Path(kit_name) if Path(kit_name).is_dir() else root / kit_name
@@ -831,13 +920,11 @@ def compare(
         # brightest moving surface), and the decode trimmed to the ref's length so the
         # depth normalisation covers only the stretch actually being judged — an extreme
         # in an excluded tail must not compress the greys of the overlap.
-        gen_rect = detect_crop(gen_info)
-        if gen_rect:
-            typer.echo(f"{DIM}matte on the generation: cropping to {gen_rect.width}×{gen_rect.height}{OFF}")
         gen_full_seconds = gen_info.duration
-        gen_trim = (0.0, ref_info.duration) if gen_info.duration > ref_info.duration else None
-        size = target_size(gen_info, resolution, crop=gen_rect)
-        frames = read_frames(gen_info, trim=gen_trim, fps=24.0, size=size, crop=gen_rect)
+        gen_rect, gen_profile = _depth_profile(
+            gen_info, resolution, input_size, precision,
+            trim_seconds=ref_info.duration if gen_info.duration > ref_info.duration else None,
+        )
 
         geometry_note = None
         ref_aspect = ref_info.width / ref_info.height
@@ -851,23 +938,6 @@ def compare(
                 f"({ref_aspect:.2f}:1) vs generation {gen_w}×{gen_h} ({gen_aspect:.2f}:1)"
             )
 
-        device = engine.pick_device()
-        if device == "cpu":
-            _warn("MPS unavailable — running on CPU. This will be slow.")
-        total = engine.expected_windows(frames.shape[0])
-        with typer.progressbar(length=total, label="depth") as bar:
-            seen = {"n": 0}
-
-            def on_window(done: int, _total: int) -> None:
-                bar.update(done - seen["n"])
-                seen["n"] = done
-
-            result = engine.infer(
-                frames, 24.0, input_size=input_size, precision=precision,
-                device=device, on_window=on_window,
-                on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}"),
-            )
-        gen_profile = motionlib.measure(result.frames, 24.0)
     except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
     except engine.NonFiniteDepth as e:

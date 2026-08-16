@@ -471,3 +471,12 @@ def test_path_label_vocabulary():
     assert m.path_label(0.1, -0.5, 0.0) == "tilts down"
     assert m.path_label(0.0, 0.0, -0.2) == "pulls out"
     assert m.path_label(0.5, 0.0, 0.2) == "pans left, pushes in"
+
+
+def test_a_subject_walking_toward_centre_is_not_a_camera_pull():
+    """One box crossing frame is radial by accident in one quadrant; a push/pull is every
+    quadrant at once. The radial term must stay 0 on the crossing (first describe smoke)."""
+    path = m.measure(moving_clip(72, speed=5), 24.0, with_flow=True).camera_path
+    assert path is not None
+    assert path["radial"] == pytest.approx(0.0, abs=1e-6)
+    assert path["label"] == "static"
