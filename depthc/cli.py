@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple
 
+import numpy as np
 import typer
 
 from depthc import __version__
@@ -967,6 +968,136 @@ def compare(
         f'      --notes "ratio {comparison.ratio if comparison.ratio is not None else "n/a"}'
         f' r0={comparison.r0 if comparison.r0 is not None else "n/a"} — <what you saw>"{OFF}'
     )
+
+
+@app.command()
+def look(
+    sources: list[Path] = typer.Argument(..., help="A reference clip, or one or more still images"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Output folder (default Outbox/looks/<name>/)"),
+    max_frames: int = typer.Option(8, "--max-frames", help="Keyframe cap for a clip"),
+    as_json: bool = typer.Option(False, "--json", help="Print look.json to stdout"),
+) -> None:
+    """Distil a reference's LOOK — palette, per-shot key, warmth, detail — into look.json.
+
+    The still-image sibling of a motion kit: `kit` copies a reference's motion through the
+    depth channel, `look` copies its palette and exposure through words. Splits a clip into
+    shots at colour cuts and measures the middle frame of each (or measures the stills you
+    hand it), writes a contact sheet, the keyframes, and `look.json` carrying a `visualDna`
+    block in OSIDE's VisualDnaSelection shape — hexes measured, WORDS left for authoring,
+    plus a per-shot key. Uncalibrated, description only. Proven to move two image models
+    (LIVEFIRE-2026-08-16-LOOK-DNA-AB) — and to darken a high-key shot when the key is
+    ignored, which is why the key rides per shot.
+    """
+    import json
+
+    import cv2
+
+    from depthc import look as looklib
+    from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
+
+    if not sources:
+        _die("give a clip or at least one image")
+    stills = {".png", ".jpg", ".jpeg", ".webp"}
+    dropped = ""
+    try:
+        if len(sources) == 1 and sources[0].suffix.lower() not in stills:
+            info = probe_file(sources[0])
+            sampled = read_frames(info, fps=looklib.SAMPLE_FPS, size=target_size(info, "480p"))
+            idx = looklib.pick_keyframes(sampled, looklib.SAMPLE_FPS, max_frames=max_frames)
+            frames = sampled[idx]
+            times = [i / looklib.SAMPLE_FPS for i in idx]
+            name, seconds = sources[0].stem, info.duration
+            if len(idx) == max_frames:
+                dropped = f"keyframes capped at {max_frames} (raise --max-frames to keep more shots)"
+        else:
+            imgs = []
+            for p in sources:
+                im = cv2.imread(str(p), cv2.IMREAD_COLOR)
+                if im is None:
+                    _die(f"cannot read image {p}")
+                imgs.append(cv2.cvtColor(im, cv2.COLOR_BGR2RGB))
+            frames = imgs
+            times = [float(i) for i in range(len(imgs))]
+            name, seconds = (sources[0].parent.name if len(sources) > 1 else sources[0].stem), 0.0
+    except (VideoIOError, SetupIncomplete) as e:
+        _die(str(e))
+
+    result = looklib.build_look(np.array(frames) if not isinstance(frames, list) else frames, times, name, seconds,
+                                notes=[dropped] if dropped else None)
+    out_dir = out or (Path("Outbox") / "looks" / name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    frames_dir = out_dir / "keyframes"
+    frames_dir.mkdir(exist_ok=True)
+    thumbs = []
+    for i, f in enumerate(frames):
+        f = np.asarray(f)
+        cv2.imwrite(str(frames_dir / f"keyframe_{i:02d}.jpg"), cv2.cvtColor(f, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 92])
+        h, w = f.shape[:2]
+        tw = 360
+        thumbs.append(cv2.resize(f, (tw, max(1, int(h * tw / w)))))
+    th = max(t.shape[0] for t in thumbs)
+    sheet = np.zeros((th, sum(t.shape[1] for t in thumbs), 3), dtype=np.uint8)
+    x = 0
+    for t in thumbs:
+        sheet[: t.shape[0], x : x + t.shape[1]] = t
+        x += t.shape[1]
+    cv2.imwrite(str(out_dir / "sheet.jpg"), cv2.cvtColor(sheet, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    payload = result.as_dict()
+    (out_dir / "look.json").write_text(json.dumps(payload, indent=2) + "\n")
+    if as_json:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    typer.echo(looklib.render_look(result))
+    if dropped:
+        typer.echo(f"  {YELLOW}{dropped}{OFF}")
+    typer.echo(f"  → {out_dir}/look.json · sheet.jpg · keyframes/")
+
+
+@app.command("look-compare")
+def look_compare(
+    look_json: Path = typer.Argument(..., help="A look.json written by `depthc look`"),
+    candidate: Path = typer.Argument(..., help="A generated still or clip"),
+    against: Optional[int] = typer.Option(None, "--against", help="Compare to this keyframe index instead of the global look"),
+    fps: float = typer.Option(1.0, "--fps", help="Sample rate for a clip"),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
+) -> None:
+    """Measure a generation against a look — palette distance, ΔL*, Δdark, Δwarmth, per sample.
+
+    A still gives one row. A clip gives one row per sampled second plus a DRIFT line —
+    did the look hold from first frame to last? Distances only; nothing here votes.
+    """
+    import json
+
+    import cv2
+
+    from depthc import look as looklib
+    from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
+
+    try:
+        ref = looklib.look_from_dict(json.loads(look_json.read_text()))
+    except (OSError, KeyError, ValueError) as e:
+        _die(f"cannot read look: {e}")
+    if against is not None and not (0 <= against < len(ref.frames)):
+        _die(f"--against out of range (0–{len(ref.frames) - 1})")
+    stills = {".png", ".jpg", ".jpeg", ".webp"}
+    try:
+        if candidate.suffix.lower() in stills:
+            im = cv2.imread(str(candidate), cv2.IMREAD_COLOR)
+            if im is None:
+                _die(f"cannot read image {candidate}")
+            frames, times = [cv2.cvtColor(im, cv2.COLOR_BGR2RGB)], [0.0]
+        else:
+            info = probe_file(candidate)
+            frames = read_frames(info, fps=fps, size=target_size(info, "480p"))
+            times = [i / fps for i in range(len(frames))]
+    except (VideoIOError, SetupIncomplete) as e:
+        _die(str(e))
+    deltas = looklib.compare_frames(ref, frames, times, against)
+    if as_json:
+        typer.echo(json.dumps({"look": ref.source, "candidate": candidate.name, "against": against,
+                               "rows": [d.as_dict() for d in deltas], "drift": looklib.drift(deltas)}, indent=2))
+        return
+    typer.echo(looklib.render_compare(ref, deltas, candidate.name, against))
 
 
 @app.command()

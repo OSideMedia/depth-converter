@@ -259,6 +259,36 @@ thing is the one the prompt named; that stays a by-eye call. The radial push/pul
 recorded only when all four quadrants of the frame agree, so a subject walking toward the
 lens is not booked as a camera move.
 
+### Distilling a reference's LOOK — palette and key, not motion
+
+```bash
+./.tools/uv run depthc look ~/Desktop/viral-xianxia.mp4                 # clip → shots → keyframes
+./.tools/uv run depthc look ref/palace.jpg ref/gate.jpg ref/stair.jpg   # or stills you already have
+./.tools/uv run depthc look-compare Outbox/looks/<name>/look.json ~/Desktop/oside-<id>.png
+./.tools/uv run depthc look-compare Outbox/looks/<name>/look.json ~/Desktop/oside-<id>.mp4   # + drift over time
+```
+
+A kit copies a reference's MOTION through the depth channel; `look` (v0.9.0) copies its
+LOOK through words. It splits a clip into shots at colour cuts, measures the middle frame
+of each — 6-colour palette (k-means in Lab, with area shares), luma mean and dark/bright
+shares, warmth (b*), chroma, detail — labels every shot's **key** (high / mid / low), and
+writes `look.json`, a contact sheet and the keyframes to `Outbox/looks/<name>/`.
+`look.json` carries a `visualDna` block in OSIDE's `VisualDnaSelection` shape: the hexes
+are measured, the WORDS (lighting, materials, era, forbidden list) are left empty on
+purpose — the live fire that this came from showed the words are the lever and that a
+mechanical hex→name step is too coarse (OSIDE's rendered a measured ivory/slate palette
+as "light orange, light orange, muted orange"). Read the sheet, name the colours and
+materials, keep the key per shot.
+
+Why the key rides per shot: LIVEFIRE-2026-08-16-LOOK-DNA-AB (OSIDE) put a DNA distilled
+from four reference keyframes against a generic prompt on two image models; the DNA won
+3/4 subjects on BOTH — and the one it lost, it lost on both for the same reason: one
+global palette ("dark timber, slate shadow, charcoal") pushed a high-key shot dark.
+`look-compare` shows exactly that — a still gives one row of distances (palette, ΔL*,
+Δdark, Δwarmth, Δchroma, Δdetail, the candidate's key, the nearest keyframe); a clip
+gives one row per sampled second and a DRIFT line, first frame to last. Distances, not
+verdicts; nothing here votes.
+
 ### Recording what a fire actually did
 
 ```bash

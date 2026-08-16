@@ -55,6 +55,14 @@ bundles for no real gain over doing it here.
    never says "adhered". `--rgb` skips the model for a fast look, but those figures are
    not comparable with kit/compare numbers.
 
+9. A reference whose LOOK matters (palette, exposure, ornament density) gets
+   `depthc look <clip|stills>` → `Outbox/looks/<name>/look.json` + sheet; the `visualDna`
+   block is OSIDE-shaped with hexes filled and words EMPTY — author the words from the
+   sheet, never derive them, and carry the per-shot key (a global palette darkened a
+   high-key shot on two models, LOOK-DNA-AB 2026-08-16). After a fire,
+   `depthc look-compare <look.json> <still|clip>` gives distances (+ drift on a clip);
+   quote them, they do not vote.
+
 ## Motion is the measurement that matters
 
 Duration, file size, resolution and fps are shape assertions that cannot fail if the code is
