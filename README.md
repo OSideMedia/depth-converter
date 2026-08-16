@@ -309,8 +309,9 @@ exactly the two furthest-palette clips and the one that wandered warm.
 
 `--emit-cdl` (v0.11.0, piece 3b) additionally writes `look-cdl.json` beside the manifest —
 one ASC CDL per clip (slope/offset/power/saturation) that pulls that clip's MEASURED mean
-ΔL* / Δb* / Δchroma back toward the look. HEURISTIC v1, uncalibrated and labelled so in
-the file: offset carries exposure and temperature, saturation carries chroma, slope and
+ΔL* / Δb* / Δchroma back toward the look. HEURISTIC v1.1 — linear gains FITTED ONCE on a real Resolve render (8 clips: v1 moved exposure
+~0.6 of the way and pushed temperature ~1.7× past, so the gains were refit; after the refit every
+clip sat within ±0.4 L* / ±1.7 b* of the look, palette untouched) and labelled so in the file: offset carries exposure and temperature, saturation carries chroma, slope and
 power stay 1 — a starting balance for the colourist, never a creative grade and never a
 palette fix. resolve-mcp's `apply_look` reads this file and puts each CDL on node 1 of
 its clip. On the wandering Stage-2 take it reproduced the hand-derived Resolve grade

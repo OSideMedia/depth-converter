@@ -1,6 +1,6 @@
 """Depth Converter — reference clip to Seedance-ready depth motion kit."""
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 # Pinned upstream Video-Depth-Anything commit. Kept in sync with scripts/setup.sh
 # and recorded into every kit.json for provenance.

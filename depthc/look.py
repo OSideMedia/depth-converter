@@ -601,14 +601,16 @@ def render_package(look: Look, scores: list[ClipScore]) -> str:
 # ---------------------------------------------------------------------------- per-clip CDL (look travels)
 
 CDL_SCHEMA = "oside-look-cdl/1"
-# HEURISTIC v1 — uncalibrated, marked as such. Maps a clip's measured mean deltas from the
-# look (ΔL*, Δb*, Δchroma) to an ASC CDL that pulls it back: offset carries exposure and
-# temperature, saturation carries chroma; slope and power stay 1 (a starting balance,
-# not a curve). Verified once in Resolve 2026-08-16 (t2v_palace_A: ΔL* +12→+1, Δb* +2→0)
-# with the same shape. a* (green–magenta) is deliberately NOT corrected.
-# ponytail: linear-in-delta gains; a fitted map if a colourist ever finds it under/over-shoots
-CDL_K_LUMA = 0.006        # offset per L* unit  (ΔL* +12 → −0.07)
-CDL_K_TEMP = 0.008        # r/b offset per b* unit
+# HEURISTIC v1.1 — linear-in-delta gains, FITTED ONCE on a real Resolve render (2026-08-16,
+# LOOK-TRAVELS probe: 8 clips, node-1 CDL, H.264 out, re-scored with this gauge). v1's
+# gains moved exposure ~0.6 of the way (ΔL* +9.5→+3.5, −7→−2.9, +6.8→+2.6) and pushed
+# temperature ~1.7× past the target (Δb* +3.8→−2.1, −4.0→+2.9), so K_LUMA rose 0.006→0.010
+# and K_TEMP fell 0.008→0.0045. Offset carries exposure and temperature, saturation carries
+# chroma; slope and power stay 1 (a starting balance, not a curve). a* (green–magenta) is
+# deliberately NOT corrected. Still a heuristic: one render, one codec, one look.
+# ponytail: linear gains fitted on 8 clips; a per-axis fitted map if a colourist finds drift
+CDL_K_LUMA = 0.010        # offset per L* unit  (ΔL* +10 → −0.10)
+CDL_K_TEMP = 0.0045       # r/b offset per b* unit
 CDL_K_SAT = 0.6           # saturation pull per unit of Δchroma/ref_chroma
 CDL_SAT_MIN, CDL_SAT_MAX = 0.5, 1.5
 CDL_OFFSET_MAX = 0.25
@@ -646,7 +648,7 @@ def cdl_manifest(look: Look, scores: list[ClipScore], manifest_path: str) -> dic
         "look": look.source,
         "manifest": manifest_path,
         "derivation": (
-            "HEURISTIC v1, uncalibrated: offset = −ΔL*·0.006 (all channels) ∓ Δb*·0.008 (r/b), "
+            "HEURISTIC v1.1, gains fitted once on a Resolve render (2026-08-16): offset = −ΔL*·0.010 (all channels) ∓ Δb*·0.0045 (r/b), "
             "saturation = 1 − 0.6·Δchroma/ref_chroma, slope/power 1. Scope: key, temperature, saturation — "
             "never palette content. A starting balance for the colourist, applied to node 1 by resolve-mcp apply_look."
         ),
