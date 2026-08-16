@@ -294,6 +294,19 @@ global palette ("dark timber, slate shadow, charcoal") pushed a high-key shot da
 gives one row per sampled second and a DRIFT line, first frame to last. Distances, not
 verdicts; nothing here votes.
 
+```bash
+./.tools/uv run depthc look-compare --manifest <package>/manifest.json            # the package's own look block
+./.tools/uv run depthc look-compare look.json --manifest <package>/manifest.json  # or a measured look
+```
+
+`--manifest` (v0.10.0, "look travels" piece 3) scores every `videos/*.mp4` of an OSIDE →
+DaVinci package against the look — the manifest's `look` block (colour-law hexes + targets,
+written by OSIDE's export when the project has a Style Constant) or a measured `look.json`
+— one row per clip, then flags OUTLIERS **relative to the package** (beyond 1.5 σ from the
+package mean on palette / ΔL* / Δb* / Δchroma, and only when the spread is not trivial).
+That is a triage list — look here first — not a verdict; the same eight Stage-2 takes flagged
+exactly the two furthest-palette clips and the one that wandered warm.
+
 ### Recording what a fire actually did
 
 ```bash

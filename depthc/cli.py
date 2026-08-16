@@ -1055,8 +1055,9 @@ def look(
 
 @app.command("look-compare")
 def look_compare(
-    look_json: Path = typer.Argument(..., help="A look.json written by `depthc look`"),
-    candidate: Path = typer.Argument(..., help="A generated still or clip"),
+    look_json: Optional[Path] = typer.Argument(None, help="A look.json written by `depthc look` (optional with --manifest when the manifest carries a look block)"),
+    candidate: Optional[Path] = typer.Argument(None, help="A generated still or clip"),
+    manifest: Optional[Path] = typer.Option(None, "--manifest", help="An OSIDE DaVinci package manifest.json — score every videos/*.mp4 in it (drift gauge)"),
     against: Optional[int] = typer.Option(None, "--against", help="Compare to this keyframe index instead of the global look"),
     fps: float = typer.Option(1.0, "--fps", help="Sample rate for a clip"),
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
@@ -1064,7 +1065,10 @@ def look_compare(
     """Measure a generation against a look — palette distance, ΔL*, Δdark, Δwarmth, per sample.
 
     A still gives one row. A clip gives one row per sampled second plus a DRIFT line —
-    did the look hold from first frame to last? Distances only; nothing here votes.
+    did the look hold from first frame to last? `--manifest` scores a whole OSIDE→DaVinci
+    package (every videos/*.mp4) against the look — the look.json, or the manifest's own
+    `look` block when no look.json is given — and flags outliers RELATIVE to the package
+    (look here first). Distances only; nothing here votes.
     """
     import json
 
@@ -1073,6 +1077,50 @@ def look_compare(
     from depthc import look as looklib
     from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
 
+    if manifest is not None:
+        # look.json is optional here: `depthc look-compare --manifest m.json` uses m.json's look block;
+        # `depthc look-compare look.json --manifest m.json` uses the measured look. A lone
+        # positional then IS the look.json (candidate must be absent).
+        if candidate is not None:
+            _die("--manifest takes at most one positional (the look.json)")
+        try:
+            mani = json.loads(manifest.read_text())
+        except (OSError, ValueError) as e:
+            _die(f"cannot read manifest: {e}")
+        base = manifest.parent
+        try:
+            if look_json is not None:
+                ref = looklib.look_from_dict(json.loads(look_json.read_text()))
+            elif mani.get("look"):
+                ref = looklib.look_from_manifest_block(mani["look"])
+            else:
+                _die("manifest carries no `look` block and no look.json was given — nothing to compare against")
+        except (OSError, KeyError, ValueError) as e:
+            _die(f"cannot build the look: {e}")
+        videos = mani.get("videos") or []
+        if not videos:
+            _die("manifest lists no videos")
+        scores = []
+        for v in videos:
+            rel = v.get("file", "")
+            label = f"{v.get('sceneIndex', '?')}/{v.get('shotNumber', '?')} {Path(rel).name}"
+            path = base / rel
+            try:
+                info = probe_file(path)
+                frames = read_frames(info, fps=fps, size=target_size(info, "480p"))
+                times = [i / fps for i in range(len(frames))]
+                scores.append(looklib.score_clip(ref, frames, times, rel, label))
+            except (VideoIOError, SetupIncomplete, OSError) as e:
+                scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error=str(e).splitlines()[0][:80]))
+        scores = looklib.flag_outliers(scores)
+        if as_json:
+            typer.echo(json.dumps({"look": ref.source, "manifest": str(manifest), "clips": [s.as_dict() for s in scores]}, indent=2))
+            return
+        typer.echo(looklib.render_package(ref, scores))
+        return
+
+    if look_json is None or candidate is None:
+        _die("give <look.json> <candidate>, or --manifest <manifest.json>")
     try:
         ref = looklib.look_from_dict(json.loads(look_json.read_text()))
     except (OSError, KeyError, ValueError) as e:

@@ -123,3 +123,27 @@ def test_swatch_hint_words():
     assert L.swatch_hint([90.0, 0.0, 0.0], 0.5) == "50% · pale, neutral, greyed"
     assert L.swatch_hint([40.0, 5.0, 30.0], 0.2) == "20% · dark, warm, saturated"
     assert L.swatch_hint([55.0, -2.0, -12.0], 0.1) == "10% · mid, cool, muted"
+
+
+def test_look_from_manifest_block_and_package_outliers():
+    block = {"name": "Film look", "hex": ["#d6bb95", "#4b6075", "#1e2022"], "targets": {"luma_mean": 50.0, "warmth": 6.0}}
+    ref = L.look_from_manifest_block(block)
+    assert ref.source == "Film look" and len(ref.palette) == 3
+    assert abs(sum(s.share for s in ref.palette) - 1.0) < 1e-6 and ref.palette[0].share > ref.palette[-1].share
+    # four "clips": three on-look, one wildly cool/bright → flagged relative to its siblings
+    on = [split(WARM_IVORY, SLATE)] * 3
+    off = [split(SKY, WHITE)] * 3
+    scores = [L.score_clip(ref, on, [0, 1, 2], f"v{i}.mp4", f"1/{i}") for i in range(3)]
+    scores.append(L.score_clip(ref, off, [0, 1, 2], "v9.mp4", "2/9"))
+    scores = L.flag_outliers(scores)
+    assert scores[3].outlier and not scores[0].outlier
+    text = L.render_package(ref, scores)
+    assert "outliers 1/4" in text and "PASS" not in text and "adhered" not in text
+
+
+def test_flag_outliers_needs_three_clips_and_ignores_tiny_spread():
+    ref = L.build_look([split(WARM_IVORY, SLATE)], [0.0], "ref", 0.0)
+    two = [L.score_clip(ref, [solid(SKY)], [0], "a", "a"), L.score_clip(ref, [solid(WARM_IVORY)], [0], "b", "b")]
+    assert not any(s.outlier for s in L.flag_outliers(two))
+    same = [L.score_clip(ref, [split(WARM_IVORY, SLATE)], [0], f"{i}", f"{i}") for i in range(4)]
+    assert not any(s.outlier for s in L.flag_outliers(same))

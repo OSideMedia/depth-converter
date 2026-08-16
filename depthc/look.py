@@ -479,3 +479,120 @@ def render_compare(look: Look, deltas: list[Delta], label: str, against: int | N
             f"L* {dr['luma_drift']:+.1f}   b* {dr['warmth_drift']:+.1f}   keys {'→'.join(dr['keys'])}"
         )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------- package (manifest) mode
+
+def hex_to_lab(h: str) -> list[float]:
+    h = h.strip().lstrip("#")
+    rgb = np.array([[int(h[i:i + 2], 16) for i in (0, 2, 4)]], dtype=np.uint8)
+    return [float(v) for v in rgb_to_lab(rgb)[0]]
+
+
+def look_from_manifest_block(block: dict, source: str = "manifest") -> "Look":
+    """Build a comparable Look from an OSIDE manifest `look` block (piece 1 of look-travels):
+    `hex` (colour-law swatches, dominant first) + `targets` {luma_mean, dark_share, warmth, chroma}.
+    Shares fall back to the 60:30:10 law when the block carries none. Frames are synthetic
+    (one frame = the global), so `nearest_frame` is meaningless here and reported as 0."""
+    hexes = list(block.get("hex") or [])
+    if not hexes:
+        raise ValueError("manifest look block carries no hex swatches")
+    shares = list(block.get("shares") or [])
+    if len(shares) != len(hexes):
+        law = [0.6, 0.3, 0.1]
+        shares = (law + [0.0] * len(hexes))[: len(hexes)]
+        tot = sum(shares) or 1.0
+        shares = [x / tot for x in shares]
+    palette = [Swatch(h, float(sh), hex_to_lab(h)) for h, sh in zip(hexes, shares)]
+    t = block.get("targets") or {}
+    lum = float(t.get("luma_mean", np.mean([p.lab[0] for p in palette])))
+    dark = float(t.get("dark_share", 0.0))
+    warm = float(t.get("warmth", np.mean([p.lab[2] for p in palette])))
+    chroma = float(t.get("chroma", np.mean([np.hypot(p.lab[1], p.lab[2]) for p in palette])))
+    fl = FrameLook(0, 0.0, lum, 0.0, dark, 0.0, chroma, warm, 0.0, palette, key_label(lum, dark))
+    keys = {"high-key": 0, "mid-key": 0, "low-key": 0}
+    keys[fl.key] += 1
+    return Look(source=block.get("name") or source, seconds=0.0, frames=[fl], palette=palette,
+                luma_mean=lum, dark_share=dark, bright_share=0.0, chroma=chroma, warmth=warm, detail=0.0,
+                keys=keys, notes=["built from a manifest look block — targets, not measured keyframes"])
+
+
+@dataclass
+class ClipScore:
+    file: str
+    label: str
+    seconds: int
+    palette: float
+    luma: float
+    warmth: float
+    chroma: float
+    dark: float
+    key_track: str
+    outlier: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "file": self.file, "label": self.label, "seconds": self.seconds,
+            "palette": round(self.palette, 1), "luma": round(self.luma, 1), "warmth": round(self.warmth, 1),
+            "chroma": round(self.chroma, 1), "dark": round(self.dark, 3), "key_track": self.key_track,
+            "outlier": self.outlier, "error": self.error,
+        }
+
+
+def score_clip(look: Look, frames: np.ndarray, times: list[float], file: str, label: str) -> ClipScore:
+    deltas = compare_frames(look, frames, times, None)
+    if not deltas:
+        return ClipScore(file, label, 0, 0, 0, 0, 0, 0, "", error="no frames")
+    keys = [d.key for d in deltas]
+    track = keys[0] if len(set(keys)) == 1 else "→".join(k[0].upper() for k in keys)
+    return ClipScore(
+        file, label, len(deltas),
+        float(np.mean([d.palette for d in deltas])), float(np.mean([d.luma for d in deltas])),
+        float(np.mean([d.warmth for d in deltas])), float(np.mean([d.chroma for d in deltas])),
+        float(np.mean([d.dark for d in deltas])), track,
+    )
+
+
+# outlier rule — RELATIVE to the package, report-only: a clip is flagged on an axis when it
+# sits more than OUTLIER_Z standard deviations from the package mean on that axis, and the
+# axis spread is not trivially small. Nothing here is calibrated to "wrong"; it says
+# "furthest from its siblings — look here first".
+OUTLIER_Z = 1.5
+OUTLIER_MIN_SPREAD = {"palette": 1.0, "luma": 3.0, "warmth": 2.0, "chroma": 2.0}
+
+
+def flag_outliers(scores: list[ClipScore]) -> list[ClipScore]:
+    ok = [s for s in scores if s.error is None]
+    if len(ok) < 3:
+        return scores
+    for axis in ("palette", "luma", "warmth", "chroma"):
+        vals = np.array([getattr(s, axis) for s in ok], dtype=float)
+        mu, sd = float(vals.mean()), float(vals.std())
+        if sd < OUTLIER_MIN_SPREAD[axis]:
+            continue
+        for s, v in zip(ok, vals):
+            if abs(v - mu) > OUTLIER_Z * sd:
+                s.outlier.append(f"{axis} {v - mu:+.1f} vs package mean")
+    return scores
+
+
+def render_package(look: Look, scores: list[ClipScore]) -> str:
+    lines = [f"PACKAGE DRIFT  {len(scores)} clips vs {look.source} — distances, not verdicts; outliers are relative to the package"]
+    lines.append("  clip                            s   palette   ΔL*    Δb*  Δchroma  key      flag")
+    for s in scores:
+        if s.error:
+            lines.append(f"  {s.label[:30]:30}  --   ERROR {s.error}")
+            continue
+        flag = "; ".join(s.outlier) if s.outlier else ""
+        lines.append(
+            f"  {s.label[:30]:30} {s.seconds:2d}   {s.palette:6.1f}  {s.luma:+5.1f}  {s.warmth:+5.1f}   {s.chroma:+6.1f}  {s.key_track:8} {flag}"
+        )
+    ok = [s for s in scores if s.error is None]
+    if ok:
+        lines.append(
+            f"  package mean   palette {np.mean([s.palette for s in ok]):.1f}   ΔL* {np.mean([s.luma for s in ok]):+.1f}   "
+            f"Δb* {np.mean([s.warmth for s in ok]):+.1f}   Δchroma {np.mean([s.chroma for s in ok]):+.1f}   "
+            f"outliers {sum(1 for s in ok if s.outlier)}/{len(ok)}"
+        )
+    return "\n".join(lines)

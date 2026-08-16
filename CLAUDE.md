@@ -64,6 +64,8 @@ bundles for no real gain over doing it here.
    quote them, they do not vote. `look.json` also carries a paste-ready `styleConstant`
    block (OSIDE Look tab › Style Constant): hexes filled, prose empty, hints beside —
    author, then paste; there is deliberately no OSIDE import door.
+   `depthc look-compare --manifest <pkg>/manifest.json` scores a whole DaVinci package
+   (look-travels drift gauge): per-clip distances + RELATIVE outliers = a triage list.
 
 ## Motion is the measurement that matters
 
