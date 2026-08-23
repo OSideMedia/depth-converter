@@ -25,7 +25,7 @@ import numpy as np
 
 from depthc.motion import (
     REGION_COLS, REGION_ROWS, STATIC_FLOOR, STRONG_ENERGY, WEAK_ENERGY, MotionProfile,
-    path_label,
+    path_label, path_speed, path_tempo,
 )
 
 BUCKET_SECONDS = 0.5
@@ -47,9 +47,13 @@ class Segment:
     start: float
     end: float
     label: str
+    tempo: str = ""                              # "slowly" | "quickly" | "" (unremarkable)
 
     def as_dict(self) -> dict:
-        return {"start": round(self.start, 2), "end": round(self.end, 2), "label": self.label}
+        return {
+            "start": round(self.start, 2), "end": round(self.end, 2), "label": self.label,
+            "tempo": self.tempo,
+        }
 
 
 @dataclass
@@ -119,16 +123,28 @@ def camera_segments(profile: MotionProfile, bucket_seconds: float = BUCKET_SECON
     n = profile.path.shape[0] - step + 1
     if n <= 0:
         return []
-    labels = []
+    labels: list[str] = []
+    speeds: list[float] = []
     for i in range(0, n, step):
         chunk = profile.path[i:i + step]
         moving = np.any(chunk != 0, axis=1)
         if not moving.any():
             labels.append("static")
+            speeds.append(0.0)
             continue
         dx, dy, radial = (float(v) for v in chunk[moving].mean(axis=0))
         labels.append(path_label(dx, dy, radial))
-    return _segments(labels, bucket_seconds)
+        speeds.append(path_speed(dx, dy, radial))
+    segments = _segments(labels, bucket_seconds)
+    # Tempo is graded over the whole run, not per bucket: a per-bucket adverb would split
+    # one "pans left" into fragments at every flicker across a band edge.
+    for segment in segments:
+        if segment.label == "static":
+            continue
+        lo = int(round(segment.start / bucket_seconds))
+        hi = int(round(segment.end / bucket_seconds))
+        segment.tempo = path_tempo(float(np.mean(speeds[lo:hi])))
+    return segments
 
 
 def placement_track(
@@ -213,7 +229,10 @@ def _sentences(d: Description) -> list[str]:
         if not moving:
             out.append("Camera: locked off — no whole-frame move measured.")
         else:
-            runs = "; ".join(f"{s.label} {s.start:g}–{s.end:g}s" for s in moving)
+            runs = ", then ".join(
+                " ".join(filter(None, [s.tempo, s.label])) + f" {s.start:g}–{s.end:g}s"
+                for s in moving
+            )
             kind = ""
             if d.camera_share is not None:
                 kind = (

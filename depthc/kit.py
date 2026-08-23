@@ -293,6 +293,8 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         "  ref ('take movement, action and pacing from it'); describing the action again",
         "  makes two instructions for one reference. Describe the LOOK only.",
         f"  Ask for about {manifest['suggestedOutputSeconds']:g}s of output.",
+        "  Fire at 720p or 4K, never 1080p — 1080p ignored or overshot the ref 3/3",
+        "  while every other tier adhered 4/4 (DOCS/LIVE-FIRE.md).",
         "  binding.txt is for surfaces that HAVE a per-reference binding field - OSIDE",
         "  does not, for uploads. See prompt.txt.",
         "",

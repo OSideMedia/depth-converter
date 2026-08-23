@@ -463,6 +463,12 @@ def test_camera_share_is_unchanged_by_the_flow_refactor():
     assert m.measure(still, 24.0).camera_path == {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
 
 
+def test_path_tempo_bands():
+    assert m.path_tempo(m.path_speed(0.2, 0.1, 0.0)) == "slowly"    # >15 s to cross
+    assert m.path_tempo(m.path_speed(0.8, 0.0, 0.1)) == ""          # unremarkable
+    assert m.path_tempo(m.path_speed(2.0, 0.0, 0.0)) == "quickly"   # <4 s to cross
+
+
 def test_path_label_vocabulary():
     assert m.path_label(0.0, 0.0, 0.0) == "static"
     assert m.path_label(0.5, 0.1, 0.0) == "pans left"

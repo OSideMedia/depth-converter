@@ -114,6 +114,15 @@ PATH_RADIAL_STILL = 0.05  # px per frame of expansion/contraction below this is 
 # be booked as a camera move. Found on the first describe smoke: a box crossing frame read
 # "pulls out … pushes in" on a locked-off camera.
 PATH_RADIAL_QUADRANT = 0.5
+# A pace word beside the path label ("slowly pans left"). The idea is CozyClay's — its
+# camera-move classifier grades tempo from physical lens travel in m/s — but those units
+# do not exist here, so the bands are re-derived as TIME TO CROSS THE FRAME: a move at
+# v grid-px/frame crosses the GRID_LONG_EDGE in 160/(24·v) seconds at the 24 fps analysis
+# rate. Slower than a ~15 s crossing reads "slowly"; faster than ~4 s reads "quickly".
+# ponytail: heuristic crossing-time bands, never calibrated against a fire — re-derive
+# from measured generations before tempo is ever allowed to vote in a verdict.
+PATH_SLOW = GRID_LONG_EDGE / (24.0 * 15.0)  # ≈ 0.44 px/frame
+PATH_FAST = GRID_LONG_EDGE / (24.0 * 4.0)   # ≈ 1.67 px/frame
 
 SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
 SPARK_DEAD = "·"
@@ -333,6 +342,20 @@ def path_label(dx: float, dy: float, radial: float) -> str:
     if abs(radial) >= PATH_RADIAL_STILL:
         parts.append("pushes in" if radial > 0 else "pulls out")
     return ", ".join(parts) if parts else "static"
+
+
+def path_speed(dx: float, dy: float, radial: float) -> float:
+    """One pace number for a path sample: translation plus expansion, grid px/frame."""
+    return float(np.hypot(dx, dy) + abs(radial))
+
+
+def path_tempo(speed: float) -> str:
+    """"slowly" / "quickly" / "" for a NAMED path; meaningless beside "static"."""
+    if speed >= PATH_FAST:
+        return "quickly"
+    if speed < PATH_SLOW:
+        return "slowly"
+    return ""
 
 
 def sparkline(values, floor: float = STATIC_FLOOR, ceiling: float | None = None) -> str:

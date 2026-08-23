@@ -29,7 +29,24 @@ def test_a_pan_is_named_as_a_camera_move_over_time():
     desc = d.describe(m.measure(panning_clip(72), 24.0))
     assert desc.camera_overall is not None and desc.camera_overall["label"] == "pans left"
     assert desc.camera_segments and desc.camera_segments[0].label == "pans left"
-    assert any(s.startswith("Camera: pans left") and "camera-path" in s for s in desc.sentences)
+    # 4 source px/frame is 2 grid px/frame — over the PATH_FAST crossing-time band.
+    assert desc.camera_segments[0].tempo == "quickly"
+    assert any(
+        s.startswith("Camera: quickly pans left") and "camera-path" in s for s in desc.sentences
+    )
+
+
+def test_two_camera_runs_chain_with_then():
+    desc = d.Description(
+        seconds=3.0, energy=2.0, band="fine", spark="▅▅▅", dead=None, camera_share=0.8,
+        camera_overall={"label": "pans left"},
+        camera_segments=[
+            d.Segment(0.0, 1.5, "pans left", tempo="slowly"),
+            d.Segment(1.5, 3.0, "pushes in"),
+        ],
+    )
+    line = d._sentences(desc)[0]
+    assert "slowly pans left 0–1.5s, then pushes in 1.5–3s" in line
 
 
 def test_a_still_clip_is_static_everywhere():

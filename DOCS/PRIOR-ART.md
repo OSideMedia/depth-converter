@@ -106,3 +106,51 @@ before firing is a required step, not a nicety.
 - **Whether polarity matters** (near-bright vs far-bright). No pipeline we found treats it as
   a choice, because a trained ControlNet has a fixed convention. A generic video-ref slot has
   none, so it is an open question and a `--variants` arm.
+
+---
+
+## CozyClay (NomaDamas) — surveyed 2026-08-23
+
+A browser 3D staging studio (Three.js/R3F + an MCP server): block a scene with clay
+mannequins, fly a camera, and it derives film vocabulary from the *known geometry* —
+the geometry-forward twin of our pixels-backward pipeline. AGPL-3.0, so ideas were
+re-derived in our own units; no code was copied.
+
+### Taken
+
+- **A tempo word beside the path label.** Their camera-move classifier grades slow/fast
+  from physical lens travel in m/s. Re-derived here as time-to-cross-the-frame bands
+  (`PATH_SLOW`/`PATH_FAST` in `motion.py`); `describe` now says "quickly pans left
+  0–2s, then pushes in". Heuristic, uncalibrated — marked as such at the constants.
+- **"then"-chained camera runs** in the describe sentence, their `moveSequencePhrase`
+  shape, replacing the semicolon join.
+- **Provenance tags on prompt rules.** Their ARDY prompt guide labels every line
+  `[Upstream fact]` vs `[CozyClay policy]` vs `[pipeline observation]`. Applied to the
+  kit template's GUIDANCE section as `[measured]` / `[community]` / `[reasoned]`, and
+  the measured 720p-or-4K resolution law now appears in the template and kit README
+  (it previously lived only in CLAUDE.md, invisible at fire time).
+
+### Deferred (owed ledger)
+
+- **Framing vocabulary from the depth silhouette.** Their `shot.js` names shot size
+  from screen fraction (seven labels, explicit thresholds) and level from lens height.
+  We could estimate subject screen fraction from the depth silhouette and name framing
+  in `describe` — but that is a build needing measurement, not a port.
+- **Depth-parallax move disambiguation.** From RGB flow alone, pan-vs-truck and orbit
+  are unnameable (`path_label` says so by construction). We hold the one signal that
+  could split them from pixels: the parallax gradient across depth bands. Uncalibrated
+  research with no current consumer; recorded so the seam is not lost.
+
+### Deliberately not taken
+
+- **Nearest-prime lens snapping for OSIDE.** Their insight (models saw more "35mm"
+  captions than "47mm") is already superseded there: OSIDE quantises to a real focal
+  set (8/14/35/50/75mm) and the 2.5 dialect deliberately ships FOV anchors instead of
+  mm — a measured dialect decision this would regress.
+- **The geometric move classifier's thresholds** (DOLLY_M, ORBIT_DEG…). They need 3D
+  positions we do not have; only the tempo idea transfers.
+- **Their Seedance 2.0 provider facts** — corroboration only, 2.0-era, third-party:
+  no-seed matches our seed-does-not-pin law; "reference-video and first/last-frame
+  cannot be mixed" is *their validator hard-erroring* where we measured a *silent
+  drop* in OSIDE's adapter — possibly an Ark-direct vs Composer surface difference;
+  worth one line in any future parity pass, not a fire.

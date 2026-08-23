@@ -49,23 +49,33 @@ the image references.
 GUIDANCE — not part of either paste block
 ═══════════════════════════════════════════════════════════════════════════════
 
-• Keep the ref in the 3–8 s sweet spot. Adherence degrades past ~8 s and refs over ~10 s
-  lose it badly. This kit is {duration:.2f}s.
+Every rule carries its provenance: [measured] = a paid fire this repo recorded
+(DOCS/LIVE-FIRE.md) · [community] = hands-on community testing, not vendor-documented ·
+[reasoned] = follows from the mechanics, untested.
 
-• One dominant motion signal per clip. A ref carrying a camera move AND an action AND a
-  lighting change gets followed at random.
+• [measured] Fire at 720p or 4K, NEVER 1080p. 1080p is 0/3 — the ref ignored or overshot
+  every time, across seeds, ref resolutions and prompt phrasings — while every other tier
+  is 4/4. Iterate at 720p, master at 4K.
 
-• Weight roughly 70% identity refs / 30% motion ref. Over-weighting the motion ref is the
-  usual cause of identity drift.
+• [community] Keep the ref in the 3–8 s sweet spot. Adherence degrades past ~8 s and refs
+  over ~10 s lose it badly. This kit is {duration:.2f}s.
 
-• Identity images must not contain real photographic faces — Seedance rejects them. Use
-  AI-generated or stylized references, or an approved likeness from the Ark asset library.
+• [community] One dominant motion signal per clip. A ref carrying a camera move AND an
+  action AND a lighting change gets followed at random.
 
-• Match output length to the ref: request about {suggested_output:g}s. A ref shorter than
-  the generation leaves the tail uncovered, and what the model does there is undefined.
+• [community] Weight roughly 70% identity refs / 30% motion ref. Over-weighting the motion
+  ref is the usual cause of identity drift.
 
-• Attach this as a refs-only shot. Go straight to "make video" and skip the create-frame
-  step — the adapter never sends references alongside a start frame, so a frame-first shot
-  silently drops the depth ref.
+• [community — confirmed once by a measured rejection] Identity images must not contain
+  real photographic faces — Seedance rejects them at input moderation. Use AI-generated or
+  stylized references, or an approved likeness from the Ark asset library.
+
+• [reasoned] Match output length to the ref: request about {suggested_output:g}s. A ref
+  shorter than the generation leaves the tail uncovered, and what the model does there is
+  undefined.
+
+• [measured] Attach this as a refs-only shot. Go to "make video" and skip the create-frame
+  step — the adapter never sends references alongside a start frame, so a frame-first
+  shot silently drops the depth ref.
 
 {still_guidance}
