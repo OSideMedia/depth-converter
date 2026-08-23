@@ -800,7 +800,9 @@ def _depth_profile(info, resolution: str, input_size: int, precision: str,
             device=device, on_window=on_window,
             on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}"),
         )
-    return rect, motionlib.measure(result.frames, 24.0)
+    # The analysis-grid depth frames ride along for framing (describe); compare ignores
+    # them — its questions are all answered by the profile.
+    return rect, motionlib.measure(result.frames, 24.0), motionlib.analysis_gray(result.frames)
 
 
 @app.command()
@@ -837,8 +839,10 @@ def describe(
         if rgb:
             frames = read_frames(info, fps=24.0, size=target_size(info, "480p"))
             profile = motionlib.measure(frames, 24.0)
+            framing = None  # in RGB, bright is not near — there is no figure to size
         else:
-            _, profile = _depth_profile(info, resolution, input_size, precision)
+            _, profile, gray = _depth_profile(info, resolution, input_size, precision)
+            framing = describelib.read_framing(gray, region_energy=profile.region_energy)
     except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
     except engine.NonFiniteDepth as e:
@@ -847,7 +851,7 @@ def describe(
         typer.echo("\ncancelled", err=True)
         raise typer.Exit(130)
 
-    description = describelib.describe(profile)
+    description = describelib.describe(profile, framing=framing)
     if as_json:
         payload = description.as_dict()
         payload["space"] = "rgb" if rgb else "depth"
@@ -922,7 +926,7 @@ def compare(
         # depth normalisation covers only the stretch actually being judged — an extreme
         # in an excluded tail must not compress the greys of the overlap.
         gen_full_seconds = gen_info.duration
-        gen_rect, gen_profile = _depth_profile(
+        gen_rect, gen_profile, _ = _depth_profile(
             gen_info, resolution, input_size, precision,
             trim_seconds=ref_info.duration if gen_info.duration > ref_info.duration else None,
         )

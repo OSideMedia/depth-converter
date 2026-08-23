@@ -50,9 +50,12 @@ bundles for no real gain over doing it here.
    both.
 
 8. A generation with **no kit** (fired from text alone) gets `depthc describe <clip>` —
-   the same depth pass, described in prompt words (camera over time, where the motion sits
-   and travels, energy). Read it against the prompt. Uncalibrated, description only; it
-   never says "adhered". `--rgb` skips the model for a fast look, but those figures are
+   the same depth pass, described in prompt words (camera over time with a tempo word,
+   framing of the nearest figure, where the motion sits and travels, energy). Read it
+   against the prompt. Uncalibrated, description only; it never says "adhered". The
+   framing line sizes the nearest iso-depth OBJECT — usually the figure, but a
+   foreground sign reads the same, and a depth-only measure cannot tell an insert from
+   a landscape (no absolute scale); silence means the gates found no distinct figure. `--rgb` skips the model for a fast look, but those figures are
    not comparable with kit/compare numbers.
 
 9. A reference whose LOOK matters (palette, exposure, ornament density) gets

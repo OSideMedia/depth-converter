@@ -130,16 +130,27 @@ re-derived in our own units; no code was copied.
   the measured 720p-or-4K resolution law now appears in the template and kit README
   (it previously lived only in CLAUDE.md, invisible at fire time).
 
+- **Framing vocabulary from the depth silhouette** (taken 2026-08-23, same day, after
+  Peter's call to close the loose end). `read_framing` sizes the nearest iso-depth
+  figure and names it on a five-rung ladder; everything tighter than "medium" collapses
+  into one honest "tight" rung because an in-frame silhouette saturates at 1.0.
+  Validated on six CC clips from Wikimedia Commons — the first pass failed 3/6 and the
+  fixes were MEASURED, not guessed: open water ramped +0.25 while true figures sat
+  within ±0.08 (→ the FRAMING_MAX_RAMP surface gate), and a static near sliver got
+  sized while the dancers moved in the midground (→ the motion-hotspot overlap gate).
+  Final score: 5/6 correct-or-honestly-silent; the sixth sizes a foreground SIGN at 68%
+  (depth cannot know person from object — documented, by-eye caveat stands). What depth
+  alone can never fix: an insert and a landscape share the same relative-depth
+  structure, so a frame-filling near surface that slips the gates reads as a wide.
+
 ### Deferred (owed ledger)
 
-- **Framing vocabulary from the depth silhouette.** Their `shot.js` names shot size
-  from screen fraction (seven labels, explicit thresholds) and level from lens height.
-  We could estimate subject screen fraction from the depth silhouette and name framing
-  in `describe` — but that is a build needing measurement, not a port.
 - **Depth-parallax move disambiguation.** From RGB flow alone, pan-vs-truck and orbit
   are unnameable (`path_label` says so by construction). We hold the one signal that
   could split them from pixels: the parallax gradient across depth bands. Uncalibrated
-  research with no current consumer; recorded so the seam is not lost.
+  research with no current consumer; recorded so the seam is not lost. (Closed
+  2026-08-23 as won't-do by Peter's call — no consumer; this note is the preserved
+  idea.)
 
 ### Deliberately not taken
 
