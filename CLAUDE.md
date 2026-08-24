@@ -20,11 +20,11 @@ uv upgrade can never silently re-resolve this build.
 "never plain `uv` — the machine-wide Homebrew uv is x86_64 and cannot install torch at all."
 Homebrew migrated to `/opt/homebrew` (native arm64) on 2026-08-24, so plain `uv` is now
 arm64 0.12.5 and *would* resolve torch. Keep using `.tools/uv` on the pinning argument alone.
-What did NOT change: `last30days-skill` and `oside-resolve-mcp` still have venvs built by the
-old x86_64 uv 0.11.28 against `cpython-3.12-macos-x86_64-none`. Both still run (verified
-2026-08-24) because a venv resolves its interpreter by absolute path — but a plain
-`uv sync`/`uv add` in either now picks up the arm64 uv and would re-resolve them. That is a
-deliberate migration, not something to trigger by accident.
+The two sibling projects named here previously — `last30days-skill` and `oside-resolve-mcp` —
+were migrated to arm64 the same day, so there is no longer an x86 venv anywhere to protect.
+Both were rebuilt with **zero version drift** (pinned to their exact prior versions) and
+re-verified: last30days 4098 passed / 1 pre-existing failure, identical to its x86 baseline
+and 1.36× faster; oside-resolve-mcp 41/41, identical.
 
 ## The primary workflow: inbox → kit
 
