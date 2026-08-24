@@ -33,10 +33,15 @@ Installs a **project-local arm64 `uv`** into `.tools/`, fetches an arm64 CPython
 [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) at a pinned
 commit, and downloads the VDA-Small checkpoint (116 MB).
 
-> **Why project-local uv?** PyTorch ships **arm64-only** macOS wheels. A Homebrew `uv` under
-> `/usr/local` is an x86_64 binary and resolves x86_64 wheels, so `torch` will never install
-> through it. Keeping the arm64 uv inside `.tools/` fixes this build without changing `uv`
-> for any other project on the machine. Fully undone by `rm -rf .tools/`.
+> **Why project-local uv?** PyTorch ships **arm64-only** macOS wheels, and `.tools/uv` is a
+> pinned arm64 uv, so this build resolves `torch` the same way on any machine and cannot be
+> broken by a machine-wide uv upgrade. Fully undone by `rm -rf .tools/`.
+>
+> **[AMENDED 2026-08-24]** This note used to say the machine-wide Homebrew `uv` under
+> `/usr/local` was an x86_64 binary that could never install `torch`. That was true until
+> 2026-08-24, when Homebrew moved to `/opt/homebrew` (native arm64) — plain `uv` is now
+> arm64 0.12.5. `.tools/` is therefore belt-and-braces rather than a workaround, and is
+> kept for the pinning guarantee.
 
 Verify the toolchain at any time:
 

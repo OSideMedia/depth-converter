@@ -13,10 +13,18 @@ changing anything structural.
 ./.tools/uv run depthc ...
 ```
 
-**Never plain `uv`.** The machine-wide Homebrew uv is x86_64 and PyTorch publishes
-arm64-only macOS wheels, so it cannot install torch at all. `.tools/uv` is the arm64 one.
-It is project-local on purpose — two other projects (`last30days-skill`,
-`oside-resolve-mcp`) still run on the x86_64 uv and must not be disturbed.
+**Always `./.tools/uv`.** It is arm64 and version-pinned to this project, so a machine-wide
+uv upgrade can never silently re-resolve this build.
+
+**[AMENDED 2026-08-24] The original reason is gone; the rule stands.** This used to read
+"never plain `uv` — the machine-wide Homebrew uv is x86_64 and cannot install torch at all."
+Homebrew migrated to `/opt/homebrew` (native arm64) on 2026-08-24, so plain `uv` is now
+arm64 0.12.5 and *would* resolve torch. Keep using `.tools/uv` on the pinning argument alone.
+What did NOT change: `last30days-skill` and `oside-resolve-mcp` still have venvs built by the
+old x86_64 uv 0.11.28 against `cpython-3.12-macos-x86_64-none`. Both still run (verified
+2026-08-24) because a venv resolves its interpreter by absolute path — but a plain
+`uv sync`/`uv add` in either now picks up the arm64 uv and would re-resolve them. That is a
+deliberate migration, not something to trigger by accident.
 
 ## The primary workflow: inbox → kit
 

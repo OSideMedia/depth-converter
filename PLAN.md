@@ -54,6 +54,9 @@ Use **Video Depth Anything — Small (VDA-Small)**, not per-frame Depth Anything
 Apple M4 Pro, 24 GB unified memory, macOS (Darwin 25.5), Python 3.11.9, ffmpeg 8.1.2 at
 `/usr/local/bin/ffmpeg`, `uv` installed. PyTorch MPS is the acceleration path. Expect a
 10 s / 24 fps clip (~240 frames) to convert in roughly 1–5 minutes — fine for the use case.
+*(Toolchain line above describes the machine as of 2026-07-24. Since 2026-08-24: ffmpeg is
+arm64 9.0.1 at `/opt/homebrew/bin/ffmpeg`; machine-wide `uv` is arm64 0.12.5. See RESOLVED
+note below.)*
 
 **[AMENDED 2026-07-24] TOOLCHAIN BLOCKER — the installed toolchain is x86_64.** Verified:
 Homebrew lives at `/usr/local` (Intel prefix); `uv` 0.11.28 is an x86_64 Mach-O; every
@@ -62,6 +65,16 @@ is x86_64 (runs under Rosetta). Meanwhile **PyTorch ships arm64-only macOS wheel
 (checked PyPI 2026-07-24: torch 2.13.0, sole macOS tag `macosx_14_0_arm64`). An x86_64 uv
 resolves x86_64 wheels, finds none, and `uv add torch` fails outright — MPS never enters
 the picture. Gate 0 cannot pass without fixing this.
+
+> **[RESOLVED 2026-08-24] The blocker above is historical — the machine toolchain is now
+> native arm64.** Homebrew was migrated from `/usr/local` (Intel prefix, running under
+> Rosetta) to `/opt/homebrew` (native). Plain `uv` is now arm64 0.12.5 and resolves the
+> arm64 torch wheels directly; `ffmpeg` is now arm64 9.0.1 at `/opt/homebrew/bin/ffmpeg`,
+> measured 1.81× faster than the x86 build on `libx264 -preset medium`. The x86 prefix is
+> retained until ~2026-08-31 as rollback only. **The `.tools/` decision below still stands**
+> — not because the machine forces it, but because a pinned project-local uv keeps this
+> build reproducible across machines and immune to a machine-wide uv upgrade. Kept above
+> unedited as the record of why `.tools/` exists at all.
 
 > **[CORRECTED 2026-07-24, build session] Root cause is uv, not the interpreter.** The
 > framework Python 3.11.9 is in fact a **universal binary** (`x86_64` + `arm64`) and
