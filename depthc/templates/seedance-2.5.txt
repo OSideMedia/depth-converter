@@ -1,0 +1,109 @@
+DEPTH MOTION KIT — {kit_name}
+depth.mp4 · {duration:.2f}s · {width}×{height} · {fps:g} fps · suggested output {suggested_output:g}s
+Depth Converter v{version} · dialect seedance-2.5
+
+TWO VARIANTS BELOW. Use exactly one — they are not meant to be combined.
+OSIDE's Composer auto-generates its own ACTIVE REFERENCES block from each reference's
+binding field, so pasting the standalone block into OSIDE produces two competing reference
+blocks. That is the precise failure the binding field exists to prevent.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+VARIANT A — FOR A SURFACE THAT HAS A PER-REFERENCE BINDING FIELD
+Paste into that field. Nothing else. The compiler wraps it and does its own numbering.
+
+NOT OSIDE, as of 2026-07-25. An UPLOADED video reference has no binding field there —
+bindings are auto-generated for entity refs only, and the compiler already writes
+"@Video 1 is a motion and camera reference — take movement, action and pacing from it."
+Pasting this on top is two instructions for one reference. In OSIDE, upload depth.mp4
+and write nothing about the motion; describe only the LOOK you want.
+
+If you want the appearance-stripping clause the compiler's line lacks, paste only:
+  "it carries structure only: take no color, texture, clothing, face, lighting, or
+   environment from it"
+═══════════════════════════════════════════════════════════════════════════════
+
+[[BINDING_A]]
+the depth motion blueprint (grayscale depth map of a real performance) — follow its body
+motion, choreography, camera path, and timing exactly, beat for beat; it carries structure
+only: take no color, texture, clothing, face, lighting, or environment from it; appearance
+comes entirely from the image references
+[[/BINDING_A]]
+
+
+═══════════════════════════════════════════════════════════════════════════════
+VARIANT B — STANDALONE
+For the Ark console or any non-OSIDE surface. Paste the whole block.
+═══════════════════════════════════════════════════════════════════════════════
+
+ACTIVE REFERENCES
+@Video 1 — depth motion blueprint (grayscale depth map of a real performance)
+
+Define @Video 1 as the motion blueprint. Follow its body motion, choreography, camera
+path, and timing exactly, beat for beat. @Video 1 carries structure only: take no color,
+texture, clothing, face, lighting, or environment from it. Appearance comes entirely from
+the image references.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+GUIDANCE — not part of either paste block
+═══════════════════════════════════════════════════════════════════════════════
+
+Every rule carries its provenance: [measured] = a paid fire this repo recorded
+(DOCS/LIVE-FIRE.md) · [community] = hands-on community testing, not vendor-documented ·
+[reasoned] = follows from the mechanics, untested.
+
+A [measured] rule is measured ON A MODEL, and the model is part of the finding. THIS FILE
+HAS NO 2.5 FIRES BEHIND IT YET. Rules below are marked by what they actually rest on:
+
+  [measured on 2.0]      a paid 2.0 fire. Whether it transfers to 2.5 is UNKNOWN unless the
+                         rule says why it should — do not read it as a 2.5 result.
+  [vendor]               stated by BytePlus for 2.5 in the Ark API docs. Not a fire.
+  [structural]           follows from how a depth reference works, so model-independent.
+  [community]/[reasoned] as in the 2.0 file; unchanged and unmeasured on either model.
+
+When a 2.5 fire is recorded, promote the rule and say so here.
+
+• [vendor] Output tiers on 2.5 are 480p / 720p / 1080p. THERE IS NO 4K RUNG on this model
+  as of 2026-08-24 — so "master at 4K", the 2.0 rule, is not a thing you can do here. If
+  ByteDance adds one later this line is what changes.
+
+• [measured on 2.0 — DOES NOT TRANSFER, treat as OPEN] On 2.0, 1080p was 0/3 for
+  depth-motion work while every other tier was 4/4. That was 2.0's NATIVE 1080p lane. 2.5's
+  1080p is a separately-wired lane, switched on 2026-08-17, and no depth-motion fire has
+  been measured on it. So:
+      – 720p is the safe default on 2.5 today, and it is where you should iterate.
+      – 1080p is the only rung above it. It may be fine. It is UNMEASURED, not condemned.
+  Do not quote the 0/3 figure as a 2.5 result. If you fire 1080p on 2.5, run
+  `depthc compare` and record it — that one fire closes the question for good.
+
+• [community] Keep the ref in the 3–8 s sweet spot. Adherence degrades past ~8 s and refs
+  over ~10 s lose it badly. This kit is {duration:.2f}s. Note this is a COMMUNITY figure and
+  was never vendor-stated or fired at its boundaries on either model — 2.5 accepts a ref up
+  to 30 s, so the sweet spot is advice about adherence, not a limit.
+
+• [community] One dominant motion signal per clip. A ref carrying a camera move AND an
+  action AND a lighting change gets followed at random.
+
+• [community] Weight roughly 70% identity refs / 30% motion ref. Over-weighting the motion
+  ref is the usual cause of identity drift.
+
+• [structural] The depth map carries no source pixels, so appearance comes entirely from
+  the image references. True of any model that accepts a video reference.
+
+• [community — confirmed once by a measured rejection on 2.0] Identity images must not contain
+  real photographic faces — Seedance rejects them at input moderation. Use AI-generated or
+  stylized references, or an approved likeness from the Ark asset library.
+
+• [reasoned] Match output length to the ref: request about {suggested_output:g}s. A ref
+  shorter than the generation leaves the tail uncovered, and what the model does there is
+  undefined. 2.5's output window is 4–30 s (2.0's was 4–15).
+
+• [vendor] You MAY use create-frame on 2.5 — this is the opposite of the 2.0 rule. 2.5
+  accepts reference arrays alongside a start frame and demotes the frame to a reference
+  image, so the depth ref still rides. On 2.0 a start frame silently DROPPED the depth ref,
+  which is why the 2.0 kit says to skip that step; carrying that habit here costs you the
+  staging lock for nothing. Seed does not pin Seedance output, so a start frame is the only
+  determinism lever available — worth using when composition matters.
+
+{still_guidance}

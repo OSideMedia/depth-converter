@@ -270,10 +270,44 @@ def test_prompt_still_guidance_flips_on_faces():
 
 
 def test_prompt_states_the_refs_only_rule():
-    """A frame-first shot silently drops the depth ref — the kit must say so."""
+    """On 2.0 a frame-first shot silently drops the depth ref — the kit must say so."""
     text = _render()
     assert "skip the create-frame" in text
     assert "refs-only" in text
+
+
+def test_the_start_frame_rule_inverts_on_2_5():
+    """The two models disagree, and printing 2.0's rule into a 2.5 kit costs a staging lock.
+
+    2.0: a start frame takes the whole request and the depth ref is dropped.
+    2.5: the frame demotes to a reference image and both ride.
+    Until 2026-08-24 there was one template, so every kit carried the 2.0 rule.
+    """
+    text = _render(dialect="seedance-2.5")
+    assert "You MAY use create-frame" in text
+    assert "skip the create-frame" not in text
+
+
+def test_no_kit_instructs_a_4k_master_on_2_5():
+    """'Master at 4K' is followable on 2.0 and names a tier 2.5 does not offer today.
+
+    Asserted on the INSTRUCTION, not the substring: the 2.5 file mentions the phrase in the
+    sentence that negates it, and a bare `not in` would fail on correct prose.
+    """
+    assert "Iterate at 720p, master at 4K" in _render()
+    text25 = _render(dialect="seedance-2.5")
+    assert "THERE IS NO 4K RUNG" in text25
+    assert "Iterate at 720p, master at 4K" not in text25
+
+
+def test_the_2_5_template_does_not_present_the_0_of_3_as_its_own_result():
+    """The 1080p finding is a 2.0 measurement. Quoting it as a 2.5 result would be false.
+
+    It may still be MENTIONED — it must be labelled as not transferring.
+    """
+    text = _render(dialect="seedance-2.5")
+    assert "DOES NOT TRANSFER" in text
+    assert "UNMEASURED, not condemned" in text
 
 
 def test_prompt_carries_the_suggested_output_length():

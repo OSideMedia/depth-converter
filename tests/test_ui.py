@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from depthc import ui
+from depthc import checks, ui
 from depthc.checks import Tier, check
 
 
@@ -33,13 +33,24 @@ def test_default_port_avoids_the_oside_dev_server():
         (0, 2.5, "single beat"),
         (0, 1.5, "under the 2s minimum"),
         (0, 12, "adherence degrades"),
-        (0, 20, "over the 15s ceiling"),
+        (0, 20, "ceiling"),
         (5, 5, "empty range"),
         (9, 4, "empty range"),
     ],
 )
 def test_trim_feedback_matches_the_checker_tiers(start, end, expected):
     assert expected in ui._trim_feedback(start, end)
+
+
+def test_the_ui_reads_its_bounds_from_the_dialect_record_not_a_literal():
+    """The UI had seven bare `15`s, so correcting checks.py would have left it refusing
+    references the CLI accepts, quoting the stale number as fact."""
+    from depthc import checks
+
+    d = checks.dialect_for(checks.DEFAULT_DIALECT)
+    assert ui._UI_MAX_REF == d.ref_seconds[1]
+    assert f"{d.ref_seconds[1]:g}s ceiling" in ui._trim_feedback(0, d.ref_seconds[1] + 5)
+    assert d.name in ui._trim_feedback(0, d.ref_seconds[1] + 5)
 
 
 def test_trim_feedback_reports_the_span():
@@ -108,7 +119,7 @@ def test_report_html_clean_pass_has_no_remedy_rows():
 
 def test_convert_without_a_video_returns_a_message():
     *_, status = ui._convert(
-        None, "", "", "720p", "auto", "conform-24", 0, 5,
+        None, "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 0, 5,
         False, True, "auto", 518, "fp32", False, False, "",
     )
     assert "Drop a clip" in status
@@ -117,10 +128,10 @@ def test_convert_without_a_video_returns_a_message():
 def test_convert_rejects_an_over_long_clip(clip_long):
     """>15s must be refused with an explanation, before any inference is attempted."""
     *_, status = ui._convert(
-        str(clip_long), "", "", "720p", "auto", "conform-24", 0, 20,
+        str(clip_long), "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 0, 20,
         False, True, "auto", 518, "fp32", False, False, "",
     )
-    assert "15s ceiling" in status
+    assert "ceiling" in status and "seedance-2.0" in status
 
 
 @pytest.mark.slow
@@ -132,7 +143,7 @@ def test_convert_clamps_an_out_point_past_the_end(clip_3s, tmp_path):
     is how this suite silently wrote kits into it.
     """
     *_, status = ui._convert(
-        str(clip_3s), "", "", "720p", "auto", "conform-24", 0, 20,
+        str(clip_3s), "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 0, 20,
         False, True, "auto", 518, "fp32", False, False, str(tmp_path / "lib"),
     )
     assert "ceiling" not in status
@@ -140,7 +151,7 @@ def test_convert_clamps_an_out_point_past_the_end(clip_3s, tmp_path):
 
 def test_convert_on_a_non_video_returns_a_message(not_a_video):
     *_, status = ui._convert(
-        str(not_a_video), "", "", "720p", "auto", "conform-24", 0, 5,
+        str(not_a_video), "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 0, 5,
         False, True, "auto", 518, "fp32", False, False, "",
     )
     assert "is not a video file" in status
@@ -149,10 +160,32 @@ def test_convert_on_a_non_video_returns_a_message(not_a_video):
 
 def test_convert_on_an_empty_range_returns_a_message(clip_3s):
     *_, status = ui._convert(
-        str(clip_3s), "", "", "720p", "auto", "conform-24", 2.0, 2.0,
+        str(clip_3s), "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 2.0, 2.0,
         False, True, "auto", 518, "fp32", False, False, "",
     )
     assert "Empty trim range" in status
+
+
+def test_the_model_picker_changes_which_clips_are_refused(clip_long):
+    """The picker must move the LIMITS, not just the prompt template.
+
+    A 20s reference is over 2.0's 15s ceiling and inside 2.5's 30s one. Before the picker
+    existed the UI graded every clip against 2.0 and had seven hardcoded 15s literals, so
+    this clip was unbuildable here regardless of the target model.
+    """
+    *_, on_20 = ui._convert(
+        str(clip_long), "", "", "seedance-2.0", "720p", "auto", "conform-24", 0, 20,
+        False, True, "auto", 518, "fp32", False, False, "",
+    )
+    assert "ceiling" in on_20 and "seedance-2.0" in on_20
+    # ...and it points at the model that would accept it rather than just refusing.
+    assert "seedance-2.5 accepts up to 30s" in on_20
+
+    *_, on_25 = ui._convert(
+        str(clip_long), "", "", "seedance-2.5", "720p", "auto", "conform-24", 0, 20,
+        False, True, "auto", 518, "fp32", False, False, "",
+    )
+    assert "ceiling" not in on_25
 
 
 def test_reveal_on_a_missing_path_does_not_raise(tmp_path):

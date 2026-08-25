@@ -53,9 +53,15 @@ Every rule carries its provenance: [measured] = a paid fire this repo recorded
 (DOCS/LIVE-FIRE.md) · [community] = hands-on community testing, not vendor-documented ·
 [reasoned] = follows from the mechanics, untested.
 
-• [measured] Fire at 720p or 4K, NEVER 1080p. 1080p is 0/3 — the ref ignored or overshot
-  every time, across seeds, ref resolutions and prompt phrasings — while every other tier
-  is 4/4. Iterate at 720p, master at 4K.
+A [measured] rule is measured ON A MODEL, and the model is part of the finding. Everything
+below was measured on seedance-2.0 via Ark. None of it automatically transfers to 2.5 —
+see templates/seedance-2.5.txt, where the two that provably do NOT are corrected.
+
+• [measured on seedance-2.0] Fire at 720p or 4K, NEVER 1080p. 1080p is 0/3 — the ref
+  ignored or overshot every time, across seeds, ref resolutions and prompt phrasings —
+  while every other tier is 4/4. Iterate at 720p, master at 4K. Scope: this is a finding
+  about 2.0's native 1080p lane. 2.5 does not currently offer 4K at all and its 1080p is a
+  separately-wired lane about which these three failures say nothing.
 
 • [community] Keep the ref in the 3–8 s sweet spot. Adherence degrades past ~8 s and refs
   over ~10 s lose it badly. This kit is {duration:.2f}s.
@@ -74,8 +80,10 @@ Every rule carries its provenance: [measured] = a paid fire this repo recorded
   shorter than the generation leaves the tail uncovered, and what the model does there is
   undefined.
 
-• [measured] Attach this as a refs-only shot. Go to "make video" and skip the create-frame
-  step — the adapter never sends references alongside a start frame, so a frame-first
-  shot silently drops the depth ref.
+• [measured on seedance-2.0] Attach this as a refs-only shot: go to "make video" and
+  skip the create-frame step — on 2.0 the adapter sends no references alongside a start
+  frame, so a frame-first shot silently drops the depth ref. Scope: 2.5 INVERTS this — it
+  accepts both and demotes the frame to a reference image, so on 2.5 skipping create-frame
+  throws away a usable staging reference.
 
 {still_guidance}
