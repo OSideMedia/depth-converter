@@ -118,10 +118,61 @@ Append below. What adhered, what drifted, what prompt wording changed, and the c
 
 Total spend ~$11.00. Per-kit detail lives in each kit's `result.json`.
 
-## THE RESOLUTION LAW — shoot 720p or 4K, never 1080p
+**[2026-08-24] Those per-kit `result.json` files no longer exist**, nor do the kits, nor the
+four CLIP A-D calibration clips `PLAN.md` §1a says live in `Processed/`. `Outbox/`,
+`Processed/` and `Inbox/` hold only their README. No Time Machine destination is configured
+and `~/.Trash` is empty, so there is no restore. The findings survive — they are in this file
+— but the media and the per-fire metadata (which VARIANT was fired, model id, output URL,
+timestamps) are gone. Do not spend an hour looking for them. The cause is a scope collision,
+not carelessness: "never commit media" is a rights law that also swallowed the text RECORDS,
+because `.gitignore` excludes `Outbox/*` wholesale.
+
+### Results — 2026-08-24 · Seedance 2.5, native 1080p vs 720p, same depth reference
+
+Kit `Probe1080p_001` — Pexels 2084066 (free commercial licence), 13-18s, 5.00s ref,
+4.53 mean depth-space energy, 42% depth retention, 3% whole-frame. Both arms identical
+except the output tier. Fired through `scripts/livefire-25-1080p-depthref.ts`.
+
+| Arm | Res | Cost | Verdict | Energy vs ref | Adherence | Regions direct/mirror |
+|---|---|---|---|---|---|---|
+| Probe1080p_001 | **1080p** | $2.45 | **adhered** | **−7%** | r = **+0.820** | +0.877 / +0.189 |
+| Probe1080p_001 | 720p (control) | $1.38 | **adhered** | +11% | r = +0.716 | +0.851 / +0.229 |
+
+Total settled $3.83. Lag controls on the 1080p arm: −1.0s −0.157 · −0.5s −0.033 ·
+**0.0s +0.820** · +0.5s −0.131 · +1.0s +0.305 — peaks at zero and collapses either side,
+which is what makes it an alignment rather than two busy clips.
+
+**THE 0/3 DOES NOT TRANSFER TO 2.5.** 2.0's native 1080p ran +22-32% excess energy with
+r ≤ +0.107; 2.5's separately-wired 1080p lane (switched on 2026-08-17) ran −7% at r = +0.820
+on the same kind of reference. The control confirms the clip itself behaves on the known-good
+tier, so the result is about the LANE and not the subject.
+
+**LIMIT ON THIS RESULT — read it before quoting it.** ONE GENTLE REFERENCE SURVIVED. The ref
+is a lateral walk whose energy is substantially background parallax; the 0/3 was a sword duel
+— fast, multi-limb, with props that dissolved. A demanding reference on 2.5's 1080p is still
+unfired, so this is suggestive, not an all-clear. A FAIL here would have been conclusive; a
+pass is not.
+
+**BILLING, MEASURED.** Both arms billed exactly 2.008× the estimate — 241 frames where
+`24 x seconds` predicts 120. Ark's "input WITH video" rate column bills **input seconds PLUS
+output seconds**, and this ref was the same length as the render. OSIDE's `arkTokens`
+(`lib/fal/adapters/arkSeedance.ts:442`) doubles only for `arkTask === 'edit'`, so any 2.5
+render carrying a video reference is under-quoted — by 2x when ref length matches output
+length. Approved ceiling was $1.91; settled $3.83. Recorded here because the estimate was
+wrong for a documented reason, not because the fire was.
+
+## THE RESOLUTION LAW — shoot 720p or 4K, never 1080p — **ON SEEDANCE 2.0**
 
 **1080p is 0 for 3. Every other tier is 4 for 4.** (Fisher exact p ≈ 0.029.) This is the
 single most operationally important thing these runs found, and it cost $6.87 to learn.
+
+**[SCOPED 2026-08-24] This law is about SEEDANCE 2.0, and about 2.0's NATIVE 1080p lane.**
+It was measured 2026-07-25, before 2.5 was on this account at all — the results table above
+it has no model column because there was only one model. It does NOT carry to 2.5, and the
+2026-08-24 fire above is the measurement that says so (−7% at r = +0.820). Two further
+consequences on 2.5: there is no 4K rung at all, so "master at 4K" names a tier that does
+not exist there; and a start frame no longer discards reference arrays. Both are handled by
+`--dialect seedance-2.5`, which selects the constraint record and the kit prose together.
 
 **The HD-ref experiment (2026-07-25 evening) killed the two remaining alternative
 explanations.** A 1920×1080 depth ref of the identical window (energy 4.39 vs the 720p

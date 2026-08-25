@@ -404,6 +404,19 @@ class MotionProfile:
 
     fps: float
     deltas: np.ndarray = field(repr=False)
+    # The frame rate the DELTAS are expressed in, which is not always the rate they were
+    # SAMPLED at. `fps` is the time axis (i / fps is a timestamp); `delta_fps` is the scale
+    # of the magnitudes. They agree for everything measure() builds, whose deltas are raw.
+    # They diverge for scout_clip(), which samples at 12 and rescales its deltas to
+    # 24fps-equivalent so its numbers are comparable with a kit's — it reports fps=12 for
+    # the timestamps and delta_fps=24 for the magnitudes.
+    #
+    # Splitting them fixed a live wrong answer: `spikes` read `fps` as the scale and
+    # rescaled its absolute floor a SECOND time, landing the scout's threshold at 16.0
+    # instead of 8.0. Measured on real footage 2026-08-24 — the same 31s clip ranked
+    # 13-18s at --scout-fps 12 and 25-30s at 24, with a 7.6 spike neither pass called a
+    # cut. None = "same as fps", the raw case.
+    delta_fps: float | None = None
     bucket_seconds: float = 0.5
     # None = the flow pass was skipped; 0.0 = measured, and it is pure subject motion.
     # Collapsing the two made a genuine zero drop the motion-type finding entirely.
@@ -416,6 +429,11 @@ class MotionProfile:
     path: np.ndarray | None = field(default=None, repr=False)
 
     # ------------------------------------------------------------------ scalars
+    @property
+    def delta_scale(self) -> float:
+        """The fps the magnitudes are expressed in — `delta_fps`, or `fps` when unset."""
+        return float(self.delta_fps if self.delta_fps is not None else self.fps)
+
     @property
     def energy(self) -> float:
         return round(float(self.deltas.mean()), 3) if self.deltas.size else 0.0
@@ -525,7 +543,12 @@ class MotionProfile:
         # together) but the absolute floor does not: calibrated at 24 fps, it sits ~2.5×
         # too high at 60 fps, where per-gap deltas shrink by the same factor — a real cut
         # would slide under an unscaled 8.0 and ship inside the ref undetected.
-        floor = SPIKE_FLOOR * (24.0 / self.fps) if self.fps > 0 else SPIKE_FLOOR
+        #
+        # It scales by the DELTA scale, never the time axis. A profile whose deltas are
+        # already 24fps-equivalent needs no correction at all, and applying one anyway is
+        # what hid cuts from the scout.
+        scale = self.delta_scale
+        floor = SPIKE_FLOOR * (24.0 / scale) if scale > 0 else SPIKE_FLOOR
         limit = max(floor, self.median * SPIKE_MULTIPLE)
         return [round(i / self.fps, 2) for i, d in enumerate(self.deltas) if d > limit]
 
@@ -861,7 +884,11 @@ def scout_clip(
     deltas, changed = frame_stats(result.frames)
     profile = MotionProfile(
         fps=scout_fps,
+        # Rescaled so the scout's energies are directly comparable with a kit's, which are
+        # always measured at 24. `delta_fps` records that, so magnitude rules downstream
+        # judge against the right scale instead of re-deriving it from the sample rate.
         deltas=deltas * (scout_fps / 24.0),
+        delta_fps=24.0,
         changed=changed,
         bucket_seconds=1.0,
         camera=camera_share(result.frames, scout_fps),
