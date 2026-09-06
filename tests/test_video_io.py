@@ -231,7 +231,14 @@ def test_encode_gray_is_tagged_full_range(tmp_path):
 
 
 def test_encode_gray_preserves_the_full_luma_range(tmp_path):
-    """0 and 255 must survive the round trip — they are the nearest and farthest planes."""
+    """0 and 255 must survive the round trip — they are the nearest and farthest planes.
+
+    Read the STORED Y plane (`-pix_fmt yuv420p` on a yuv420p file is a byte copy), not a
+    `-pix_fmt gray` conversion: that goes through swscale, whose gray output range differs
+    by ffmpeg version — ubuntu's 6.1.1 returned 17-234 from a file 9.0.1 read as 0-255 and
+    ffprobe tagged `pc` (CI, 2026-09-06). A guard that reads through a transform measures
+    the transform; this measures the file.
+    """
     import shutil
     import subprocess
 
@@ -239,11 +246,14 @@ def test_encode_gray_preserves_the_full_luma_range(tmp_path):
     out = encode_gray(frames, tmp_path / "levels.mp4", fps=24)
     raw = subprocess.run(
         [shutil.which("ffmpeg"), "-v", "error", "-i", str(out),
-         "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+         "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"],
         capture_output=True, check=True,
     ).stdout
-    decoded = np.frombuffer(raw, dtype=np.uint8)
-    assert decoded.min() <= 4 and decoded.max() >= 251
+    n, h, w = frames.shape
+    luma_bytes, chroma_bytes = h * w, 2 * (h // 2) * (w // 2)
+    per_frame = np.frombuffer(raw, dtype=np.uint8).reshape(n, luma_bytes + chroma_bytes)
+    luma = per_frame[:, :luma_bytes]
+    assert luma.min() <= 4 and luma.max() >= 251, (luma.min(), luma.max())
 
 
 def test_mux_audio_never_truncates_the_video(tmp_path):
