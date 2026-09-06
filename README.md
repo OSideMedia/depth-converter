@@ -49,6 +49,19 @@ Verify the toolchain at any time:
 ./.tools/uv run python -m depthc.smoke
 ```
 
+Run the tests (~90 s; nine of them need what `setup.sh` fetched — six run the model, three
+import the vendored checkout):
+
+```bash
+./.tools/uv run pytest -q tests
+```
+
+The same suite runs on every push and PR in `.github/workflows/tests.yml` (ubuntu, CPU
+torch from the committed `uv.lock`, ffmpeg from apt). That runner never downloads the
+VDA checkout or checkpoint, so those nine (`slow` + `vendor` markers) **self-skip there
+with a reason that says so** (`tests/conftest.py`) — the run log prints the count. The
+workflow also refuses invisible code points in any tracked text file.
+
 ## Usage — the inbox loop
 
 The primary path. Three folders in the project, and nothing to hunt for:
