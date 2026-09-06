@@ -386,6 +386,17 @@ def read_frames(
     )
 
 
+def _yuv420p_planes(frames: np.ndarray) -> bytes:
+    """[N, H, W] uint8 luma → planar yuv420p bytes with neutral (128) chroma, per frame.
+
+    Byte-exact: what libx264 receives as Y is the array, untouched by any scaler.
+    """
+    n, height, width = frames.shape
+    chroma = np.full((n, (height // 2) * (width // 2)), 128, dtype=np.uint8)
+    luma = np.ascontiguousarray(frames).reshape(n, height * width)
+    return np.concatenate([luma, chroma, chroma], axis=1).tobytes()
+
+
 def encode_gray(
     frames: np.ndarray,
     out_path: str | Path,
@@ -395,8 +406,15 @@ def encode_gray(
 ) -> Path:
     """Encode [N, H, W] uint8 grayscale to the fixed depth.mp4 spec.
 
-    libx264, yuv420p, +faststart. Feeding `gray` in and asking for `yuv420p` out makes
-    ffmpeg replicate luma across chroma at neutral — the 3-channel grayscale the spec wants.
+    libx264, yuv420p, +faststart. The yuv420p planes are built HERE, in numpy — Y is the
+    depth, U and V are flat 128 (neutral chroma) — and handed to ffmpeg as rawvideo
+    `yuv420p`, so no swscale conversion sits between the array and libx264.
+
+    [2026-09-06] It used to feed `gray` and let ffmpeg convert to yuv420p. On ffmpeg 6.1.1
+    (ubuntu's, the CI runner) that conversion COMPRESSED the luma to 16-235 while the
+    container still said full range — measured on the stored Y plane, 0-255 in → 16-235
+    stored — and ffmpeg 9.0.1 (this Mac) did not. A version-dependent scaler default is not
+    a place to keep the one invariant this file exists for, so the conversion is gone.
 
     THE STREAM IS TAGGED FULL-RANGE, EXPLICITLY. The luma here is 0-255 (depth), but H.264's
     spec default for an untagged stream is LIMITED range: a spec-conformant decoder on the
@@ -405,7 +423,7 @@ def encode_gray(
     levels through untouched, which is why this never showed locally; what Seedance's
     decoder does is not observable from here, so the file must carry the truth itself:
     `-color_range pc` plus the h264_metadata VUI flag (verified: ffprobe reports
-    color_range=pc and a 0-255 gradient survives a round trip).
+    color_range=pc and a 0-255 gradient survives a round trip on 9.0.1 and 6.1.1).
     """
     if frames.ndim != 3:
         raise VideoIOError(f"Expected [N, H, W] grayscale, got shape {frames.shape}")
@@ -420,7 +438,7 @@ def encode_gray(
 
     cmd = [
         _tool("ffmpeg"), "-v", "error", "-y", "-nostdin",
-        "-f", "rawvideo", "-pix_fmt", "gray",
+        "-f", "rawvideo", "-pix_fmt", "yuv420p", "-color_range", "pc",
         "-s", f"{width}x{height}", "-r", f"{fps:g}", "-i", "-",
         "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
         "-pix_fmt", "yuv420p", "-color_range", "pc",
@@ -428,7 +446,7 @@ def encode_gray(
         "-movflags", "+faststart",
         str(out_path),
     ]
-    proc = subprocess.run(cmd, input=frames.tobytes(), capture_output=True)
+    proc = subprocess.run(cmd, input=_yuv420p_planes(frames), capture_output=True)
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-6:]
         raise VideoIOError("ffmpeg encode failed:\n  " + "\n  ".join(tail))
