@@ -62,6 +62,17 @@ bundles for no real gain over doing it here.
    "…"` with the measured numbers. A generation is the only evidence that says whether any
    of this works and it costs money; unrecorded, the finding has to be re-derived. Ask for
    both.
+   **Name the generation (since 2026-09-06):** both commands take `--generation <id>` —
+   the id on the generation's row/URL in OSIDE (a UUID v4; anything else is refused
+   naming the grammar). `compare` checks it before the depth pass and carries it into the
+   `depthc result` line it prints; `result` writes it as `fires[].generationId` in
+   `result.json`. Without the flag the fire is unkeyed, as every fire before that day is.
+   That is the fire → generation join (PLAN-SHARED-GENERATION-ID step d):
+   `fires[].generationId == generations.id`, plus the content half `kit.json.depth.sha256
+   == request_payload.refs[].sha256` — every kit built from 2026-09-06 records the SHA-256
+   of its depth.mp4 as written, and OSIDE's upload door hashes the uploaded bytes onto the
+   reference. The OSIDE half lands in OSIDE (branch feat/ref-sha256), not here. Ask Peter
+   for the id with the download.
 
 8. A generation with **no kit** (fired from text alone) gets `depthc describe <clip>` —
    the same depth pass, described in prompt words (camera over time with a tempo word,
