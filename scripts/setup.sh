@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Depth Converter — one-shot bootstrap. Idempotent; safe to re-run.
 #
-# Installs a PROJECT-LOCAL arm64 uv (.tools/uv) rather than shadowing the
-# machine-wide Homebrew uv, which is x86_64 and cannot resolve PyTorch's
-# arm64-only macOS wheels. Nothing outside this folder is modified.
+# Installs a PROJECT-LOCAL arm64 uv (.tools/uv), version-pinned to this project,
+# rather than relying on the machine-wide uv. Until 2026-08-24 the Homebrew uv was
+# x86_64 and could not resolve PyTorch's arm64-only macOS wheels; Homebrew is native
+# arm64 now (/opt/homebrew) and the local pin stands on reproducibility alone — see
+# CLAUDE.md "Always use the project-local uv". Nothing outside this folder is modified.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -138,6 +138,19 @@ Ark wrapper projects, and multiple guides; official BytePlus doc pages are JS-re
 were not directly extractable — one human console check before hard-failing on any of these
 is noted in Phase 4)
 
+> **[AMENDED 2026-09-06] The table below is the 2026-07-24 triangulation, kept unedited as
+> the record. It is no longer what the checker enforces.** Per-model constraint records
+> landed in a4772f6 (2026-08-24): `checks.py DIALECTS` holds one record per model, quoted
+> from the vendored Ark page (`OSIDE AI FILMMAKER/DOCS/vendor/seedance-2.5/ARK-API-create-
+> video-task-2026-08-15.md:700-712`), and `--dialect` selects the record and the kit prose
+> together. Every "stricter" value here drifted in the work-refused direction and was
+> corrected there: 50 MB → 200 MB (both lines), 2,086,876 px → 8,295,044 px, mixed inputs
+> 12 → 15 (2.0) / 50 (2.5), output 4–15 s (2.0) / 4–30 s (2.5), refs 2–15 s (2.0) /
+> 2–30 s (2.5), and "never sends refs alongside a start frame" is 2.0 only — 2.5 keeps
+> them. Since 2026-09-06 (audit E-3) the enforced fields are READ from OSIDE's exported
+> envelope (`depthc/seedance-envelope.json`) and the hand table is the held-equal fallback.
+> The default dialect is seedance-2.5 since the same day (audit DC-5).
+
 | Constraint | Value |
 |---|---|
 | Video refs per generation | up to 3, **combined duration 2–15 s**; **[AMENDED 2026-07-24] each clip also ≥ 2 s — checker adds a FAIL tier for < 2 s** (OSIDE's adapter header: "2–15s each") |
