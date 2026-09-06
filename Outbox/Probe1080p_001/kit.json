@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "kitName": "Probe1080p_001",
+  "createdAt": "2026-08-25T04:33:16+00:00",
+  "tool": {
+    "name": "depthc",
+    "version": "0.13.0",
+    "model": "Video-Depth-Anything Small (vits, Apache-2.0)",
+    "vdaCommit": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+    "device": "mps",
+    "elapsedSeconds": 21.94
+  },
+  "promptDialect": "seedance-2.5",
+  "targetModel": {
+    "dialect": "seedance-2.5",
+    "refSeconds": [
+      2.0,
+      30.0
+    ],
+    "outputSeconds": [
+      4.0,
+      30.0
+    ],
+    "pixels": [
+      407696,
+      8295044
+    ],
+    "maxFileMb": 200.0,
+    "outputResolutions": [
+      "480p",
+      "720p",
+      "1080p"
+    ],
+    "refsWithStartFrame": true
+  },
+  "tags": [
+    "Probe1080p"
+  ],
+  "description": "Pexels 2084066 (free licence), 13-18s. Subject-motion beat AFTER the 11-12s shot change, chosen to sidestep the cut question rather than rely on the scout's cut detector. Built to answer one question: does 2.5's 1080p lane mistreat a depth ref the way 2.0's native 1080p did (0/3)?",
+  "source": {
+    "filename": "pex-2084066.mp4",
+    "sha256": "8444f8622465593b3d93b8b69faa4519b94b107b64f099ba5ed5afb61677b269",
+    "durationSeconds": 30.905,
+    "fps": 23.976,
+    "width": 1920,
+    "height": 1080,
+    "trim": [
+      13.0,
+      18.0
+    ],
+    "crop": null
+  },
+  "depth": {
+    "filename": "depth.mp4",
+    "durationSeconds": 5.0,
+    "fps": 24.0,
+    "width": 1280,
+    "height": 720,
+    "frameCount": 120,
+    "sizeBytes": 921058,
+    "pixels": 921600
+  },
+  "still": {
+    "filename": "still.png",
+    "frameIndex": 17,
+    "containsRealFaces": false,
+    "usage": "may be attached as an @Image look reference (never first_frame)"
+  },
+  "settings": {
+    "resolution": "720p",
+    "fps": "conform-24",
+    "invert": false,
+    "inputSize": 518,
+    "precision": "fp32",
+    "crop": "auto",
+    "keepAudio": false
+  },
+  "suggestedOutputSeconds": 5.0,
+  "checks": {
+    "tier": "PASS",
+    "findings": [
+      {
+        "tier": "PASS",
+        "check": "duration",
+        "detail": "5.00s is inside the 3-8s sweet spot.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "output coverage",
+        "detail": "5.00s is exactly requestable as an output length.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "file size",
+        "detail": "0.9 MB is within 200 MB.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "resolution",
+        "detail": "1280\u00d7720 = 921,600 px is in window.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "frame rate",
+        "detail": "24 fps matches Seedance's output cadence.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "still.png faces",
+        "detail": "Flagged as free of real photographic faces.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "motion signal",
+        "detail": "4.53 mean depth-space energy \u2014 a clear signal (\u2584\u2586\u2586\u2587\u2584\u2587\u2586\u2586\u2588\u2587).",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "depth retention",
+        "detail": "42% of the source's motion survived into depth.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "motion type",
+        "detail": "3% of the movement is whole-frame \u2014 this is a subject-motion reference.",
+        "remedy": ""
+      }
+    ]
+  },
+  "motion": {
+    "energy": 4.529,
+    "median": 4.415,
+    "peak": 7.819,
+    "headEnergy": 3.563,
+    "tailEnergy": 5.972,
+    "cameraShare": 0.027,
+    "bucketSeconds": 0.5,
+    "buckets": [
+      3.11,
+      4.31,
+      4.05,
+      5.28,
+      2.72,
+      5.15,
+      4.62,
+      4.34,
+      6.33,
+      5.46
+    ],
+    "sparkline": "\u2584\u2586\u2586\u2587\u2584\u2587\u2586\u2586\u2588\u2587",
+    "deadStretch": null,
+    "spikeSeconds": [],
+    "regionEnergy": [
+      [
+        4.062,
+        4.692,
+        3.428
+      ],
+      [
+        4.23,
+        5.756,
+        3.811
+      ],
+      [
+        4.342,
+        5.965,
+        4.42
+      ]
+    ],
+    "cameraPath": {
+      "dx": 0.022,
+      "dy": 0.0,
+      "radial": -0.023,
+      "label": "static"
+    },
+    "grid": "long-edge 160 (aspect-preserving, v2)",
+    "fps": 24.0,
+    "sourceEnergy": 10.871,
+    "retention": 0.417
+  },
+  "sheet": {
+    "filename": "sheet.png",
+    "usage": "local-only contact sheet"
+  }
+}

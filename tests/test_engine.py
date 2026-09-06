@@ -89,6 +89,7 @@ def test_fp32_is_the_default():
     assert inspect.signature(engine.infer).parameters["precision"].default == "fp32"
 
 
+@pytest.mark.vendor
 def test_window_hook_restores_tqdm():
     """The hook must never leave upstream's module mutated."""
     engine.ensure_vendor_on_path()
@@ -100,6 +101,7 @@ def test_window_hook_restores_tqdm():
     assert vda.tqdm is original
 
 
+@pytest.mark.vendor
 def test_window_hook_restores_tqdm_on_exception():
     engine.ensure_vendor_on_path()
     import video_depth_anything.video_depth as vda
@@ -111,6 +113,7 @@ def test_window_hook_restores_tqdm_on_exception():
     assert vda.tqdm is original
 
 
+@pytest.mark.vendor
 def test_window_hook_reports_progress():
     """Progress must fire *after* each body, so a window counts only once it is done."""
     engine.ensure_vendor_on_path()

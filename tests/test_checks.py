@@ -48,7 +48,14 @@ def test_under_two_seconds_fails(seconds):
 
 
 @pytest.mark.parametrize("seconds", [15.1, 30.0])
-def test_over_fifteen_seconds_fails(seconds):
+def test_over_fifteen_seconds_fails_on_2_0(seconds):
+    """2.0 law, so 2.0 is named: the default moved to 2.5 on 2026-09-06 (audit DC-5)."""
+    assert tier_of("duration", check(**{**GOOD, "duration": seconds},
+                                     dialect="seedance-2.0")) is Tier.FAIL
+
+
+@pytest.mark.parametrize("seconds", [30.1, 45.0])
+def test_over_thirty_seconds_fails_on_the_default(seconds):
     assert tier_of("duration", check(**{**GOOD, "duration": seconds})) is Tier.FAIL
 
 
@@ -163,7 +170,13 @@ def test_suggested_output_clamps_to_the_output_window(ref, expected):
     a fractional suggestion (5.04) is one no legal request can honour — the adapter would
     round it silently while the manifest claimed a match.
     """
-    assert suggested_output_seconds(ref) == expected
+    assert suggested_output_seconds(ref, "seedance-2.0") == expected
+
+
+def test_suggested_output_clamps_to_the_default_models_window():
+    """The default is 2.5 (audit DC-5): a 35s ref clamps to its 30s ceiling, not 15."""
+    assert suggested_output_seconds(20.0) == 20.0
+    assert suggested_output_seconds(35.0) == 30.0
 
 
 # --------------------------------------------------------------------- the motion gate
@@ -300,7 +313,12 @@ def test_motion_findings_never_lack_a_remedy():
     (16.0, False),  # over the output ceiling: whole seconds alone don't make it requestable
 ])
 def test_on_output_grid(seconds, expected):
-    assert on_output_grid(seconds) is expected
+    assert on_output_grid(seconds, "seedance-2.0") is expected
+
+
+def test_on_output_grid_follows_the_default_models_ceiling():
+    assert on_output_grid(16.0) is True     # legal on 2.5, the default
+    assert on_output_grid(31.0) is False    # over 2.5's 30s ceiling
 
 
 def test_a_ref_shorter_than_the_output_floor_warns():
@@ -350,8 +368,10 @@ def test_snap_gives_up_rather_than_fabricate_footage():
 
 
 def test_snap_never_exceeds_the_output_ceiling():
-    (start, end), _ = snap_trim(0.0, 19.4, 30.0)
+    (start, end), _ = snap_trim(0.0, 19.4, 30.0, "seedance-2.0")
     assert end - start == pytest.approx(15.0)
+    (start, end), _ = snap_trim(0.0, 34.4, 40.0)   # default: 2.5's 30s ceiling
+    assert end - start == pytest.approx(30.0)
 
 
 def test_snapped_lengths_always_land_on_the_grid():
@@ -412,12 +432,21 @@ def test_snap_trim_is_per_model():
     assert round(e25 - s25, 3) == 19.0
 
 
-def test_the_default_dialect_is_2_0_so_nothing_silently_changed_model():
-    """A kit built without --dialect must grade exactly as it did before this change."""
-    assert checks.DEFAULT_DIALECT == "seedance-2.0"
-    explicit = check(**{**GOOD, "duration": 20.0}, dialect="seedance-2.0").as_dict()
+def test_the_default_dialect_is_2_5_osides_live_line():
+    """[CHANGED 2026-09-06, audit DC-5] The default WAS 2.0 "so nothing silently changed
+    model" on 2026-08-24. But 2.5 is OSIDE's live line and the only kit on disk is 2.5, so
+    the inbox hint — which named no dialect — built a kit graded by 2.0 law. A kit built
+    without --dialect now grades as a 2.5 kit; 2.0 is one flag away and unchanged.
+    """
+    assert checks.DEFAULT_DIALECT == "seedance-2.5"
+    explicit = check(**{**GOOD, "duration": 20.0}, dialect="seedance-2.5").as_dict()
     implicit = check(**{**GOOD, "duration": 20.0}).as_dict()
     assert explicit == implicit
+    assert implicit["tier"] != "FAIL"
+    assert check(**{**GOOD, "duration": 20.0}, dialect="seedance-2.0").tier is Tier.FAIL
+    # the module-level names derive from the default record, so they moved with it
+    assert checks.MAX_REF_SECONDS == 30.0
+    assert checks.OUTPUT_SECONDS == (4.0, 30.0)
 
 
 def test_an_unknown_dialect_names_the_alternatives_instead_of_defaulting():

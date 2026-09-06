@@ -3,9 +3,11 @@
 # pattern. Re-runnable: each build replaces the previous bundle.
 #
 # THE arch -arm64 TRAP: an app bundle launched from Finder does not inherit the shell's
-# architecture, and this Mac's Homebrew tooling is x86_64. Without `arch -arm64` in the
-# exec line, the server can come up under Rosetta with no MPS at all. The OSIDE pair hit
-# exactly this; PLAN.md §0 says not to rediscover it here.
+# architecture. Until 2026-08-24 this Mac's Homebrew tooling was x86_64, and without
+# `arch -arm64` in the exec line the server came up under Rosetta with no MPS at all.
+# Homebrew is native arm64 now (/opt/homebrew, CLAUDE.md), but the prefix stays: a Finder
+# launch still inherits nothing, and the cost is nil. The OSIDE pair hit exactly this;
+# PLAN.md §0 says not to rediscover it here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

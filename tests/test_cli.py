@@ -7,6 +7,8 @@ no test holding any of them in place (2026-07-30 council audit).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from depthc import cli
@@ -83,12 +85,44 @@ class TestConvertOverwriteGuard:
 
 
 class TestFifteenSecondGate:
-    """The 15s law fires on the trim AS GIVEN — snap must not clamp it legal first."""
+    """The 15s law fires on the trim AS GIVEN — snap must not clamp it legal first.
+
+    2.0 law, so 2.0 is passed explicitly: the default is 2.5 since 2026-09-06 (DC-5).
+    """
 
     def test_long_trim_dies_before_snap(self, clip_long):
-        result = runner.invoke(cli.app, ["kit", str(clip_long), "--trim", "0", "20"])
+        result = runner.invoke(
+            cli.app, ["kit", str(clip_long), "--trim", "0", "20", "--dialect", "seedance-2.0"]
+        )
         assert result.exit_code == 1
         assert "caps video references at 15s" in _text(result)
+        assert "rebuild with --dialect seedance-2.5" in _text(result)
+
+
+class TestInboxHint:
+    """The scout's copy-paste hint is what actually gets run — it must name the dialect.
+
+    Until 2026-09-06 it printed no --dialect, so following the tool's own hint built a kit
+    graded against whatever the default happened to be (audit DC-5).
+    """
+
+    def test_scout_hint_names_the_default_dialect_explicitly(self, capsys):
+        from depthc import checks, motion as m
+        import numpy as np
+
+        profile = m.MotionProfile(fps=24.0, deltas=np.full(24 * 8, 3.0, dtype=np.float32))
+        windows = m.score_windows(profile, 5.0)
+        result = m.ScoutResult(
+            profile=profile, windows=windows, per_second=list(profile.buckets),
+            scout_fps=12.0, elapsed=1.0, target_seconds=5.0,
+        )
+        clip = Path("Inbox/x.mp4")
+        cli._print_scout(clip, result)
+        out = capsys.readouterr().out
+        hint = next(line for line in out.splitlines() if "depthc kit" in line)
+        assert f"--dialect {checks.DEFAULT_DIALECT}" in hint
+        assert "--dialect seedance-2.5" in hint
+        assert str(clip) in hint
 
 
 class TestDialectPreflight:

@@ -17,6 +17,48 @@ from pathlib import Path
 
 import pytest
 
+from depthc import vendor_path
+
+
+def vendor_present() -> bool:
+    """The vendored VDA checkout, at the one path `ensure_vendor_on_path` reads."""
+    return (vendor_path.VENDOR_DIR / "video_depth_anything").is_dir()
+
+
+def checkpoint_present() -> bool:
+    """The VDA-Small checkpoint, at the one path `ensure_checkpoint` reads."""
+    return vendor_path.CHECKPOINT.is_file()
+
+
+def pytest_collection_modifyitems(config, items):
+    """LABELLED SELF-SKIPS for the tests that need what `scripts/setup.sh` fetches.
+
+    Positive evidence, not a failed search: setup.sh writes exactly two paths and engine.py
+    reads exactly those two, so their absence is a fact about this checkout, not a guess.
+
+    `slow` tests run VDA-Small for real and need both; `vendor` tests import the vendored
+    module (the tqdm hook) and need the checkout only. On a checkout without them (CI:
+    `.github/workflows/tests.yml` runs ubuntu with CPU torch and never downloads either)
+    they would ERROR in `ensure_vendor_on_path`, not skip. This turns that into a skip that
+    names itself, so the run log says "N skipped: no VDA …" instead of a silent green — the
+    count is the subject set, and `-rs` prints it. Found by simulating the asset-less
+    checkout from `git archive` before the workflow was ever pushed: three `vendor` tests
+    were failing that the `slow` marker alone did not cover.
+    """
+    have_vendor, have_ckpt = vendor_present(), checkpoint_present()
+    if have_vendor and have_ckpt:
+        return
+    missing = " + ".join(
+        p for p, ok in (("vendor/Video-Depth-Anything", have_vendor),
+                        ("checkpoints/video_depth_anything_vits.pth", have_ckpt)) if not ok
+    )
+    tail = f"({missing}; run scripts/setup.sh) — labelled self-skip, see .github/workflows/tests.yml"
+    for item in items:
+        if item.get_closest_marker("slow"):
+            item.add_marker(pytest.mark.skip(reason=f"real-model test, no VDA assets {tail}"))
+        elif item.get_closest_marker("vendor") and not have_vendor:
+            item.add_marker(pytest.mark.skip(reason=f"needs the vendored VDA checkout {tail}"))
+
 
 @pytest.fixture(autouse=True)
 def isolate_user_folders(tmp_path, monkeypatch):

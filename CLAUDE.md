@@ -2,7 +2,13 @@
 
 Local macOS tool: reference clip → temporally-consistent grayscale depth video + a
 Seedance Kit, so real choreography and camera motion can be copied onto AI characters
-through Seedance 2.0's video-reference channel.
+through Seedance's video-reference channel.
+
+**Two models, two envelopes.** `--dialect seedance-2.0 | seedance-2.5` selects the
+constraint record AND the kit prose together (`checks.py DIALECTS`, read from OSIDE's
+exported envelope since 2026-09-06; per-model records since a4772f6, 2026-08-24). The
+default is **seedance-2.5** (OSIDE's live line) since 2026-09-06. Every law below that was
+measured on one model says which — a 2.0 number applied to a 2.5 kit is a wrong number.
 
 `PLAN.md` is the full build plan and the record of what each gate proved. Read it before
 changing anything structural.
@@ -103,28 +109,44 @@ meaningless — an earlier pass compared 24 fps depth against 12 fps source and 
 52%, wrong numbers with the right ranking.
 
 Output length is requested as a **whole number of seconds, minimum 4** (OSIDE's Ark adapter:
-`duration: Math.round(...)`, `durationRange: [4, 15]`). A ref that is not a whole number of
-seconds guarantees the generation runs past its end. `--snap` is on by default.
+`duration: Math.round(...)`). The window is per model — seedance-2.0: `[4, 15]`;
+seedance-2.5: `[4, 30]` (30 s live-confirmed by OSIDE 2026-08-07) — and the ref ceiling
+follows it (15 s on 2.0, 30 s on 2.5). A ref that is not a whole number of seconds
+guarantees the generation runs past its end. `--snap` is on by default and snaps to the
+selected model's window.
 
 Kits land in **`Outbox/<Tags>_NNN/`** inside the project — not in the home folder.
 `Outbox/INDEX.txt` is regenerated on every build. `--archive` moves the source to
 `Processed/` on PASS/WARN; a FAIL deliberately stays in `Inbox/`.
 
 Each kit carries `README.txt` (what to do), `binding.txt` (the Variant A phrase alone, one
-line, ready to paste), and `sheet.png` (depth contact sheet with timestamps). Those plus
-`depth.mp4` are the only files Peter needs to touch. `--variants` adds four refs of the same
+line — for surfaces that HAVE a per-reference binding field; OSIDE does not, for uploads),
+and `sheet.png` (depth contact sheet with timestamps). **Exactly one file goes to OSIDE:
+`depth.mp4`, uploaded as the video reference. That is the whole handover.** The four
+surfaces that say so — this file, `README.md`, `Outbox/README.txt` and every kit's
+`README.txt` — are held to the same words by `tests/test_handover.py`; until 2026-09-06
+two of them said "take two files and paste binding.txt" (audit DC-2). `--variants` adds four refs of the same
 beat under `variants/` — contrast-stretched, inverted, **midgrey** (luma capped at 190 so
 figures never blow to near-white — the moderation-rejection shape), and **edges** (Canny of
 the depth video, experimental) — **exactly one is uploaded per generation**.
 
 ## Firing a kit — the rules the live run produced
 
-- **720p or 4K. NEVER 1080p.** 1080p is 0/3 (three seeds, two ref resolutions, two prompt
-  phrasings; +31/32/22% excess motion, props dissolving every time; the HD-ref control run
-  ignored its ref at r = +0.107). Ref-resolution matching and explicit prompts do NOT fix
-  it — the native 1080p lane itself mistreats video refs. 4K adhering is consistent with 4K
-  being SR over a lower-res base pass (cascade architecture + its cheaper per-token price),
-  so iterate at 720p, master at 4K, never buy 1080p for depth-motion work.
+- **On seedance-2.0: 720p or 4K. NEVER 1080p.** 1080p is 0/3 (2026-07-25; three seeds,
+  two ref resolutions, two prompt phrasings; +31/32/22% excess motion, props dissolving
+  every time; the HD-ref control run ignored its ref at r = +0.107). Ref-resolution
+  matching and explicit prompts do NOT fix it — 2.0's native 1080p lane itself mistreats
+  video refs. 4K adhering is consistent with 4K being SR over a lower-res base pass
+  (cascade architecture + its cheaper per-token price), so on 2.0 iterate at 720p, master
+  at 4K, never buy 1080p for depth-motion work.
+- **On seedance-2.5 the 0/3 does NOT transfer.** 2.5's separately-wired 1080p lane
+  (live 2026-08-17) ADHERED on 2026-08-24: −7 % energy at r = +0.820 against a 720p
+  control at +11 % / r = +0.716, same ref, same prompt ($3.83 settled;
+  `DOCS/LIVE-FIRE.md` § 2026-08-24). **Suggestive, not an all-clear:** one GENTLE
+  reference survived (a lateral walk with background parallax); a demanding ref — the
+  sword duel the 0/3 was measured on — is still unfired on 2.5's 1080p. There is **no 4K
+  rung on 2.5** as of 2026-08-24, so "master at 4K" names a tier that does not exist
+  there; iterate at 720p, and if you fire 1080p run `depthc compare` and record it.
 - **Judge by motion ratio first, correlation second.** They disagreed and the ratio was right:
   over-following is what smears bodies and dissolves props, and correlation cannot see it.
 - **One identity per body in the ref.** The ref sets the head-count and beats any text lock.
@@ -137,10 +159,16 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
   model-size selector by design, and adding one is a licensing violation, not an upgrade.
 - **Nothing fires against a paid API automatically.** Live-fire is human-run and
   budget-approved. See `DOCS/LIVE-FIRE.md`.
-- **Never commit media.** `Inbox/`, `Processed/` and `Outbox/` contents are gitignored and
+- **Never commit media.** `Inbox/`, `Processed/` and `Outbox/` media are gitignored and
   stay that way: source clips carry other people's rights, and a kit's `source.mp4` is the
-  original footage. Evidence about a fire belongs in `DOCS/LIVE-FIRE.md`, which is tracked;
-  the per-kit `result.json` is local. (Repo went private under OSideMedia on 2026-07-25
+  original footage. Evidence about a fire belongs in `DOCS/LIVE-FIRE.md`, which is tracked,
+  AND in the per-kit text records, which are tracked too since 2026-09-06 (audit DC-4):
+  `Outbox/*/kit.json`, `Outbox/*/result.json` and `Outbox/INDEX.txt`. Nothing else in a
+  kit folder is — `depth.mp4`, `source.mp4`, `preview.mp4`, `still.png`, `sheet.png`,
+  `prompt.txt`, `binding.txt`, `README.txt`, `variants/` never are
+  (`tests/test_gitignore.py` proves each with `git check-ignore`). The wholesale
+  `Outbox/*` rule had already swallowed every 2026-07-25 kit's `result.json` — paid
+  evidence, gone (`DOCS/LIVE-FIRE.md`). (Repo went private under OSideMedia on 2026-07-25
   once Gate 4 passed, with the per-repo noreply email
   `261988918+OSideMedia@users.noreply.github.com`.)
 - **Never edit `vendor/`.** Upstream is pinned and imported; device and precision handling
@@ -151,10 +179,16 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
 
 ## Attaching a kit in OSIDE — corrected by the live run
 
-Shotlist → pick the shot → go straight to **"make video", skipping create-frame**. A
-depth-motion shot is refs-only: the adapter sets `refsWithStartFrame:false`, so a
-frame-first shot silently drops the depth ref. Upload `depth.mp4` as the video ref and add
-character/location/prop `@Image` refs for the look.
+Shotlist → pick the shot → **make video**. Upload `depth.mp4` as the video ref and add
+character/location/prop `@Image` refs for the look. The create-frame step is the one
+instruction that is OPPOSITE on the two models, and the kit README prints the right one:
+
+- **seedance-2.0: go straight to "make video", skipping create-frame.** A depth-motion
+  shot is refs-only there: the adapter sets `refsWithStartFrame:false`, so a frame-first
+  shot silently drops the depth ref.
+- **seedance-2.5: you MAY use create-frame.** `refsWithStartFrame:true` — a start frame
+  demotes to a reference image and the reference arrays still ride, so the depth ref is
+  kept. Seed does not pin output, so the start frame is the only staging lock available.
 
 **Paste no binding phrase.** An uploaded video ref has no binding field — bindings are
 auto-generated for entity refs only — and the compiler already writes its own line from
