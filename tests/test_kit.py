@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -337,6 +338,7 @@ def _manifest(**overrides):
         depth_fps=24.0,
         depth_size=(1280, 536),
         depth_bytes=1_500_000,
+        depth_sha256="b" * 64,
         frame_count=120,
         still_index=7,
         still_has_real_faces=True,
@@ -773,3 +775,81 @@ def test_index_says_nothing_about_fires_for_an_untested_kit(tmp_path):
     # "FIRED" also appears in the header's explanation, so check the entry itself.
     entry = kitlib.write_outbox_index(tmp_path).read_text().split("1 kit:")[1]
     assert "FIRED" not in entry
+
+
+# --------------------------------------------- depth.sha256 — the content half of the join
+#
+# OSIDE's upload door records the uploaded clip's SHA-256 on the reference
+# (request_payload.refs[].sha256). kit.json carries the same hash of depth.mp4, so
+# kit.json.depth.sha256 == refs[].sha256 names the kit a generation rode
+# (PLAN-SHARED-GENERATION-ID step d, 2026-09-06).
+
+
+def test_manifest_depth_sha256_is_the_hash_of_the_written_file(tmp_path):
+    depth = tmp_path / "depth.mp4"
+    depth.write_bytes(b"\x00\x00\x00\x1cftypisom" + bytes(range(256)) * 8)
+    manifest = _manifest(depth_sha256=kitlib.sha256_file(depth))
+    assert manifest["depth"]["sha256"] == hashlib.sha256(depth.read_bytes()).hexdigest()
+    assert len(manifest["depth"]["sha256"]) == 64
+
+
+@pytest.mark.slow
+def test_a_built_kit_records_the_hash_of_its_own_depth_mp4(clip_3s, tmp_path):
+    """End to end: the hash in kit.json is of the depth.mp4 that sits beside it — the
+    bytes that get uploaded, after the size gate and any audio mux, not an intermediate."""
+    from typer.testing import CliRunner
+
+    from depthc import cli
+
+    lib = tmp_path / "lib"
+    result = CliRunner().invoke(cli.app, ["kit", str(clip_3s), "--library", str(lib), "--tags", "hash"])
+    kit_dirs = [p for p in lib.iterdir() if p.is_dir()] if lib.is_dir() else []
+    assert kit_dirs, result.output
+    kit_dir = kit_dirs[0]
+    manifest = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())
+    on_disk = hashlib.sha256((kit_dir / "depth.mp4").read_bytes()).hexdigest()
+    assert manifest["depth"]["sha256"] == on_disk
+    assert kitlib.depth_sha256(kit_dir) == on_disk
+
+
+def test_an_old_manifest_without_depth_sha256_still_loads(tmp_path):
+    """A kit built before 2026-09-06 has no depth.sha256 and real fires behind it; the
+    reader says None, it never refuses the kit."""
+    kit_dir = tmp_path / "Old-kit_001"
+    kit_dir.mkdir()
+    manifest = _manifest()
+    del manifest["depth"]["sha256"]
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
+    assert [e.path for e in kitlib.library_list(tmp_path)] == [kit_dir]
+    assert kitlib.depth_sha256(kit_dir) is None
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert kitlib.library_list(tmp_path)[0].verdict == "adhered"
+
+
+def test_depth_sha256_reads_a_new_manifest(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    assert kitlib.depth_sha256(kit_dir) == "b" * 64
+    assert kitlib.depth_sha256(tmp_path / "no-such-kit") is None
+
+
+def test_schema_requires_a_well_formed_depth_sha256():
+    """Accepted: 64 lowercase hex. Refused: anything else, and absence — on a NEW kit."""
+    import jsonschema
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.validate(_manifest(depth_sha256="0" * 64), schema)
+    for bad in ("", "xyz", "0" * 63, "A" * 64, "0" * 65):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_manifest(depth_sha256=bad), schema)
+    absent = _manifest()
+    del absent["depth"]["sha256"]
+    with pytest.raises(jsonschema.ValidationError, match="sha256"):
+        jsonschema.validate(absent, schema)
+
+
+def test_schema_version_stays_1_with_the_additive_key():
+    """Audit DC-6 ruling: additive keys do not bump schemaVersion; the schema says so."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    assert schema["properties"]["schemaVersion"] == {"const": 1}
+    assert "sha256" in schema["properties"]["depth"]["required"]
+    assert "additive" in schema.get("$comment", "").lower()

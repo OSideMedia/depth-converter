@@ -418,6 +418,7 @@ def build_manifest(
     depth_fps: float,
     depth_size: tuple[int, int],
     depth_bytes: int,
+    depth_sha256: str,
     frame_count: int,
     still_index: int,
     still_has_real_faces: bool,
@@ -466,6 +467,12 @@ def build_manifest(
         },
         "depth": {
             "filename": "depth.mp4",
+            # The content half of the fire -> generation join. OSIDE's upload door records
+            # the uploaded clip's SHA-256 on the reference (request_payload.refs[].sha256);
+            # a browser upload cannot read this file beside the clip, so the hash of the
+            # BYTES is the only key both sides can hold. Hashed after the size gate and any
+            # audio mux — the file as it is uploaded, never an intermediate.
+            "sha256": depth_sha256,
             "durationSeconds": round(depth_duration, 3),
             "fps": round(depth_fps, 3),
             "width": width,
@@ -565,6 +572,28 @@ def _target_model_block(dialect: str) -> dict:
 def write_manifest(paths: KitPaths, manifest: dict) -> Path:
     paths.manifest.write_text(json.dumps(manifest, indent=2) + "\n")
     return paths.manifest
+
+
+def read_manifest(kit_dir: Path) -> dict | None:
+    """The kit's manifest, or None when there is no readable kit.json there."""
+    try:
+        data = json.loads((Path(kit_dir) / KIT_MANIFEST).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def depth_sha256(kit_dir: Path) -> str | None:
+    """SHA-256 of the kit's depth.mp4 as recorded at build time, or None on a kit built
+    before 2026-09-06 — those carry no such key and have real fires behind them, so a
+    reader tolerates the absence (and `compare` says so once) rather than refusing the kit.
+    The schema requires the key on NEW kits only.
+    """
+    manifest = read_manifest(kit_dir)
+    if not manifest:
+        return None
+    value = (manifest.get("depth") or {}).get("sha256")
+    return value if isinstance(value, str) and value else None
 
 
 # ------------------------------------------------------------------- the feedback loop

@@ -544,6 +544,9 @@ def kit(
                 })
 
         depth_bytes = paths.depth.stat().st_size
+        # Hashed here, after the size-gate re-encode and the audio mux above, so it names
+        # the bytes that get uploaded — OSIDE hashes the upload and joins on this value.
+        depth_sha = kitlib.sha256_file(paths.depth)
         depth_info = probe_file(paths.depth)
         report = checks.check(
             duration=depth_info.duration,
@@ -585,6 +588,7 @@ def kit(
             depth_fps=depth_info.fps,
             depth_size=(depth_info.width, depth_info.height),
             depth_bytes=depth_bytes,
+            depth_sha256=depth_sha,
             frame_count=job.result.count,
             still_index=chosen,
             still_has_real_faces=faces,
@@ -988,6 +992,17 @@ def compare(
         depth_path = kit_dir / "depth.mp4"
         if not depth_path.is_file():
             _die(f"No kit at {kit_dir} (expected a depth.mp4 inside)")
+
+    # The content half of the fire -> generation join lives in kit.json; a kit built before
+    # 2026-09-06 has none. Said once, before the depth pass, and never fatal.
+    # ponytail: only the base depth.mp4 is hashed — a fired VARIANT has its own bytes and no
+    # recorded hash yet; hash variants/ at build time if a variant fire ever needs the join.
+    if kitlib.depth_sha256(kit_dir) is None:
+        _warn(
+            "kit.json carries no depth.sha256 (kit built before 2026-09-06) — the content "
+            "join to OSIDE's refs[].sha256 cannot be made for this kit; "
+            "`shasum -a 256 depth.mp4` gives the value by hand."
+        )
 
     # A processed variant is not measured in the same units as the depth.mp4 it came from:
     # midgrey caps luma at 190, so its motion energy is ~0.74x the base while the generation

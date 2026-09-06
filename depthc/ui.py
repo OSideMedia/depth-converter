@@ -366,7 +366,8 @@ def _convert(
             crop=str(crop_rect) if crop_rect else None,
             depth_duration=depth_info.duration, depth_fps=depth_info.fps,
             depth_size=(depth_info.width, depth_info.height),
-            depth_bytes=paths.depth.stat().st_size, frame_count=result.count,
+            depth_bytes=paths.depth.stat().st_size,
+            depth_sha256=kitlib.sha256_file(paths.depth), frame_count=result.count,
             still_index=chosen, still_has_real_faces=faces, tags=tag_list,
             description=description or "",
             settings={

@@ -143,3 +143,38 @@ class TestDialectPreflight:
         )
         assert result.exit_code == 1
         assert "not renderable" in _text(result)
+
+
+class TestCompareNamesAMissingDepthHash:
+    """The content join needs kit.json.depth.sha256; a kit built before 2026-09-06 has
+    none. compare says so ONCE, before the depth pass, and carries on — it never refuses
+    a real kit with real fires behind it."""
+
+    def _kit(self, tmp_path: Path, with_hash: bool) -> Path:
+        import json
+
+        from test_kit import _manifest
+
+        from depthc import kit as kitlib
+
+        kit_dir = tmp_path / "Old_001"
+        kit_dir.mkdir()
+        manifest = _manifest()
+        if not with_hash:
+            del manifest["depth"]["sha256"]
+        (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
+        (kit_dir / "depth.mp4").write_bytes(b"not a video")  # the decode dies right after
+        return kit_dir
+
+    def test_old_kit_is_named_once_then_compare_proceeds(self, tmp_path):
+        kit_dir = self._kit(tmp_path, with_hash=False)
+        result = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        text = _text(result)
+        assert text.count("no depth.sha256") == 1
+        assert "refs[].sha256" in text
+        assert result.exit_code == 1  # the fake depth.mp4, not the missing hash
+
+    def test_a_hashed_kit_gets_no_note(self, tmp_path):
+        kit_dir = self._kit(tmp_path, with_hash=True)
+        result = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        assert "no depth.sha256" not in _text(result)
