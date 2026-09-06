@@ -120,8 +120,12 @@ Kits land in **`Outbox/<Tags>_NNN/`** inside the project — not in the home fol
 `Processed/` on PASS/WARN; a FAIL deliberately stays in `Inbox/`.
 
 Each kit carries `README.txt` (what to do), `binding.txt` (the Variant A phrase alone, one
-line, ready to paste), and `sheet.png` (depth contact sheet with timestamps). Those plus
-`depth.mp4` are the only files Peter needs to touch. `--variants` adds four refs of the same
+line — for surfaces that HAVE a per-reference binding field; OSIDE does not, for uploads),
+and `sheet.png` (depth contact sheet with timestamps). **Exactly one file goes to OSIDE:
+`depth.mp4`, uploaded as the video reference. That is the whole handover.** The four
+surfaces that say so — this file, `README.md`, `Outbox/README.txt` and every kit's
+`README.txt` — are held to the same words by `tests/test_handover.py`; until 2026-09-06
+two of them said "take two files and paste binding.txt" (audit DC-2). `--variants` adds four refs of the same
 beat under `variants/` — contrast-stretched, inverted, **midgrey** (luma capped at 190 so
 figures never blow to near-white — the moderation-rejection shape), and **edges** (Canny of
 the depth video, experimental) — **exactly one is uploaded per generation**.

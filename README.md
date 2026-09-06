@@ -369,11 +369,14 @@ dialect is a new template file plus `--dialect`, with no code change.
 1. **Curate** — find the clip with the camera move or choreography you want.
 2. **Trim** — cut to the **3–8 s sweet spot**, one clear motion signal only.
 3. **Convert** — run `depthc kit`; it renders locally and lands in `Outbox/`.
-4. **Attach** — in OSIDE: Shotlist → pick the shot → go straight to **"make video"**,
-   **skipping the create-frame step**. A depth-motion shot is a refs-only shot: the adapter
-   never sends references alongside a start frame, so a frame-first shot would silently drop
-   the depth ref. In Composer, add your character/location/prop image refs (the look), upload
-   `depth.mp4` as the video ref (the motion), and paste the line from `binding.txt`.
+4. **Attach** — in OSIDE: Shotlist → pick the shot → **"make video"**. In Composer, add
+   your character/location/prop image refs (the look) and upload `depth.mp4` as the video
+   ref (the motion). That is the whole handover — **paste no binding phrase**: an uploaded
+   video ref has no binding field and the Composer writes its own line. `binding.txt` is
+   for surfaces that HAVE a per-reference binding field — OSIDE does not, for uploads.
+   The create-frame step is per model, and the kit's `README.txt` prints the right rule:
+   on **seedance-2.0** skip it (refs-only — a start frame silently drops the depth ref);
+   on **seedance-2.5** you may use it (the frame demotes to a reference image, refs ride).
 5. **Fire** — generate.
 
 **Resolution guidance.** The depth ref is always ≤720p-class; it's a motion guide, not
