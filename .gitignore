@@ -22,3 +22,16 @@ Outbox/*
 !Inbox/README.txt
 !Processed/README.txt
 !Outbox/README.txt
+
+# [2026-09-06, audit DC-4] The per-kit TEXT records are tracked; the media never is.
+# `Outbox/*` wholesale already swallowed every 2026-07-25 kit's result.json (the paid
+# evidence — DOCS/LIVE-FIRE.md:121-129) and left the one surviving $3.83 record in an
+# unbacked local folder. A kit folder must be un-ignored for its files to be, so the
+# folder pattern comes first; depth.mp4 / source.mp4 / preview.mp4 / still.png /
+# sheet.png / prompt.txt / binding.txt / README.txt / variants/ stay ignored via the
+# re-ignore line below — `git check-ignore -v` each one to prove it (tests/test_gitignore.py).
+!Outbox/*/
+Outbox/*/*
+!Outbox/*/kit.json
+!Outbox/*/result.json
+!Outbox/INDEX.txt

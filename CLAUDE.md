@@ -159,10 +159,16 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
   model-size selector by design, and adding one is a licensing violation, not an upgrade.
 - **Nothing fires against a paid API automatically.** Live-fire is human-run and
   budget-approved. See `DOCS/LIVE-FIRE.md`.
-- **Never commit media.** `Inbox/`, `Processed/` and `Outbox/` contents are gitignored and
+- **Never commit media.** `Inbox/`, `Processed/` and `Outbox/` media are gitignored and
   stay that way: source clips carry other people's rights, and a kit's `source.mp4` is the
-  original footage. Evidence about a fire belongs in `DOCS/LIVE-FIRE.md`, which is tracked;
-  the per-kit `result.json` is local. (Repo went private under OSideMedia on 2026-07-25
+  original footage. Evidence about a fire belongs in `DOCS/LIVE-FIRE.md`, which is tracked,
+  AND in the per-kit text records, which are tracked too since 2026-09-06 (audit DC-4):
+  `Outbox/*/kit.json`, `Outbox/*/result.json` and `Outbox/INDEX.txt`. Nothing else in a
+  kit folder is — `depth.mp4`, `source.mp4`, `preview.mp4`, `still.png`, `sheet.png`,
+  `prompt.txt`, `binding.txt`, `README.txt`, `variants/` never are
+  (`tests/test_gitignore.py` proves each with `git check-ignore`). The wholesale
+  `Outbox/*` rule had already swallowed every 2026-07-25 kit's `result.json` — paid
+  evidence, gone (`DOCS/LIVE-FIRE.md`). (Repo went private under OSideMedia on 2026-07-25
   once Gate 4 passed, with the per-repo noreply email
   `261988918+OSideMedia@users.noreply.github.com`.)
 - **Never edit `vendor/`.** Upstream is pinned and imported; device and precision handling
