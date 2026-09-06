@@ -12,6 +12,7 @@ from depthc import kit as kitlib
 from depthc.checks import check
 
 SCHEMA_PATH = Path(__file__).parent.parent / "depthc" / "kit_schema.json"
+RESULT_SCHEMA_PATH = Path(__file__).parent.parent / "depthc" / "result_schema.json"
 
 
 # ------------------------------------------------------------------- naming & library
@@ -695,6 +696,8 @@ def test_readme_always_explains_how_to_record_a_fire():
         duration=5.0, width=1280, height=536, fps=24.0, size_bytes=1_500_000,
         still_has_real_faces=True))
     assert "depthc result" in text
+    # ...and how to name the OSIDE generation it became (step d of the shared-id plan).
+    assert "--generation" in text
 
 
 # ------------------------------------------------------------------------ the fire log
@@ -853,3 +856,93 @@ def test_schema_version_stays_1_with_the_additive_key():
     assert schema["properties"]["schemaVersion"] == {"const": 1}
     assert "sha256" in schema["properties"]["depth"]["required"]
     assert "additive" in schema.get("$comment", "").lower()
+
+
+# ------------------------------ fires[].generationId — the generation half of the join
+#
+# OSIDE's `generations.id` is the hub every store joins to. A fire that names it is a
+# row in the ledger; one that does not is a number in a human's memory.
+
+GEN = "3f2504e0-4f89-4d3c-9a6b-0305e82c3301"  # v4: version nibble 4, variant nibble a
+
+
+def test_a_fire_records_the_generation_it_became(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered", generation_id=GEN.upper())
+    saved = json.loads((kit_dir / "result.json").read_text())
+    assert saved["fires"][0]["generationId"] == GEN  # canonical: lowercase, hyphenated
+
+
+def test_a_fire_without_a_generation_is_unkeyed_as_before(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert "generationId" not in json.loads((kit_dir / "result.json").read_text())["fires"][0]
+
+
+@pytest.mark.parametrize("bad", [
+    "gen-42",
+    "",
+    "3f2504e0-4f89-4d3c-9a6b-0305e82c330",     # 11 in the last group
+    "3f2504e04f894d3c9a6b0305e82c3301",         # no hyphens
+    "3f2504e0-4f89-1d3c-9a6b-0305e82c3301",     # version nibble 1
+    "3f2504e0-4f89-4d3c-1a6b-0305e82c3301",     # variant nibble 1
+    "{3f2504e0-4f89-4d3c-9a6b-0305e82c3301}",   # braced form
+])
+def test_a_non_uuid_generation_is_refused_naming_the_grammar(tmp_path, bad):
+    kit_dir = _kit_on_disk(tmp_path)
+    with pytest.raises(ValueError, match="UUID v4") as e:
+        kitlib.record_result(kit_dir, verdict="adhered", generation_id=bad)
+    assert "8-4-4-4-12" in str(e.value)
+    assert not (kit_dir / "result.json").exists()  # refused before anything is written
+
+
+def test_an_old_result_json_without_generation_ids_still_loads(tmp_path):
+    """Every fire recorded before 2026-09-06 lacks the key; the log reads, and a new fire
+    appended beside it carries the id while the old one stays unkeyed."""
+    kit_dir = _kit_on_disk(tmp_path)
+    old = {"schemaVersion": 1, "kitName": kit_dir.name, "fires": [{
+        "firedAt": "2026-08-25T04:54:01+00:00", "verdict": "adhered",
+        "meaning": kitlib.VERDICTS["adhered"], "surface": "ark", "model": "ark-seedance-2.5",
+        "variant": "base", "outputSeconds": 5.0, "costUsd": 2.45,
+        "outputRef": "DOCS/livefire/x/1080p.mp4", "notes": "ratio 0.93, r0=+0.820",
+    }]}
+    (kit_dir / "result.json").write_text(json.dumps(old))
+    assert kitlib.read_results(kit_dir)["fires"][0]["verdict"] == "adhered"
+    kitlib.record_result(kit_dir, verdict="partial", generation_id=GEN)
+    fires = kitlib.read_results(kit_dir)["fires"]
+    assert "generationId" not in fires[0]
+    assert fires[1]["generationId"] == GEN
+
+
+def test_result_schema_governs_old_and_new_records(tmp_path):
+    import jsonschema
+
+    schema = json.loads(RESULT_SCHEMA_PATH.read_text())
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered", cost_usd=0.31)        # unkeyed, as before
+    kitlib.record_result(kit_dir, verdict="partial", generation_id=GEN)   # keyed
+    jsonschema.validate(kitlib.read_results(kit_dir), schema)
+    bad = kitlib.read_results(kit_dir)
+    bad["fires"][1]["generationId"] = "gen-42"
+    with pytest.raises(jsonschema.ValidationError, match="generationId|pattern"):
+        jsonschema.validate(bad, schema)
+    # The schema's verdict list IS kit.VERDICTS — the two cannot drift apart.
+    assert sorted(schema["properties"]["fires"]["items"]["properties"]["verdict"]["enum"]) \
+        == sorted(kitlib.VERDICTS)
+
+
+def test_every_tracked_result_json_validates():
+    """The per-kit records tracked by law (audit DC-4) are the schema's real subjects; an
+    empty subject set is a failed enumeration, not a pass."""
+    import subprocess
+
+    import jsonschema
+
+    root = Path(__file__).parent.parent
+    tracked = subprocess.run(
+        ["git", "ls-files", "Outbox/*/result.json"], cwd=root, capture_output=True, text=True,
+    ).stdout.split()
+    assert tracked, "no tracked Outbox/*/result.json — the DC-4 evidence set is empty"
+    schema = json.loads(RESULT_SCHEMA_PATH.read_text())
+    for rel in tracked:
+        jsonschema.validate(json.loads((root / rel).read_text()), schema)

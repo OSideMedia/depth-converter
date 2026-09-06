@@ -319,7 +319,8 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         "-----------------",
         "  Record what happened, so the next kit is chosen on evidence:",
         f"    depthc result {manifest['kitName']} --verdict adhered|partial|ignored|late|rejected \\",
-        '        --surface oside --cost 0.30 --notes "what actually came back"',
+        '        --surface oside --cost 0.30 --notes "what actually came back" \\',
+        "        --generation <id>   # the OSIDE generation it became: the id on its row/URL",
         "  That writes result.json here and shows up in Outbox/INDEX.txt.",
     ]
 
@@ -608,6 +609,26 @@ VERDICTS = {
     "rejected": "the API or moderation refused the input",
 }
 RESULT_SCHEMA_VERSION = 1
+RESULT_SCHEMA = Path(__file__).parent / "result_schema.json"  # documents result.json; tests hold it
+
+# The generation half of the fire -> generation join: OSIDE's `generations.id`, a Postgres
+# gen_random_uuid() — RFC 4122 version 4. Stored canonical (lowercase, hyphenated) so
+# `fires[].generationId == generations.id` is a plain string equality on both sides.
+GENERATION_ID_GRAMMAR = (
+    "UUID v4 — 8-4-4-4-12 hex with version nibble 4 and variant nibble 8/9/a/b, "
+    "e.g. 3f2504e0-4f89-4d3c-9a6b-0305e82c3301; it is the id on the generation's row/URL in OSIDE"
+)
+GENERATION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
+
+def validate_generation_id(value: str) -> str:
+    """The canonical form of an OSIDE generation id, or ValueError naming the grammar."""
+    candidate = value.strip().lower()
+    if not GENERATION_ID_RE.match(candidate):
+        raise ValueError(f"--generation {value!r} is not a {GENERATION_ID_GRAMMAR}")
+    return candidate
 
 
 def read_results(kit_dir: Path) -> dict:
@@ -634,6 +655,7 @@ def record_result(
     output_ref: str = "",
     variant: str = "",
     notes: str = "",
+    generation_id: str | None = None,
 ) -> dict:
     """Append one fire to the kit's result.json and return the updated log.
 
@@ -645,11 +667,13 @@ def record_result(
     """
     if verdict not in VERDICTS:
         raise ValueError(f"verdict must be one of {sorted(VERDICTS)} (got {verdict!r})")
+    # Refused before anything is read or written: a fire keyed to a typo joins nothing.
+    generation = validate_generation_id(generation_id) if generation_id is not None else None
 
     log = read_results(kit_dir)
     log["kitName"] = Path(kit_dir).name
     log["schemaVersion"] = RESULT_SCHEMA_VERSION
-    log["fires"].append({
+    entry = {
         "firedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "verdict": verdict,
         "meaning": VERDICTS[verdict],
@@ -660,7 +684,13 @@ def record_result(
         "costUsd": cost_usd,
         "outputRef": output_ref,
         "notes": notes,
-    })
+    }
+    # The OSIDE generation this fire became (PLAN-SHARED-GENERATION-ID step d). Absent,
+    # not null, when unknown: every fire recorded before 2026-09-06 is unkeyed, and a
+    # reader must be able to tell "never named" from "named nothing".
+    if generation is not None:
+        entry["generationId"] = generation
+    log["fires"].append(entry)
     (Path(kit_dir) / "result.json").write_text(json.dumps(log, indent=2) + "\n")
     return log
 

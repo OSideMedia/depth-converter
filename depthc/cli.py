@@ -815,6 +815,10 @@ def result(
         "", "--variant", help="Which ref was used: base, contrast, invert, midgrey, edges"
     ),
     notes: str = typer.Option("", "--notes", help="What actually happened, in your words"),
+    generation: Optional[str] = typer.Option(
+        None, "--generation",
+        help="The OSIDE generation this fire became — its id (UUID v4) from the generation's row/URL",
+    ),
     library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
 ) -> None:
     """Record what happened when a kit was fired.
@@ -834,7 +838,7 @@ def result(
         log = kitlib.record_result(
             kit_dir, verdict=verdict, surface=surface, model=model,
             output_seconds=seconds, cost_usd=cost, output_ref=output,
-            variant=variant, notes=notes,
+            variant=variant, notes=notes, generation_id=generation,
         )
     except ValueError as e:
         _die(str(e))
@@ -965,6 +969,11 @@ def compare(
         True, "--camera-path/--no-camera-path",
         help="Median-flow camera path (pan/tilt/push) on both sides — WHICH WAY the frame moves",
     ),
+    generation: Optional[str] = typer.Option(
+        None, "--generation",
+        help="The OSIDE generation this download IS — its id (UUID v4) from the generation's "
+             "row/URL; carried into the `depthc result` line that records the fire",
+    ),
 ) -> None:
     """Measure whether a generation followed its kit — energy ratio first, correlation second.
 
@@ -977,6 +986,14 @@ def compare(
     """
     from depthc import compare as comparelib, engine, kit as kitlib, motion as motionlib
     from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
+
+    # Refused before the depth pass: a 30 s model run keyed to a typo is a wasted run.
+    generation_id = None
+    if generation is not None:
+        try:
+            generation_id = kitlib.validate_generation_id(generation)
+        except ValueError as e:
+            _die(str(e))
 
     root = kitlib.library_root(library)
     kit_dir = Path(kit_name) if Path(kit_name).is_dir() else root / kit_name
@@ -1072,11 +1089,24 @@ def compare(
     ))
     typer.echo("")
     typer.echo(f"{DIM}record it:{OFF}")
-    typer.echo(
+    typer.echo(_record_hint(kit_name, comparison, generation_id))
+
+
+def _record_hint(kit_name: str, comparison, generation_id: str | None) -> str:
+    """The ready-to-paste `depthc result` line under a compare report.
+
+    `compare` measures and never writes the fire — the verdict is human-only (the plan's
+    "no automatic verdicts"; the suggestion is a heuristic) — so the generation id it was
+    given rides into result.json through this line, and `result --generation` is what
+    writes fires[].generationId.
+    """
+    ratio = comparison.ratio if comparison.ratio is not None else "n/a"
+    r0 = comparison.r0 if comparison.r0 is not None else "n/a"
+    generation = f" --generation {generation_id}" if generation_id else ""
+    return (
         f'{DIM}  ./.tools/uv run depthc result "{kit_name}" --verdict {comparison.suggestion} '
-        f'--surface oside --seconds {comparison.overlap_seconds:g} \\\n'
-        f'      --notes "ratio {comparison.ratio if comparison.ratio is not None else "n/a"}'
-        f' r0={comparison.r0 if comparison.r0 is not None else "n/a"} — <what you saw>"{OFF}'
+        f'--surface oside --seconds {comparison.overlap_seconds:g}{generation} \\\n'
+        f'      --notes "ratio {ratio} r0={r0} — <what you saw>"{OFF}'
     )
 
 
