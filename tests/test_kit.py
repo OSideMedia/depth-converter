@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from depthc import checks
 from depthc import kit as kitlib
 from depthc.checks import check
 
@@ -271,7 +272,7 @@ def test_prompt_still_guidance_flips_on_faces():
 
 def test_prompt_states_the_refs_only_rule():
     """On 2.0 a frame-first shot silently drops the depth ref — the kit must say so."""
-    text = _render()
+    text = _render(dialect="seedance-2.0")
     assert "skip the create-frame" in text
     assert "refs-only" in text
 
@@ -294,7 +295,7 @@ def test_no_kit_instructs_a_4k_master_on_2_5():
     Asserted on the INSTRUCTION, not the substring: the 2.5 file mentions the phrase in the
     sentence that negates it, and a bare `not in` would fail on correct prose.
     """
-    assert "Iterate at 720p, master at 4K" in _render()
+    assert "Iterate at 720p, master at 4K" in _render(dialect="seedance-2.0")
     text25 = _render(dialect="seedance-2.5")
     assert "THERE IS NO 4K RUNG" in text25
     assert "Iterate at 720p, master at 4K" not in text25
@@ -365,7 +366,29 @@ def test_manifest_records_provenance():
     assert manifest["source"]["sha256"] == "a" * 64
     assert manifest["tool"]["vdaCommit"] == kitlib.VDA_COMMIT
     assert manifest["tool"]["name"] == "depthc"
+    assert manifest["promptDialect"] == checks.DEFAULT_DIALECT == "seedance-2.5"
+
+
+def test_a_2_0_kit_still_gets_2_0_prose_and_numbers_end_to_end():
+    """Every place that switches on the dialect name must still pick 2.0 when asked.
+
+    The default moved to 2.5 (audit DC-5); this is the guard that the flag, not the
+    default, decides the template, the binding, the manifest envelope and the README.
+    """
+    assert kitlib.DEFAULT_DIALECT == checks.DEFAULT_DIALECT
+    manifest = _manifest(dialect="seedance-2.0")
     assert manifest["promptDialect"] == "seedance-2.0"
+    assert manifest["targetModel"]["dialect"] == "seedance-2.0"
+    assert manifest["targetModel"]["refSeconds"] == [2.0, 15.0]
+    assert manifest["targetModel"]["refsWithStartFrame"] is False
+    assert "4k" in manifest["targetModel"]["outputResolutions"]
+    assert "dialect seedance-2.0" in _render(dialect="seedance-2.0")
+    assert kitlib.render_binding("seedance-2.0") == kitlib.render_binding("seedance-2.0")
+    report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000,
+                   dialect="seedance-2.0")
+    readme = kitlib.render_kit_readme(manifest, report)
+    assert "Skip create-frame" in readme
+    assert "never 1080p" in readme
 
 
 def test_manifest_records_the_crop_and_trim():
@@ -504,11 +527,20 @@ def test_kit_readme_names_the_one_file_to_upload():
     assert text.index("TAKE THIS ONE FILE") < text.index("EVERYTHING ELSE")
 
 
-def test_kit_readme_states_the_refs_only_rule():
-    report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000)
-    text = kitlib.render_kit_readme(_manifest(), report)
+def test_kit_readme_states_the_refs_only_rule_on_2_0():
+    report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000,
+                   dialect="seedance-2.0")
+    text = kitlib.render_kit_readme(_manifest(dialect="seedance-2.0"), report)
     assert "MAKE VIDEO" in text
     assert "Skip create-frame" in text
+
+
+def test_kit_readme_on_the_default_dialect_allows_a_start_frame():
+    """The default is 2.5 (audit DC-5): the frame demotes to a reference, refs still ride."""
+    report = check(duration=5.0, width=1280, height=536, fps=24.0, size_bytes=800_000)
+    text = kitlib.render_kit_readme(_manifest(), report)
+    assert "You MAY use create-frame" in text
+    assert "Skip create-frame" not in text
 
 
 def test_kit_readme_flags_a_real_face_still_as_local_only():

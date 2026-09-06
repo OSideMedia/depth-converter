@@ -33,7 +33,8 @@ def test_default_port_avoids_the_oside_dev_server():
         (0, 2.5, "single beat"),
         (0, 1.5, "under the 2s minimum"),
         (0, 12, "adherence degrades"),
-        (0, 20, "ceiling"),
+        (0, 20, "adherence degrades"),   # legal on 2.5, the default since 2026-09-06
+        (0, 35, "ceiling"),
         (5, 5, "empty range"),
         (9, 4, "empty range"),
     ],
@@ -125,10 +126,22 @@ def test_convert_without_a_video_returns_a_message():
     assert "Drop a clip" in status
 
 
+def test_the_ui_default_is_2_5_and_its_bounds_follow(tmp_path):
+    """[2026-09-06, audit DC-5] The UI's probe-time bounds and the model radio both read
+    the default record; the default is 2.5, so a 20s upload is no longer refused up front."""
+    assert checks.DEFAULT_DIALECT == "seedance-2.5"
+    assert ui._UI_DIALECT.name == "seedance-2.5"
+    assert ui._UI_MAX_REF == 30.0
+    assert "seedance-2.5" in ui._trim_feedback(0, 35)
+
+
 def test_convert_rejects_an_over_long_clip(clip_long):
-    """>15s must be refused with an explanation, before any inference is attempted."""
+    """>15s on 2.0 must be refused with an explanation, before any inference is attempted.
+
+    2.0 is passed explicitly — on the default (2.5) a 20s clip is legal.
+    """
     *_, status = ui._convert(
-        str(clip_long), "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 0, 20,
+        str(clip_long), "", "", "seedance-2.0", "720p", "auto", "conform-24", 0, 20,
         False, True, "auto", 518, "fp32", False, False, "",
     )
     assert "ceiling" in status and "seedance-2.0" in status

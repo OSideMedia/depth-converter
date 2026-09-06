@@ -24,6 +24,7 @@ import numpy as np
 
 from depthc import VDA_COMMIT, __version__
 from depthc.checks import Report, Tier, suggested_output_seconds
+from depthc.checks import DEFAULT_DIALECT as checks_default_dialect
 from depthc.checks import dialect_for as checks_dialect_for
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -33,7 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # work in, work out, and originals. An earlier default of ~/Depth_Motion_Library buried the
 # deliverables in the home folder, away from the workflow they belong to.
 DEFAULT_LIBRARY = PROJECT_ROOT / "Outbox"
-DEFAULT_DIALECT = "seedance-2.0"
+DEFAULT_DIALECT = checks_default_dialect  # one source: checks.DEFAULT_DIALECT
 KIT_MANIFEST = "kit.json"
 
 STILL_SEARCH_FRAMES = 24

@@ -685,8 +685,8 @@ def _print_scout(clip: Path, result, indent: str = "    ") -> None:
     )
     typer.echo(
         f"{indent}{DIM}./.tools/uv run depthc kit \"{clip}\" "
-        f"--trim {best.start:g} {best.end:g} --tags \"...\" --desc \"...\" "
-        f"--preview --archive{OFF}"
+        f"--trim {best.start:g} {best.end:g} --dialect {checks.DEFAULT_DIALECT} "
+        f"--tags \"...\" --desc \"...\" --preview --archive{OFF}"
     )
 
 

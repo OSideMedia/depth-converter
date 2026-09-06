@@ -316,7 +316,11 @@ def load_envelope(
 
 DIALECTS: dict[str, Dialect] = load_envelope()
 
-DEFAULT_DIALECT = "seedance-2.0"
+# [CHANGED 2026-09-06, audit DC-5] 2.5 is OSIDE's live line and the only kit on disk is a
+# 2.5 kit; defaulting to 2.0 meant the inbox hint — which named no dialect — built a kit
+# graded by 2.0 law (15s ceiling, refs-only, 4K rung) for a model that has none of those.
+# `--dialect seedance-2.0` still selects the 2.0 template, prose and envelope in full.
+DEFAULT_DIALECT = "seedance-2.5"
 
 
 def dialect_for(name: str | Dialect | None = None) -> Dialect:
