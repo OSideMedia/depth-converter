@@ -486,3 +486,66 @@ def test_a_subject_walking_toward_centre_is_not_a_camera_pull():
     assert path is not None
     assert path["radial"] == pytest.approx(0.0, abs=1e-6)
     assert path["label"] == "static"
+
+
+# ------------------------------------------------------- the scout's cut detector, at 12 fps
+# `MotionProfile.fps` was doing two jobs: the TIME axis (i / fps gives a timestamp) and the
+# SCALE the deltas are expressed in. They are the same thing for measure(), whose deltas are
+# raw at fps — and different for scout_clip(), which rescales its deltas to 24fps-equivalent
+# and still reports fps=12. `spikes` read fps as the scale and rescaled the floor a second
+# time, so at the scout's default the threshold landed 2x too high.
+#
+# This matters because the changed-pixel CUT_FRACTION rule is deliberately disabled off
+# 24 fps, which makes the magnitude rule the scout's ONLY cut detector — and a missed cut
+# puts a spliced window at the top of `depthc inbox` with a ready-to-paste --trim, against
+# the module's own law that a hard cut is the worst possible competing signal.
+
+
+def _scout_shaped_profile(spike_24fps_equivalent: float):
+    """A profile built the way scout_clip builds one: deltas already on the 24 fps scale."""
+    raw = np.full(60, 1.0, dtype=np.float64)      # quiet clip: median 1.0, so median*6 = 6
+    raw[30] = spike_24fps_equivalent
+    return m.MotionProfile(fps=12.0, deltas=raw, delta_fps=24.0, bucket_seconds=1.0)
+
+
+@pytest.mark.parametrize("magnitude", [9.0, 12.0, 15.0])
+def test_a_cut_between_the_floor_and_twice_it_is_seen_at_the_scout_default(magnitude):
+    """The band the double-compensation hid: above SPIKE_FLOOR, below 2x it.
+
+    On a clip quiet enough that median*SPIKE_MULTIPLE stays under the doubled floor, a cut
+    of this size was invisible at --scout-fps 12 and visible at 24 — two different answers
+    from the same footage, decided by a flag nobody passes.
+    """
+    assert m.SPIKE_FLOOR < magnitude < 2 * m.SPIKE_FLOOR   # the test has a real subject
+    profile = _scout_shaped_profile(magnitude)
+    assert profile.spikes, f"a {magnitude} spike on the 24fps scale must clear SPIKE_FLOOR"
+
+
+def test_the_delta_scale_is_independent_of_the_time_axis():
+    """Same deltas, same scale, two different frame rates → the same verdict.
+
+    The floor follows the scale the deltas are IN, never the rate they were sampled at.
+    """
+    raw = np.full(60, 1.0); raw[30] = 10.0
+    at12 = m.MotionProfile(fps=12.0, deltas=raw.copy(), delta_fps=24.0)
+    at24 = m.MotionProfile(fps=24.0, deltas=raw.copy(), delta_fps=24.0)
+    assert bool(at12.spikes) == bool(at24.spikes) is True
+    # ...and the timestamps still come from the time axis, which is what fps is for.
+    assert at12.spikes[0] == round(30 / 12.0, 2)
+    assert at24.spikes[0] == round(30 / 24.0, 2)
+
+
+def test_raw_deltas_still_get_their_floor_rescaled():
+    """The 60 fps case the original scaling existed for must not regress.
+
+    A profile from measure() carries RAW deltas at its own fps, so delta_fps defaults to fps
+    and a 60 fps clip still gets the floor scaled down — per-gap deltas shrink by the same
+    factor, and an unscaled 8.0 would let a real cut slide under.
+    """
+    raw = np.full(60, 0.4); raw[30] = 4.0     # 4.0 raw at 60fps = 10.0 at 24fps
+    at60 = m.MotionProfile(fps=60.0, deltas=raw.copy())
+    assert at60.delta_fps is None and at60.delta_scale == 60.0  # None means "same as fps"
+    assert at60.spikes, "a 60fps cut must still be caught by the scaled floor"
+    # The same series read as raw 24 fps is genuinely below the floor and must NOT fire.
+    at24 = m.MotionProfile(fps=24.0, deltas=raw.copy())
+    assert not at24.spikes

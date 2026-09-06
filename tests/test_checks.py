@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from depthc import motion as m
+from depthc import checks, motion as m
 from depthc.checks import (
     Tier, check, format_report, on_output_grid, snap_trim, suggested_output_seconds,
 )
@@ -52,15 +52,26 @@ def test_over_fifteen_seconds_fails(seconds):
     assert tier_of("duration", check(**{**GOOD, "duration": seconds})) is Tier.FAIL
 
 
-def test_oversize_file_fails_at_the_stricter_limit():
-    """Sources disagree (50 vs 200 MB); the checker enforces the stricter one."""
-    report = check(**{**GOOD, "size_bytes": 60_000_000})
+def test_oversize_file_fails_at_the_vendor_limit():
+    """200 MB, quoted from the Ark API page for BOTH model lines.
+
+    [RE-SCOPED 2026-08-24] This asserted FAIL at 60 MB under a "sources are contested, take
+    the stricter" rule. The vendor states 200 MB on three pages, so 60 MB was legal input the
+    checker refused — and this assertion is what would have made that correction look like a
+    regression. The counterexample below is the point: a vendor-legal 120 MB ref must PASS.
+    """
+    report = check(**{**GOOD, "size_bytes": 210_000_000})
     assert tier_of("file size", report) is Tier.FAIL
     assert "200" in next(f.detail for f in report.findings if f.check == "file size")
 
 
+def test_a_vendor_legal_large_file_passes():
+    """The refusal this file used to certify. 120 MB is inside 200 and must ship."""
+    assert tier_of("file size", check(**{**GOOD, "size_bytes": 120_000_000})) is Tier.PASS
+
+
 def test_file_just_under_the_limit_passes():
-    assert tier_of("file size", check(**{**GOOD, "size_bytes": 49_000_000})) is Tier.PASS
+    assert tier_of("file size", check(**{**GOOD, "size_bytes": 199_000_000})) is Tier.PASS
 
 
 def test_too_few_pixels_fails():
@@ -69,8 +80,20 @@ def test_too_few_pixels_fails():
 
 
 def test_too_many_pixels_fails():
-    report = check(**{**GOOD, "width": 3840, "height": 2160})
+    """DCI 4K (4096x2160 = 8,847,360) is genuinely over the vendor ceiling of 8,295,044."""
+    report = check(**{**GOOD, "width": 4096, "height": 2160})
     assert tier_of("resolution", report) is Tier.FAIL
+
+
+@pytest.mark.parametrize("w,h", [(1920, 1080), (2560, 1440), (3840, 2160)])
+def test_vendor_legal_resolutions_pass(w, h):
+    """[RE-SCOPED 2026-08-24] UHD 3840x2160 = 8,294,400 clears the vendor ceiling by 644 px.
+
+    This file previously asserted that exact resolution FAILS, against a ceiling
+    (2,086,876) that appears in no vendor source. 1440p and UHD refs were being refused
+    AFTER conversion — the GPU time already spent — and this assertion certified it.
+    """
+    assert tier_of("resolution", check(**{**GOOD, "width": w, "height": h})) is Tier.PASS
 
 
 def test_letterboxed_720p_still_passes_the_pixel_window():
@@ -115,7 +138,7 @@ def test_real_faces_warn_and_say_local_only():
 
 
 def test_report_tier_is_the_worst_finding():
-    report = check(**{**GOOD, "duration": 9.0, "size_bytes": 99_000_000})
+    report = check(**{**GOOD, "duration": 9.0, "size_bytes": 210_000_000})
     assert report.tier is Tier.FAIL
     assert len(report.of(Tier.WARN)) >= 1
 
@@ -347,3 +370,79 @@ def test_format_report_shows_remedies_for_problems():
     text = format_report(check(**{**GOOD, "duration": 12.0}), colour=False)
     assert "→" in text
     assert "WARN" in text
+
+
+# ---------------------------------------------------------------- per-model envelopes
+# The drift these exist to catch: until 2026-08-24 the table held ONE envelope (2.0's) and
+# graded every kit against it, so a 2.5-legal 20s reference was refused before it reached the
+# GPU. Each test below pairs the 2.0 refusal with the 2.5 acceptance, so neither can silently
+# become the other.
+
+
+@pytest.mark.parametrize("seconds", [20.0, 30.0])
+def test_long_refs_fail_on_2_0_and_pass_on_2_5(seconds):
+    """The headline drift: 2.0 caps a video ref at 15s, 2.5 at 30s."""
+    assert tier_of("duration", check(**{**GOOD, "duration": seconds},
+                                     dialect="seedance-2.0")) is Tier.FAIL
+    assert tier_of("duration", check(**{**GOOD, "duration": seconds},
+                                     dialect="seedance-2.5")) is not Tier.FAIL
+
+
+def test_the_2_0_refusal_names_the_model_and_the_way_out():
+    """A number in a refusal is meaningless without the model it belongs to."""
+    report = check(**{**GOOD, "duration": 20.0}, dialect="seedance-2.0")
+    detail = next(f.detail for f in report.findings if f.check == "duration")
+    remedy = next(f.remedy for f in report.findings if f.check == "duration")
+    assert "seedance-2.0" in detail
+    assert "seedance-2.5" in remedy and "30s" in remedy
+
+
+def test_output_window_is_per_model():
+    assert checks.suggested_output_seconds(20.0, "seedance-2.0") == 15.0
+    assert checks.suggested_output_seconds(20.0, "seedance-2.5") == 20.0
+    assert checks.on_output_grid(20.0, "seedance-2.5") is True
+    assert checks.on_output_grid(20.0, "seedance-2.0") is False
+
+
+def test_snap_trim_is_per_model():
+    """A 19.4s window snaps to 15s on 2.0 and to 19s on 2.5 — the ceiling differs."""
+    (s20, e20), _ = checks.snap_trim(0.0, 19.4, 30.0, "seedance-2.0")
+    (s25, e25), _ = checks.snap_trim(0.0, 19.4, 30.0, "seedance-2.5")
+    assert round(e20 - s20, 3) == 15.0
+    assert round(e25 - s25, 3) == 19.0
+
+
+def test_the_default_dialect_is_2_0_so_nothing_silently_changed_model():
+    """A kit built without --dialect must grade exactly as it did before this change."""
+    assert checks.DEFAULT_DIALECT == "seedance-2.0"
+    explicit = check(**{**GOOD, "duration": 20.0}, dialect="seedance-2.0").as_dict()
+    implicit = check(**{**GOOD, "duration": 20.0}).as_dict()
+    assert explicit == implicit
+
+
+def test_an_unknown_dialect_names_the_alternatives_instead_of_defaulting():
+    """Silently falling back to 2.0 would grade a 2.6 kit against the wrong envelope."""
+    with pytest.raises(ValueError, match="seedance-2.5"):
+        checks.dialect_for("seedance-9.9")
+
+
+def test_2_5_has_no_4k_rung_today_and_2_0_does():
+    """Dated observation, not a forecast — see the note on the record.
+
+    Guards the fact behind the kit prose: 'master at 4K' is followable on 2.0 and names a
+    tier 2.5 does not currently offer.
+    """
+    assert "4k" in checks.DIALECTS["seedance-2.0"].output_resolutions
+    assert "4k" not in checks.DIALECTS["seedance-2.5"].output_resolutions
+    assert "1080p" in checks.DIALECTS["seedance-2.5"].output_resolutions
+
+
+def test_no_dialect_carries_the_higgsfield_platform_cap():
+    """12 was a Higgsfield PLATFORM cap that leaked into this direct-API validator once.
+
+    Ark's own table: 2.0 = 15 (9+3+3), 2.5 = 50 (30+10+10). If either reads 12 again, the
+    same foreign number has been re-imported.
+    """
+    assert checks.DIALECTS["seedance-2.0"].max_mixed_inputs == 15
+    assert checks.DIALECTS["seedance-2.5"].max_mixed_inputs == 50
+    assert all(d.max_mixed_inputs != 12 for d in checks.DIALECTS.values())

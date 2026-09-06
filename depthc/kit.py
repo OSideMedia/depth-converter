@@ -24,6 +24,7 @@ import numpy as np
 
 from depthc import VDA_COMMIT, __version__
 from depthc.checks import Report, Tier, suggested_output_seconds
+from depthc.checks import dialect_for as checks_dialect_for
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -224,7 +225,7 @@ def render_prompt(
             height=height,
             fps=fps,
             version=__version__,
-            suggested_output=suggested_output_seconds(duration),
+            suggested_output=suggested_output_seconds(duration, dialect),
             still_guidance=still_guidance,
         )
     except (KeyError, IndexError, ValueError) as e:
@@ -285,16 +286,14 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         "",
         "IN THE COMPOSER",
         "---------------",
-        "  Shotlist -> your shot -> go straight to MAKE VIDEO. Skip create-frame:",
-        "  a depth shot is refs-only, and a start frame silently drops the depth ref.",
+        *_start_frame_lines(manifest),
         "  Add one identity per body in the ref - the ref sets the head-count and the",
         "  prompt cannot argue it down. Add your location / prop images for the look.",
         "  WRITE NOTHING ABOUT THE MOTION. The Composer already binds an uploaded video",
         "  ref ('take movement, action and pacing from it'); describing the action again",
         "  makes two instructions for one reference. Describe the LOOK only.",
         f"  Ask for about {manifest['suggestedOutputSeconds']:g}s of output.",
-        "  Fire at 720p or 4K, never 1080p — 1080p ignored or overshot the ref 3/3",
-        "  while every other tier adhered 4/4 (DOCS/LIVE-FIRE.md).",
+        *_resolution_lines(manifest),
         "  binding.txt is for surfaces that HAVE a per-reference binding field - OSIDE",
         "  does not, for uploads. See prompt.txt.",
         "",
@@ -446,6 +445,12 @@ def build_manifest(
             "elapsedSeconds": round(elapsed, 2),
         },
         "promptDialect": dialect,
+        # The ENVELOPE this kit was graded against, recorded beside the name that selected it.
+        # `promptDialect` alone is a template filename; a reader six months from now cannot
+        # tell from it whether "15s ceiling" meant 2.0's real limit or a stale table applied
+        # to a 2.5 kit. Writing the numbers down makes the grading reproducible after the
+        # record itself has moved on.
+        "targetModel": _target_model_block(dialect),
         "tags": tags,
         "description": description,
         "source": {
@@ -481,7 +486,7 @@ def build_manifest(
             ),
         },
         "settings": settings,
-        "suggestedOutputSeconds": suggested_output_seconds(depth_duration),
+        "suggestedOutputSeconds": suggested_output_seconds(depth_duration, dialect),
         "checks": report.as_dict(),
     }
     # Optional blocks are omitted rather than written null: a kit built before the motion gate
@@ -494,6 +499,66 @@ def build_manifest(
     if has_sheet:
         manifest["sheet"] = {"filename": "sheet.png", "usage": "local-only contact sheet"}
     return manifest
+
+
+def _start_frame_lines(manifest: dict) -> list[str]:
+    """The create-frame instruction, which is OPPOSITE on the two models.
+
+    On 2.0 a start frame takes the whole request and the reference arrays never ride, so a
+    frame-first shot silently drops the depth ref. On 2.5 the frame is demoted to a
+    reference image and both ride. Printing 2.0's rule into a 2.5 kit costs the operator a
+    staging lock for no reason — it was doing exactly that until 2026-08-24.
+    """
+    target = manifest.get("targetModel") or {}
+    if target.get("refsWithStartFrame"):
+        model = target.get("dialect", "this model")
+        return [
+            "  Shotlist -> your shot -> MAKE VIDEO. You MAY use create-frame here:",
+            f"  {model} keeps reference arrays alongside a start frame (the frame",
+            "  demotes to a reference image), so the depth ref still rides. Seed does",
+            "  not pin output, so the start frame is your only staging lock.",
+        ]
+    return [
+        "  Shotlist -> your shot -> go straight to MAKE VIDEO. Skip create-frame:",
+        "  a depth shot is refs-only, and a start frame silently drops the depth ref.",
+    ]
+
+
+def _resolution_lines(manifest: dict) -> list[str]:
+    """The resolution advice, scoped to the model the kit targets.
+
+    The 0/3 result is a 2.0 measurement about 2.0's native 1080p lane. 2.5 has no 4K rung
+    and wires 1080p separately, so the finding is not transferable and must not be printed
+    as though it were — but 720p being the safe default is true on both.
+    """
+    target = manifest.get("targetModel") or {}
+    tiers = target.get("outputResolutions") or []
+    if "4k" in tiers:
+        return [
+            "  Fire at 720p or 4K, never 1080p — 1080p ignored or overshot the ref 3/3",
+            "  while every other tier adhered 4/4 (DOCS/LIVE-FIRE.md).",
+        ]
+    return [
+        f"  Tiers here: {' / '.join(tiers) or 'unknown'}. No 4K on this model as of 2026-08-24.",
+        "  Iterate at 720p — that is the safe default and it is measured on 2.0.",
+        "  1080p is UNMEASURED for depth motion on this model: the 0/3 result in",
+        "  DOCS/LIVE-FIRE.md is about 2.0's native 1080p lane, not this one. If you fire",
+        "  1080p here, run `depthc compare` and record it — one fire closes the question.",
+    ]
+
+
+def _target_model_block(dialect: str) -> dict:
+    """The model envelope a kit was built and graded against, frozen into the manifest."""
+    d = checks_dialect_for(dialect)
+    return {
+        "dialect": d.name,
+        "refSeconds": list(d.ref_seconds),
+        "outputSeconds": list(d.output_seconds),
+        "pixels": list(d.pixels),
+        "maxFileMb": d.max_file_mb,
+        "outputResolutions": list(d.output_resolutions),
+        "refsWithStartFrame": d.refs_with_start_frame,
+    }
 
 
 def write_manifest(paths: KitPaths, manifest: dict) -> Path:

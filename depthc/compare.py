@@ -107,6 +107,16 @@ class Comparison:
     # 16:9 — motion.py's UNITS note), so the ratio must not drive the verdict; the lag
     # correlation compares each envelope's SHAPE against itself over time and survives.
     geometry_note: str | None = None
+    # Set when the reference that was fired is a PROCESSED VARIANT whose luma was scaled.
+    # The energy metric is mean grey-level change per frame, so a linear luma scale scales
+    # the measured energy by the same factor — while the generation comes back through
+    # engine.normalize() at full range. Left uncorrected, `--variant midgrey` (luma capped
+    # at 190) inflates the ratio by 255/190 = 1.34 and reports a PERFECTLY ADHERENT fire as
+    # "+34% over-following, the artifact signature" — worse than any recorded 1080p failure.
+    # Measured 2026-08-24: identical generation, ratio 1.000 against depth.mp4 and 1.363
+    # against variants/midgrey.mp4.
+    ref_scale: float | None = None        # measured variant_energy / base_energy, or None
+    ratio_note: str | None = None         # set when the ratio cannot be corrected at all
     # --- structure layers (None = not measured / not requested) ---
     region_r: list[list[float | None]] | None = None   # 3x3 zero-lag r per cell
     region_weights: list[list[float]] | None = None    # ref energy share per cell
@@ -149,6 +159,8 @@ class Comparison:
             "suggestion": self.suggestion,
             "reasons": self.reasons,
             "geometryNote": self.geometry_note,
+            "refScale": self.ref_scale,
+            "ratioNote": self.ratio_note,
             "regionR": self.region_r,
             "regionWeights": self.region_weights,
             "structureR": self.structure_r,
@@ -275,6 +287,8 @@ def compare_profiles(
     ref_full_seconds: float | None = None,
     gen_full_seconds: float | None = None,
     geometry_note: str | None = None,
+    ref_scale: float | None = None,
+    ratio_note: str | None = None,
     regions: bool = True,
     camera_path: bool = True,
 ) -> Comparison:
@@ -315,7 +329,16 @@ def compare_profiles(
 
     ref_energy = round(float(rd.mean()), 3) if m else 0.0
     gen_energy = round(float(gd.mean()), 3) if m else 0.0
-    ratio = round(gen_energy / ref_energy, 3) if ref_energy > 0 else None
+    # The ratio is computed on the reference's BASE scale. A luma-scaled variant measures
+    # proportionally less energy than the depth.mp4 it was derived from, and the generation
+    # is never scaled, so comparing the two raw is comparing different units. Correlation is
+    # scale-invariant and needs no such correction — only the amplitude ratio does.
+    ratio_basis = ref_energy
+    if ref_scale and ref_scale > 0 and abs(ref_scale - 1.0) > 0.02:
+        ratio_basis = ref_energy / ref_scale
+    ratio = round(gen_energy / ratio_basis, 3) if ratio_basis > 0 else None
+    if ratio_note:
+        ratio = None
 
     lags = []
     for k in LAG_BUCKETS:
@@ -345,6 +368,8 @@ def compare_profiles(
         ref_camera=ref.camera,
         gen_camera=gen.camera,
         geometry_note=geometry_note,
+        ref_scale=ref_scale,
+        ratio_note=ratio_note,
     )
     if regions:
         layer = _region_layer(ref, gen, overlap)
@@ -389,6 +414,17 @@ def _suggest_envelope(c: Comparison) -> tuple[str, list[str]]:
 
     over = c.ratio is not None and c.ratio > RATIO_HIGH
     under = c.ratio is not None and c.ratio < RATIO_LOW
+    if c.ratio_note:
+        over = under = False
+        reasons.append(
+            f"energy ratio NOT judged: {c.ratio_note} — timing correlation carries the verdict"
+        )
+    elif c.ref_scale and abs(c.ref_scale - 1.0) > 0.02:
+        reasons.append(
+            f"ratio corrected for the fired variant: its reference measures "
+            f"{c.ref_scale:.3f}x the base depth.mp4 (luma scaled), and the generation is "
+            f"normalised to full range — uncorrected this reads {1 / c.ref_scale:.2f}x hot"
+        )
     if c.geometry_note:
         over = under = False
         reasons.append(
@@ -406,6 +442,14 @@ def _suggest_envelope(c: Comparison) -> tuple[str, list[str]]:
         )
 
     if c.ratio is None:
+        # A withheld ratio and a FLAT reference are different things and must not share a
+        # message: ratio_note means "deliberately not judged", flatness means "nothing to
+        # judge". The old single branch also REPLACED `reasons`, discarding the explanation
+        # of why the ratio was withheld.
+        if c.ratio_note:
+            return "partial", reasons + [
+                "no amplitude verdict is possible for this reference — judge it by eye"
+            ]
         return "partial", ["the reference envelope is flat — nothing to compare against"]
     if r0 is None:
         return "partial", reasons + [

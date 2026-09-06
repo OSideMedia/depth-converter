@@ -145,10 +145,21 @@ def _report_html(report: checks.Report) -> str:
     return f'<div class="depthc-report">{"".join(rows)}</div>'
 
 
+# Probe-time bounds, before a model has been picked. The slider maxima and the upload
+# readout are drawn from the DEFAULT record; once the operator picks a model, `_convert`
+# reads that record instead and every limit below follows it. These were seven bare `15`
+# literals until 2026-08-24, so correcting the constraint table would have left this
+# surface refusing references the CLI accepts, quoting the stale number as fact.
+_UI_DIALECT = checks.dialect_for(checks.DEFAULT_DIALECT)
+_UI_MIN_REF, _UI_MAX_REF = _UI_DIALECT.ref_seconds
+_UI_SWEET_LOW, _UI_SWEET_HIGH = _UI_DIALECT.sweet_spot
+
+
 def _probe_readout(path: str | None) -> tuple[str, dict, dict]:
     """Inspect an upload: facts, matte, and the trim bounds the sliders should take."""
     if not path:
-        return "", gr.update(maximum=15, value=0), gr.update(maximum=15, value=15)
+        return ("", gr.update(maximum=_UI_MAX_REF, value=0),
+                gr.update(maximum=_UI_MAX_REF, value=_UI_MAX_REF))
     try:
         info = probe(path)
     except VideoIOError as e:
@@ -164,18 +175,21 @@ def _probe_readout(path: str | None) -> tuple[str, dict, dict]:
         )
 
     # Long clips get an inline warning and a concrete suggestion, never a silent failure.
-    if info.duration > 15:
+    if info.duration > _UI_MAX_REF:
         lines.append(
-            f'<span style="color:#f87171">{info.duration:.1f}s exceeds Seedance\'s 15s '
-            f"ceiling. Trim below — 3–8s follows best. Suggested: 0 → 6.</span>"
+            f'<span style="color:#f87171">{info.duration:.1f}s exceeds the '
+            f"{_UI_MAX_REF:g}s ceiling for {_UI_DIALECT.name}. Trim below — "
+            f"{_UI_SWEET_LOW:g}–{_UI_SWEET_HIGH:g}s follows best. Suggested: 0 → 6. "
+            f"(Other models have other ceilings — pick one under Target model.)</span>"
         )
-    elif info.duration > 8:
+    elif info.duration > _UI_SWEET_HIGH:
         lines.append(
-            f'<span style="color:#fbbf24">{info.duration:.1f}s is past the 3–8s sweet '
+            f'<span style="color:#fbbf24">{info.duration:.1f}s is past the '
+            f"{_UI_SWEET_LOW:g}–{_UI_SWEET_HIGH:g}s sweet "
             f"spot; adherence degrades. Consider trimming to one motion signal.</span>"
         )
 
-    end_default = min(info.duration, 6.0) if info.duration > 15 else info.duration
+    end_default = min(info.duration, 6.0) if info.duration > _UI_MAX_REF else info.duration
     return (
         '<div class="depthc-note">' + "<br>".join(lines) + "</div>",
         gr.update(maximum=round(info.duration, 2), value=0.0),
@@ -187,16 +201,16 @@ def _trim_feedback(start: float, end: float) -> str:
     span = max(0.0, end - start)
     if span <= 0:
         tone, note = "#f87171", "empty range"
-    elif span < 2:
-        tone, note = "#f87171", "under the 2s minimum — Seedance will reject this"
+    elif span < _UI_MIN_REF:
+        tone, note = "#f87171", f"under the {_UI_MIN_REF:g}s minimum — Seedance will reject this"
     elif span < 3:
         tone, note = "#fbbf24", "shorter than the 3–8s sweet spot; fine for a single beat"
-    elif span <= 8:
-        tone, note = "#4ade80", "inside the 3–8s sweet spot"
-    elif span <= 15:
+    elif span <= _UI_SWEET_HIGH:
+        tone, note = "#4ade80", f"inside the {_UI_SWEET_LOW:g}–{_UI_SWEET_HIGH:g}s sweet spot"
+    elif span <= _UI_MAX_REF:
         tone, note = "#fbbf24", "past the sweet spot — adherence degrades"
     else:
-        tone, note = "#f87171", "over the 15s ceiling"
+        tone, note = "#f87171", f"over {_UI_DIALECT.name}'s {_UI_MAX_REF:g}s ceiling"
     return (
         f'<div class="depthc-note"><b style="color:{tone}">{span:.2f}s</b> — {note}</div>'
     )
@@ -205,7 +219,7 @@ def _trim_feedback(start: float, end: float) -> str:
 # --------------------------------------------------------------------------- conversion
 
 def _convert(
-    video, tags, description, resolution, crop_mode, fps_mode, start, end,
+    video, tags, description, dialect, resolution, crop_mode, fps_mode, start, end,
     invert, faces, still_mode, input_size, precision, keep_audio, make_preview,
     library_path, progress=gr.Progress(),
 ):
@@ -216,6 +230,9 @@ def _convert(
 
     kit_dir = None  # allocated mid-build; the failure handlers below must clean it up
     try:
+        # The picked model decides the ref ceiling, the output grid and the size cap. Read
+        # it once, here, so no limit below can fall back to the default record.
+        d = checks.dialect_for(dialect)
         info = probe(video)
 
         # Clamp to the clip, then decide. Testing `end > start` before clamping let an
@@ -232,11 +249,20 @@ def _convert(
             )
 
         trim = None if (start <= 0 and end >= info.duration - 0.01) else (start, end)
-        if span > 15:
+        if span > d.ref_seconds[1]:
+            wider = next(
+                (o for o in checks.DIALECTS.values() if o.ref_seconds[1] > d.ref_seconds[1]),
+                None,
+            )
+            hint = (
+                f" {wider.name} accepts up to {wider.ref_seconds[1]:g}s."
+                if wider and span <= wider.ref_seconds[1] else ""
+            )
             return (
                 *blank[:5],
-                f"{span:.1f}s exceeds Seedance's 15s ceiling for video references. "
-                f"Trim to a single motion signal — 3–8s follows best.",
+                f"{span:.1f}s exceeds {d.name}'s {d.ref_seconds[1]:g}s ceiling for video "
+                f"references. Trim to a single motion signal — "
+                f"{d.sweet_spot[0]:g}–{d.sweet_spot[1]:g}s follows best.{hint}",
             )
 
         warnings: list[str] = []
@@ -245,7 +271,7 @@ def _convert(
         # must not depend on which surface produced the kit — a slider lands on 4.8s just
         # as easily as a typed trim does.
         window = trim if trim else (0.0, info.duration)
-        snapped, snap_note = checks.snap_trim(window[0], window[1], info.duration)
+        snapped, snap_note = checks.snap_trim(window[0], window[1], info.duration, d)
         if snap_note:
             trim = snapped
             start, end = snapped
@@ -284,8 +310,8 @@ def _convert(
         # Size guard on the SILENT encode, before the mux — the old order re-encoded after
         # muxing, silently discarding the audio the user just asked to keep (same fix as
         # the CLI; the gate must not depend on which surface produced the kit).
-        if paths.depth.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
-            warnings.append(f"depth.mp4 over {checks.MAX_FILE_MB:g} MB — re-encoded at crf 20.")
+        if paths.depth.stat().st_size > d.max_file_mb * 1_000_000:
+            warnings.append(f"depth.mp4 over {d.max_file_mb:g} MB — re-encoded at crf 20.")
             encode_gray(result.frames, paths.depth, result.fps, crf=20)
         audio_kept = False
         if keep_audio and info.has_audio:
@@ -293,10 +319,10 @@ def _convert(
             from depthc.video_io import mux_audio
 
             mux_audio(paths.depth, info.path, tmp, trim=trim)
-            if tmp.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
+            if tmp.stat().st_size > d.max_file_mb * 1_000_000:
                 tmp.unlink()
                 warnings.append(
-                    f"audio pushed depth.mp4 over {checks.MAX_FILE_MB:g} MB — "
+                    f"audio pushed depth.mp4 over {d.max_file_mb:g} MB — "
                     f"kept the silent version instead."
                 )
             else:
@@ -324,10 +350,12 @@ def _convert(
             still_has_real_faces=faces,
             motion=depth_motion,
             retention=motionlib.retention(depth_motion, source_motion),
+            dialect=d,
         )
         prompt_text = kitlib.render_prompt(
             kit_name=kit_dir.name, duration=depth_info.duration, width=depth_info.width,
             height=depth_info.height, fps=depth_info.fps, still_has_real_faces=faces,
+            dialect=d.name,
         )
         paths.prompt.write_text(prompt_text)
 
@@ -351,11 +379,12 @@ def _convert(
             report=report, device=result.device, elapsed=result.elapsed,
             motion=motionlib.manifest_block(depth_motion, source_motion),
             has_sheet=paths.sheet.exists(),
+            dialect=d.name,
         )
         kitlib.write_manifest(paths, manifest)
         # The UI used to skip both of these while its own results panel told the user to take
         # binding.txt to OSIDE — a kit built here was missing the file it was told to use.
-        paths.binding.write_text(kitlib.render_binding() + "\n")
+        paths.binding.write_text(kitlib.render_binding(d.name) + "\n")
         paths.readme.write_text(
             kitlib.render_kit_readme(manifest, report, has_preview=make_preview)
         )
@@ -448,8 +477,9 @@ def build() -> gr.Blocks:
 
                         with gr.Group(elem_classes="depthc-card"):
                             gr.Markdown("**Trim** — 3–8s follows best, one motion signal")
-                            start = gr.Slider(0, 15, 0, step=0.1, label="In (s)")
-                            end = gr.Slider(0, 15, 15, step=0.1, label="Out (s)")
+                            start = gr.Slider(0, _UI_MAX_REF, 0, step=0.1, label="In (s)")
+                            end = gr.Slider(0, _UI_MAX_REF, _UI_MAX_REF, step=0.1,
+                                            label="Out (s)")
                             # Seeded rather than empty: an empty HTML block renders as a
                             # bare slab, and a hint is more use than a blank bar anyway.
                             trim_note = gr.HTML(
@@ -463,6 +493,12 @@ def build() -> gr.Blocks:
                         description = gr.Textbox(label="Description", lines=2)
 
                         with gr.Accordion("Settings", open=False):
+                            dialect = gr.Radio(
+                                sorted(checks.DIALECTS), value=checks.DEFAULT_DIALECT,
+                                label="Target model",
+                                info="Selects the prompt template AND the limits — the "
+                                     "reference ceiling and output window differ per model.",
+                            )
                             resolution = gr.Radio(["720p", "480p", "source"], value="720p",
                                                   label="Resolution")
                             crop_mode = gr.Radio(
@@ -522,9 +558,9 @@ def build() -> gr.Blocks:
 
                 convert_btn.click(
                     _convert,
-                    [video, tags, description, resolution, crop_mode, fps_mode, start, end,
-                     invert, faces, still_mode, input_size, precision, keep_audio,
-                     make_preview, library_path],
+                    [video, tags, description, dialect, resolution, crop_mode, fps_mode,
+                     start, end, invert, faces, still_mode, input_size, precision,
+                     keep_audio, make_preview, library_path],
                     [depth_out, preview_out, report_out, prompt_out, kit_dir_box, status],
                 )
                 reveal_btn.click(_reveal, kit_dir_box, status)

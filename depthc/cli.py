@@ -15,6 +15,10 @@ from depthc import __version__
 # FIRST-run failure, and every command that loads the model must turn it into its
 # hand-written "Run: bash scripts/setup.sh" message rather than a traceback.
 from depthc.vendor_path import SetupIncomplete
+# Also eager, and also torch-free (numpy only): the `--dialect` option's default and its
+# help text are evaluated at import time, and they must name the dialects that actually
+# exist rather than a literal that can drift from DIALECTS.
+from depthc import checks
 
 app = typer.Typer(
     add_completion=False,
@@ -36,6 +40,53 @@ def _die(message: str) -> None:
 
 def _warn(message: str) -> None:
     typer.echo(f"{YELLOW}warning:{OFF} {message}")
+
+
+def _variant_ratio_basis(kit_dir: Path, variant: str) -> tuple[float | None, str | None]:
+    """How to put a fired VARIANT's energy back on the base depth.mp4's scale.
+
+    Returns (ref_scale, ratio_note). `ref_scale` is the measured variant/base energy ratio,
+    read from kit.json where both were measured on the actual files. `ratio_note` is set
+    instead when no scale correction is meaningful, and it takes the ratio out of the
+    verdict the way `geometry_note` already does.
+
+    Why this exists: `compare --variant midgrey` compared a luma-capped reference against a
+    full-range generation and reported a PERFECTLY ADHERENT fire as +36% over-following —
+    louder than every 1080p failure on record, on a workflow the kit README tells you to
+    run. The variant was measured, the correction was not applied.
+    """
+    import json
+
+    from depthc.kit import KIT_MANIFEST
+
+    # Canny edges are not a scaled copy of the envelope, they are a different signal.
+    # No linear factor puts them on the base scale, so the amplitude comparison is void.
+    if variant == "edges":
+        return None, (
+            "the 'edges' variant is a binary Canny series, not a scaled depth envelope — "
+            "its amplitude is not comparable with the generation's"
+        )
+
+    path = kit_dir / KIT_MANIFEST
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None, (
+            f"cannot read {KIT_MANIFEST} to find the '{variant}' variant's measured energy, "
+            f"so the amplitude cannot be put on the base scale"
+        )
+
+    base = (manifest.get("motion") or {}).get("energy")
+    entry = next(
+        (v for v in (manifest.get("variants") or []) if v.get("name") == variant), None
+    )
+    measured = (entry or {}).get("energy")
+    if not base or not measured:
+        return None, (
+            f"kit.json records no measured energy for '{variant}' (or for the base), so the "
+            f"amplitude cannot be put on the base scale"
+        )
+    return float(measured) / float(base), None
 
 
 def _abandon_kit(kit_dir) -> None:
@@ -96,8 +147,14 @@ def _convert(
     allow_long: bool,
     snap: bool = False,
     quiet: bool = False,
+    dialect: str | None = None,
 ) -> Conversion:
-    """Probe → validate → decode → infer. Shared by `convert` and `kit`."""
+    """Probe → validate → decode → infer. Shared by `convert` and `kit`.
+
+    `dialect` selects the model envelope every limit below is read from — the ref ceiling
+    and the output grid differ between Seedance 2.0 (15s) and 2.5 (30s), so a 20s beat is
+    a hard refusal on one and ordinary on the other.
+    """
     from depthc import checks, engine
     from depthc.video_io import probe, read_frames, resolve_fps, target_size
 
@@ -125,19 +182,30 @@ def _convert(
     # snap_trim clamp a 20s trim to 15s silently, so this gate could not fire and
     # --allow-long was dead unless --no-snap was also passed.
     span = (trim[1] - trim[0]) if trim else info.duration
-    if span > checks.MAX_REF_SECONDS and not allow_long:
+    d = checks.dialect_for(dialect)
+    max_ref = d.ref_seconds[1]
+    if span > max_ref and not allow_long:
+        wider = next(
+            (o for o in checks.DIALECTS.values() if o.ref_seconds[1] > max_ref), None
+        )
+        hint = (
+            f"\n  {wider.name} accepts up to {wider.ref_seconds[1]:g}s — "
+            f"rebuild with --dialect {wider.name} if that is the target model."
+            if wider and span <= wider.ref_seconds[1] else ""
+        )
         _die(
-            f"Trimmed length is {span:.1f}s. Seedance caps video references at 15s and "
-            f"adherence degrades past ~8s.\n"
+            f"Trimmed length is {span:.1f}s. {d.name} caps video references at "
+            f"{max_ref:g}s and adherence degrades past ~{d.sweet_spot[1]:g}s.\n"
             f"  Trim to the one clear motion signal, or pass --allow-long to override."
+            f"{hint}"
         )
 
     # Snap before anything is decoded: a ref shorter than the generation it drives leaves the
     # model to invent the tail, and the fix is free at this point. An --allow-long overlength
     # span is left alone — no output length can match it anyway.
-    if snap and span <= checks.MAX_REF_SECONDS:
+    if snap and span <= max_ref:
         window = trim if trim else (0.0, info.duration)
-        snapped, note = checks.snap_trim(window[0], window[1], info.duration)
+        snapped, note = checks.snap_trim(window[0], window[1], info.duration, d)
         if note:
             trim = snapped
             if not quiet:
@@ -335,7 +403,11 @@ def kit(
     ),
     input_size: int = typer.Option(518, "--input-size", help="Inference short side, multiple of 14"),
     precision: str = typer.Option("fp32", "--precision", help="fp32 | fp16"),
-    dialect: str = typer.Option("seedance-2.0", "--dialect", help="Prompt template to render"),
+    dialect: str = typer.Option(
+        checks.DEFAULT_DIALECT, "--dialect",
+        help="Target model: selects BOTH the prompt template and the constraint envelope "
+             f"({', '.join(sorted(checks.DIALECTS))})",
+    ),
     library: Optional[Path] = typer.Option(
         None, "--library", help="Kit output root (default Outbox/ in the project)"
     ),
@@ -396,6 +468,7 @@ def kit(
         job = _convert(
             input, trim=trim, resolution=resolution, fps=fps, crop=crop, invert=invert,
             input_size=input_size, precision=precision, allow_long=allow_long, snap=snap,
+            dialect=dialect,
         )
         trim = job.trim
 
@@ -409,19 +482,25 @@ def kit(
         # audio mux. The old order re-encoded AFTER muxing, which overwrote the just-added
         # audio track without saying so; and the audio bytes themselves could be what pushed
         # the file over the limit and triggered their own removal.
-        if paths.depth.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
-            _warn(f"depth.mp4 exceeded {checks.MAX_FILE_MB:g} MB — re-encoding at crf 20.")
+        #
+        # The ceiling is the TARGET MODEL's, and crossing it costs picture: this re-encode is
+        # lossy, on the one asset where re-encode artifacts are the signal rather than noise.
+        # It ran against 50 MB until 2026-08-24 — a quarter of the vendor's actual 200 MB —
+        # so depth maps were being degraded to satisfy a limit that did not exist.
+        _max_mb = checks.dialect_for(dialect).max_file_mb
+        if paths.depth.stat().st_size > _max_mb * 1_000_000:
+            _warn(f"depth.mp4 exceeded {_max_mb:g} MB — re-encoding at crf 20.")
             encode_gray(job.result.frames, paths.depth, job.result.fps, crf=20)
 
         audio_kept = False
         if keep_audio and job.info.has_audio:
             tmp = paths.depth.with_name("depth_audio.mp4")
             mux_audio(paths.depth, job.info.path, tmp, trim=trim)
-            if tmp.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
+            if tmp.stat().st_size > _max_mb * 1_000_000:
                 tmp.unlink()
                 _warn(
                     f"--keep-audio: the audio track pushed depth.mp4 over "
-                    f"{checks.MAX_FILE_MB:g} MB — kept the silent version instead."
+                    f"{_max_mb:g} MB — kept the silent version instead."
                 )
             else:
                 tmp.replace(paths.depth)
@@ -454,8 +533,8 @@ def kit(
                 # Same size gate as the base ref: every variant is presented as
                 # uploadable, and Seedance's cap does not care which file it was.
                 # (Edges especially — Canny flicker compresses badly.)
-                if variant_path.stat().st_size > checks.MAX_FILE_MB * 1_000_000:
-                    _warn(f"variants/{filename} exceeded {checks.MAX_FILE_MB:g} MB — re-encoding at crf 20.")
+                if variant_path.stat().st_size > _max_mb * 1_000_000:
+                    _warn(f"variants/{filename} exceeded {_max_mb:g} MB — re-encoding at crf 20.")
                     encode_gray(frames, variant_path, job.result.fps, crf=20)
                 variant_blocks.append({
                     "name": name,
@@ -476,6 +555,7 @@ def kit(
             still_has_real_faces=faces,
             motion=depth_motion,
             retention=motionlib.retention(depth_motion, source_motion),
+            dialect=dialect,
         )
 
         paths.prompt.write_text(
@@ -909,6 +989,15 @@ def compare(
         if not depth_path.is_file():
             _die(f"No kit at {kit_dir} (expected a depth.mp4 inside)")
 
+    # A processed variant is not measured in the same units as the depth.mp4 it came from:
+    # midgrey caps luma at 190, so its motion energy is ~0.74x the base while the generation
+    # returns at full range. The manifest already records BOTH energies, measured on the
+    # actual files, so the correction is data rather than theory. `edges` is not a scaled
+    # version of the envelope at all (binary Canny), so its ratio is withheld instead.
+    ref_scale, ratio_note = None, None
+    if variant:
+        ref_scale, ratio_note = _variant_ratio_basis(kit_dir, variant)
+
     try:
         # The ref decode is capped: the motion metric lives on a 160 px analysis grid, so
         # decoding a 4K master at native size buys nothing and costs gigabytes.
@@ -955,6 +1044,8 @@ def compare(
         ref_profile, gen_profile,
         gen_full_seconds=gen_full_seconds,
         geometry_note=geometry_note,
+        ref_scale=ref_scale,
+        ratio_note=ratio_note,
         regions=regions,
         camera_path=camera_path,
     )

@@ -11,6 +11,8 @@ import numpy as np
 import pytest
 
 from depthc import compare as c
+from depthc import compare as comparelib
+from depthc import motion as m
 from depthc.motion import MotionProfile
 
 FPS = 24
@@ -237,3 +239,93 @@ def test_render_carries_the_structure_lines_and_the_dict_round_trips():
     payload = json.loads(json.dumps(comp.as_dict()))
     assert payload["mirrored"] is True
     assert len(payload["regionR"]) == 3 and len(payload["regionR"][0]) == 3
+
+
+# --------------------------------------------------------------- the variant ratio bias
+# Measured 2026-08-24, before the fix: an identical generation compared against depth.mp4
+# scored ratio 1.000 ("in band") and against variants/midgrey.mp4 scored 1.363 ("+36%
+# OVER-FOLLOWING — the artifact signature"), which is louder than every 1080p failure in
+# DOCS/LIVE-FIRE.md (+22% to +32%). The variant caps luma at 190 so its measured energy is
+# ~0.74x the base, while the generation returns through engine.normalize() at full range.
+
+
+def _moving_blob(n=120, h=90, w=160, seed=7):
+    """A bright blob crossing a dark field — full 0-255 range, as normalize() guarantees."""
+    rng = np.random.default_rng(seed)
+    frames = np.zeros((n, h, w, 3), np.uint8)
+    for i in range(n):
+        x = int(10 + (w - 40) * (i / (n - 1)))
+        frames[i, 25:70, x:x + 30] = 255
+    noisy = frames.astype(np.int16) + rng.integers(-4, 5, frames.shape)
+    return np.clip(noisy, 0, 255).astype(np.uint8)
+
+
+def test_a_luma_scaled_variant_does_not_flip_a_perfect_fire_to_over_following():
+    """THE regression test for the bias. Same generation, two references, one verdict."""
+    base_frames = _moving_blob()
+    base = m.measure(base_frames, 24.0)
+    midgrey = m.measure(m.midgrey(base_frames), 24.0)
+    scale = midgrey.energy / base.energy
+
+    # A generation that followed its reference perfectly: identical motion, full range.
+    against_base = comparelib.compare_profiles(base, base, regions=False, camera_path=False)
+    against_variant = comparelib.compare_profiles(
+        midgrey, base, ref_scale=scale, regions=False, camera_path=False
+    )
+
+    assert against_base.suggestion == against_variant.suggestion
+    assert abs(against_variant.ratio - against_base.ratio) < 0.05
+    assert against_variant.ratio <= comparelib.RATIO_HIGH
+
+
+def test_without_the_correction_the_same_pair_reads_as_over_following():
+    """The counterexample, so the test above cannot pass for the wrong reason.
+
+    This is the pre-fix behaviour, asserted deliberately: uncorrected, the identical
+    generation crosses RATIO_HIGH. If this ever stops being true the fixture has drifted
+    and the test above is no longer measuring anything.
+    """
+    base_frames = _moving_blob()
+    base = m.measure(base_frames, 24.0)
+    midgrey = m.measure(m.midgrey(base_frames), 24.0)
+
+    uncorrected = comparelib.compare_profiles(
+        midgrey, base, regions=False, camera_path=False
+    )
+    assert uncorrected.ratio > comparelib.RATIO_HIGH
+    assert uncorrected.suggestion != "adhered"
+
+
+def test_the_correction_is_named_in_the_reasons_not_applied_silently():
+    base_frames = _moving_blob()
+    base = m.measure(base_frames, 24.0)
+    midgrey = m.measure(m.midgrey(base_frames), 24.0)
+    c = comparelib.compare_profiles(
+        midgrey, base, ref_scale=midgrey.energy / base.energy,
+        regions=False, camera_path=False,
+    )
+    assert any("ratio corrected for the fired variant" in r for r in c.reasons)
+
+
+def test_an_uncorrectable_variant_takes_the_ratio_out_of_the_verdict():
+    """`edges` is a binary Canny series — no linear factor puts it on the base scale."""
+    base_frames = _moving_blob()
+    base = m.measure(base_frames, 24.0)
+    c = comparelib.compare_profiles(
+        base, base, ratio_note="binary Canny series", regions=False, camera_path=False
+    )
+    assert c.ratio is None
+    assert any("energy ratio NOT judged" in r for r in c.reasons)
+
+
+def test_an_unscaled_variant_is_left_alone():
+    """invert flips near/far but |diff| is unchanged, so its scale is 1 and nothing moves."""
+    base_frames = _moving_blob()
+    base = m.measure(base_frames, 24.0)
+    inverted = m.measure(m.invert(base_frames), 24.0)
+    assert abs(inverted.energy / base.energy - 1.0) < 0.02
+    c = comparelib.compare_profiles(
+        inverted, base, ref_scale=inverted.energy / base.energy,
+        regions=False, camera_path=False,
+    )
+    assert not any("ratio corrected" in r for r in c.reasons)

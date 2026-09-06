@@ -6,7 +6,7 @@
   "required": [
     "schemaVersion", "kitName", "createdAt", "tool", "promptDialect",
     "tags", "description", "source", "depth", "still", "settings",
-    "suggestedOutputSeconds", "checks"
+    "suggestedOutputSeconds", "checks", "targetModel"
   ],
   "additionalProperties": false,
   "properties": {
@@ -16,7 +16,26 @@
     "promptDialect": { "type": "string", "minLength": 1 },
     "tags": { "type": "array", "items": { "type": "string" } },
     "description": { "type": "string" },
-    "suggestedOutputSeconds": { "type": "number", "minimum": 4, "maximum": 15 },
+    "suggestedOutputSeconds": {
+      "description": "Whole seconds, at least 4. The ceiling is the TARGET MODEL's output window (see targetModel.outputSeconds) — it was pinned to 15 until 2026-08-24, which silently capped seedance-2.5 kits at half their range.",
+      "type": "number", "minimum": 4
+    },
+
+    "targetModel": {
+      "description": "The model envelope this kit was built and graded against, frozen at build time. promptDialect names the template; this records the numbers, so the grading stays readable after the record itself moves on.",
+      "type": "object",
+      "required": ["dialect", "refSeconds", "outputSeconds", "pixels", "maxFileMb"],
+      "additionalProperties": false,
+      "properties": {
+        "dialect": { "type": "string", "minLength": 1 },
+        "refSeconds": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "outputSeconds": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+        "pixels": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "maxFileMb": { "type": "number" },
+        "outputResolutions": { "type": "array", "items": { "type": "string" } },
+        "refsWithStartFrame": { "type": "boolean" }
+      }
+    },
 
     "tool": {
       "type": "object",
