@@ -33,9 +33,15 @@ a shape-only check.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import math
+import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Callable
 
 from depthc import motion as motionlib
 
@@ -63,6 +69,17 @@ from depthc import motion as motionlib
 #     recording that 12 "traced to the Higgsfield PLATFORM surface ... a platform cap that
 #     leaked into a direct-API validator and rejected three legal files." This file was the
 #     second host of the same leak.
+#
+# [CLOSED 2026-09-06, audit E-3] The leak's SHAPE — one vendor table hand-copied into two
+# languages with no exporter and no drift gate — is closed. OSIDE now exports its live
+# envelope (`npm run export:seedance-envelope`) to `seedance-envelope.json` beside this
+# file, and `DIALECTS` is built from that payload: the fields OSIDE enforces (durations,
+# counts, file size, output ladder, start-frame rule) are READ from it, and the table below
+# is the hand FALLBACK, held equal to the payload by `test_hand_table_matches_the_envelope`.
+# The pixel window, aspect, edge and sweet-spot stay hand-owned because OSIDE enforces no
+# input pixel window at all (audit DC-7). Absent file → hand table with a stderr notice;
+# present-but-broken → refuse at import, naming the key. A number can now drift in exactly
+# one direction — OSIDE changes it, the export changes, the parity test goes red here.
 
 
 @dataclass(frozen=True)
@@ -90,7 +107,7 @@ class Dialect:
     sweet_spot: tuple[float, float] = (3.0, 8.0)  # [community], not vendor — same on both
 
 
-DIALECTS: dict[str, Dialect] = {
+HAND_DIALECTS: dict[str, Dialect] = {
     "seedance-2.0": Dialect(
         name="seedance-2.0",
         ref_seconds=(2.0, 15.0),
@@ -122,6 +139,182 @@ DIALECTS: dict[str, Dialect] = {
         refs_with_start_frame=True,   # the frame demotes to reference_image; refs still ride
     ),
 }
+
+# --- the exported envelope --------------------------------------------------------------
+# OSIDE is the owning source for everything it enforces on a request. It exports that
+# envelope off its live adapter cards (`lib/fal/adapters/arkSeedance.ts`) and lint input
+# pools; the file is GENERATED and never hand-edited here, and OSIDE's own
+# `check:seedance-envelope-drift` holds the file equal to the cards on every OSIDE commit.
+
+ENVELOPE_PATH = Path(__file__).with_name("seedance-envelope.json")
+ENVELOPE_FORMAT = "oside-seedance-envelope/1"
+ENVELOPE_REFRESH = "npm run export:seedance-envelope -- {path}"  # run inside OSIDE
+
+# Dialect field → (payload key, coercion). Only the fields OSIDE ENFORCES are listed —
+# pixels / aspect / edge_px / sweet_spot are deliberately absent (see the record note).
+_ENVELOPE_FIELDS: dict[str, tuple[str, Callable[[object], object]]] = {}
+
+
+class EnvelopeError(ValueError):
+    """The exported envelope is present but not the shape this reader was written for.
+
+    Present-but-broken is NOT absent: a silent fall back to the hand table would grade
+    against numbers OSIDE may have moved, which is the exact leak the export closes.
+    """
+
+
+def _number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"expected a number, got {value!r}")
+    return float(value)
+
+
+def _integer(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"expected an integer, got {value!r}")
+    return value
+
+
+def _boolean(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"expected true/false, got {value!r}")
+    return value
+
+
+def _pair(value: object) -> tuple[float, float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise TypeError(f"expected [low, high], got {value!r}")
+    return (_number(value[0]), _number(value[1]))
+
+
+def _strings(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
+        raise TypeError(f"expected a list of strings, got {value!r}")
+    return tuple(value)
+
+
+_ENVELOPE_FIELDS.update({
+    "ref_seconds": ("refSeconds", _pair),
+    "ref_total_seconds": ("refTotalSeconds", _number),
+    "max_video_refs": ("maxVideoRefs", _integer),
+    "max_mixed_inputs": ("maxMixedInputs", _integer),
+    "output_seconds": ("outputSeconds", _pair),
+    "max_file_mb": ("maxFileMb", _number),
+    "output_resolutions": ("outputResolutions", _strings),
+    "refs_with_start_frame": ("refsWithStartFrame", _boolean),
+})
+
+
+def _stderr(message: str) -> None:
+    print(f"depthc: {message}", file=sys.stderr)
+
+
+def _envelope_fields(name: str, record: object) -> dict[str, object]:
+    """Coerce one dialect's payload into Dialect field values, naming any broken key."""
+    if not isinstance(record, dict):
+        raise EnvelopeError(f"dialects.{name} is not an object")
+    out: dict[str, object] = {}
+    for attr, (key, coerce) in _ENVELOPE_FIELDS.items():
+        if key not in record:
+            raise EnvelopeError(f"dialects.{name}.{key} is missing")
+        try:
+            out[attr] = coerce(record[key])
+        except TypeError as e:
+            raise EnvelopeError(f"dialects.{name}.{key}: {e}") from None
+    return out
+
+
+def envelope_age_days(payload: dict, now: datetime | None = None) -> float:
+    """Days since the payload was exported. `exportedAt` is ISO-8601 with a Z suffix."""
+    stamp = payload.get("exportedAt")
+    if not isinstance(stamp, str):
+        raise EnvelopeError("exportedAt is missing")
+    try:
+        exported = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        raise EnvelopeError(f"exportedAt {stamp!r} is not an ISO-8601 timestamp") from None
+    if exported.tzinfo is None:
+        exported = exported.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - exported).total_seconds() / 86_400
+
+
+def envelope_drift(hand: dict[str, Dialect], payload: dict) -> list[str]:
+    """Every overlapping field where the hand table and the payload disagree.
+
+    Empty means the fallback is faithful. This is the parity gate's predicate, kept apart
+    from the loader so a test can hand it a deliberately wrong table and require a hit.
+    """
+    drift: list[str] = []
+    for name, record in payload.get("dialects", {}).items():
+        if name not in hand:
+            drift.append(f"{name}: in the envelope, not in the hand table")
+            continue
+        fields = _envelope_fields(name, record)
+        for attr, value in fields.items():
+            ours = getattr(hand[name], attr)
+            if ours != value:
+                drift.append(f"{name}.{attr}: hand {ours!r} != envelope {value!r}")
+    return drift
+
+
+def load_envelope(
+    path: Path | str = ENVELOPE_PATH,
+    *,
+    hand: dict[str, Dialect] | None = None,
+    now: datetime | None = None,
+    warn: Callable[[str], None] = _stderr,
+) -> dict[str, Dialect]:
+    """The constraint table: OSIDE's exported envelope laid over the hand table.
+
+    Absent file → the hand table, with one notice. Present file with a broken shape →
+    EnvelopeError naming the key. Older than its own `staleAfterDays` → a warning naming
+    the age and the refresh command; the numbers are still used, because a stale export is
+    still the last thing OSIDE actually enforced.
+    """
+    hand = dict(HAND_DIALECTS if hand is None else hand)
+    path = Path(path)
+    if not path.is_file():
+        warn(f"no exported envelope at {path} — grading from the hand table in checks.py")
+        return hand
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise EnvelopeError(f"{path.name} is not readable JSON: {e}") from None
+    if not isinstance(payload, dict):
+        raise EnvelopeError(f"{path.name}: top level is not an object")
+    if payload.get("format") != ENVELOPE_FORMAT:
+        raise EnvelopeError(
+            f"{path.name}: format {payload.get('format')!r} is not {ENVELOPE_FORMAT!r}"
+        )
+    dialects = payload.get("dialects")
+    if not isinstance(dialects, dict) or not dialects:
+        raise EnvelopeError(f"{path.name}: dialects is missing or empty")
+
+    merged = dict(hand)
+    for name, record in dialects.items():
+        fields = _envelope_fields(name, record)
+        if name not in hand:
+            # A dialect OSIDE ships that this tool has no template or pixel window for.
+            # Not broken, just not gradable here yet: say so and leave it out.
+            warn(f"{path.name} names {name!r}, which has no hand record or template here — ignored")
+            continue
+        merged[name] = dataclasses.replace(hand[name], **fields)
+
+    limit = payload.get("staleAfterDays")
+    if not isinstance(limit, (int, float)) or isinstance(limit, bool):
+        raise EnvelopeError(f"{path.name}: staleAfterDays is missing or not a number")
+    age = envelope_age_days(payload, now)
+    if age > limit:
+        warn(
+            f"{path.name} is {age:.0f} days old (staleAfterDays {limit:g}); refresh it "
+            f"in OSIDE with `{ENVELOPE_REFRESH.format(path=path)}`"
+        )
+    return merged
+
+
+DIALECTS: dict[str, Dialect] = load_envelope()
 
 DEFAULT_DIALECT = "seedance-2.0"
 
