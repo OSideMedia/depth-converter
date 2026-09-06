@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oside.media/schemas/depthc-result-1.json",
+  "title": "Depth Converter kit fire log (result.json)",
+  "$comment": "Written by kit.record_result, one entry per fire, appended never overwritten. kit.read_results tolerates any file with a `fires` list and treats a malformed one as empty (never fatal) — this schema is the documented shape, held by tests, not a runtime gate. schemaVersion stays 1 across ADDITIVE changes (audit DC-6 ruling): 2026-09-06 fires[].generationId (optional) — the OSIDE generation a fire became; every fire recorded before that day is unkeyed (PLAN-SHARED-GENERATION-ID step d).",
+  "type": "object",
+  "required": ["schemaVersion", "kitName", "fires"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kitName": { "type": "string", "minLength": 1 },
+    "fires": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["firedAt", "verdict", "meaning"],
+        "additionalProperties": false,
+        "properties": {
+          "firedAt": { "type": "string", "format": "date-time" },
+          "verdict": { "enum": ["adhered", "partial", "ignored", "late", "rejected"] },
+          "meaning": { "type": "string" },
+          "surface": { "type": "string" },
+          "model": { "type": "string" },
+          "variant": { "type": "string" },
+          "outputSeconds": { "type": ["number", "null"], "minimum": 0 },
+          "costUsd": { "type": ["number", "null"], "minimum": 0 },
+          "outputRef": { "type": "string" },
+          "notes": { "type": "string" },
+          "generationId": {
+            "description": "OSIDE generations.id (UUID v4, canonical lowercase) — the generation this fire became. fires[].generationId == generations.id is the generation half of the join; kit.json.depth.sha256 == request_payload.refs[].sha256 is the content half. Absent on every fire recorded before 2026-09-06 and on any fire recorded without --generation.",
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        }
+      }
+    }
+  }
+}

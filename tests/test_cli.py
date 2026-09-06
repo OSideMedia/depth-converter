@@ -143,3 +143,92 @@ class TestDialectPreflight:
         )
         assert result.exit_code == 1
         assert "not renderable" in _text(result)
+
+
+def _fake_kit(tmp_path: Path, with_hash: bool = True) -> Path:
+    """A kit folder with a valid kit.json and a depth.mp4 that is not a video, so any
+    command reaching the decode dies there — everything BEFORE the decode is testable."""
+    import json
+
+    from test_kit import _manifest
+
+    from depthc import kit as kitlib
+
+    kit_dir = tmp_path / "Old_001"
+    kit_dir.mkdir()
+    manifest = _manifest()
+    if not with_hash:
+        del manifest["depth"]["sha256"]
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
+    (kit_dir / "depth.mp4").write_bytes(b"not a video")
+    return kit_dir
+
+
+class TestCompareNamesAMissingDepthHash:
+    """The content join needs kit.json.depth.sha256; a kit built before 2026-09-06 has
+    none. compare says so ONCE, before the depth pass, and carries on — it never refuses
+    a real kit with real fires behind it."""
+
+    def _kit(self, tmp_path: Path, with_hash: bool) -> Path:
+        return _fake_kit(tmp_path, with_hash=with_hash)
+
+    def test_old_kit_is_named_once_then_compare_proceeds(self, tmp_path):
+        kit_dir = self._kit(tmp_path, with_hash=False)
+        result = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        text = _text(result)
+        assert text.count("no depth.sha256") == 1
+        assert "refs[].sha256" in text
+        assert result.exit_code == 1  # the fake depth.mp4, not the missing hash
+
+    def test_a_hashed_kit_gets_no_note(self, tmp_path):
+        kit_dir = self._kit(tmp_path, with_hash=True)
+        result = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        assert "no depth.sha256" not in _text(result)
+
+
+class TestGenerationFlag:
+    """`--generation <id>` on `result` and `compare` names the OSIDE generation a fire
+    became (PLAN-SHARED-GENERATION-ID step d). `compare` never writes the fire — the
+    verdict is human-only — so its id is validated up front and rides into the
+    ready-to-paste `depthc result` line, which is what writes fires[].generationId."""
+
+    GEN = "3f2504e0-4f89-4d3c-9a6b-0305e82c3301"
+
+    def test_result_writes_the_generation_into_the_fire_entry(self, tmp_path):
+        import json
+
+        kit_dir = _fake_kit(tmp_path)
+        result = runner.invoke(
+            cli.app, ["result", str(kit_dir), "--verdict", "adhered", "--generation", self.GEN]
+        )
+        assert result.exit_code == 0, _text(result)
+        saved = json.loads((kit_dir / "result.json").read_text())
+        assert saved["fires"][0]["generationId"] == self.GEN
+
+    def test_result_refuses_a_non_uuid_naming_the_grammar(self, tmp_path):
+        kit_dir = _fake_kit(tmp_path)
+        result = runner.invoke(
+            cli.app, ["result", str(kit_dir), "--verdict", "adhered", "--generation", "gen-42"]
+        )
+        assert result.exit_code == 1
+        text = _text(result)
+        assert "UUID v4" in text and "8-4-4-4-12" in text
+        assert not (kit_dir / "result.json").exists()
+
+    def test_compare_refuses_a_non_uuid_before_the_depth_pass(self, tmp_path):
+        kit_dir = _fake_kit(tmp_path)
+        args = ["compare", str(kit_dir), str(kit_dir / "depth.mp4"), "--generation"]
+        bad = runner.invoke(cli.app, args + ["gen-42"])
+        assert bad.exit_code == 1 and "UUID v4" in _text(bad)
+        # A well-formed id gets past the grammar and dies on the fake decode instead —
+        # that is what proves the grammar check ran FIRST.
+        good = runner.invoke(cli.app, args + [self.GEN])
+        assert good.exit_code == 1 and "UUID v4" not in _text(good)
+
+    def test_compare_paste_line_carries_the_generation(self):
+        from types import SimpleNamespace
+
+        c = SimpleNamespace(suggestion="adhered", overlap_seconds=5.0, ratio=0.93, r0=0.82)
+        hint = cli._record_hint("Kit_001", c, self.GEN)
+        assert "depthc result" in hint and f"--generation {self.GEN}" in hint
+        assert "--generation" not in cli._record_hint("Kit_001", c, None)

@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oside.media/schemas/depthc-kit-1.json",
   "title": "Depth Converter kit manifest",
+  "$comment": "schemaVersion stays 1 across ADDITIVE changes (audit DC-6 ruling, 2026-09-06): a new key is added to `required` for kits built from that day on, and every reader tolerates its absence on older manifests. A key that changes meaning or goes away bumps the version. Additive history: 2026-09-06 depth.sha256 (the content key of the fire -> generation join; PLAN-SHARED-GENERATION-ID step d).",
   "type": "object",
   "required": [
     "schemaVersion", "kitName", "createdAt", "tool", "promptDialect",
@@ -76,11 +77,15 @@
       "type": "object",
       "required": [
         "filename", "durationSeconds", "fps", "width", "height",
-        "frameCount", "sizeBytes", "pixels"
+        "frameCount", "sizeBytes", "pixels", "sha256"
       ],
       "additionalProperties": false,
       "properties": {
         "filename": { "const": "depth.mp4" },
+        "sha256": {
+          "description": "SHA-256 of depth.mp4 exactly as written (after the size gate and any audio mux) — the one file that goes to OSIDE. OSIDE's upload door records the uploaded clip's SHA-256 on the reference (request_payload.refs[].sha256), so kit.json.depth.sha256 == refs[].sha256 names the kit a generation rode. Required on kits built from 2026-09-06; older manifests lack it and still load (kit.depth_sha256 returns None).",
+          "type": "string", "pattern": "^[0-9a-f]{64}$"
+        },
         "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },
         "fps": { "type": "number", "exclusiveMinimum": 0 },
         "width": { "type": "integer", "multipleOf": 2 },

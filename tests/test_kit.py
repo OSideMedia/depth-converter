@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from depthc import kit as kitlib
 from depthc.checks import check
 
 SCHEMA_PATH = Path(__file__).parent.parent / "depthc" / "kit_schema.json"
+RESULT_SCHEMA_PATH = Path(__file__).parent.parent / "depthc" / "result_schema.json"
 
 
 # ------------------------------------------------------------------- naming & library
@@ -337,6 +339,7 @@ def _manifest(**overrides):
         depth_fps=24.0,
         depth_size=(1280, 536),
         depth_bytes=1_500_000,
+        depth_sha256="b" * 64,
         frame_count=120,
         still_index=7,
         still_has_real_faces=True,
@@ -693,6 +696,8 @@ def test_readme_always_explains_how_to_record_a_fire():
         duration=5.0, width=1280, height=536, fps=24.0, size_bytes=1_500_000,
         still_has_real_faces=True))
     assert "depthc result" in text
+    # ...and how to name the OSIDE generation it became (step d of the shared-id plan).
+    assert "--generation" in text
 
 
 # ------------------------------------------------------------------------ the fire log
@@ -773,3 +778,171 @@ def test_index_says_nothing_about_fires_for_an_untested_kit(tmp_path):
     # "FIRED" also appears in the header's explanation, so check the entry itself.
     entry = kitlib.write_outbox_index(tmp_path).read_text().split("1 kit:")[1]
     assert "FIRED" not in entry
+
+
+# --------------------------------------------- depth.sha256 — the content half of the join
+#
+# OSIDE's upload door records the uploaded clip's SHA-256 on the reference
+# (request_payload.refs[].sha256). kit.json carries the same hash of depth.mp4, so
+# kit.json.depth.sha256 == refs[].sha256 names the kit a generation rode
+# (PLAN-SHARED-GENERATION-ID step d, 2026-09-06).
+
+
+def test_manifest_depth_sha256_is_the_hash_of_the_written_file(tmp_path):
+    depth = tmp_path / "depth.mp4"
+    depth.write_bytes(b"\x00\x00\x00\x1cftypisom" + bytes(range(256)) * 8)
+    manifest = _manifest(depth_sha256=kitlib.sha256_file(depth))
+    assert manifest["depth"]["sha256"] == hashlib.sha256(depth.read_bytes()).hexdigest()
+    assert len(manifest["depth"]["sha256"]) == 64
+
+
+@pytest.mark.slow
+def test_a_built_kit_records_the_hash_of_its_own_depth_mp4(clip_3s, tmp_path):
+    """End to end: the hash in kit.json is of the depth.mp4 that sits beside it — the
+    bytes that get uploaded, after the size gate and any audio mux, not an intermediate."""
+    from typer.testing import CliRunner
+
+    from depthc import cli
+
+    lib = tmp_path / "lib"
+    result = CliRunner().invoke(cli.app, ["kit", str(clip_3s), "--library", str(lib), "--tags", "hash"])
+    kit_dirs = [p for p in lib.iterdir() if p.is_dir()] if lib.is_dir() else []
+    assert kit_dirs, result.output
+    kit_dir = kit_dirs[0]
+    manifest = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())
+    on_disk = hashlib.sha256((kit_dir / "depth.mp4").read_bytes()).hexdigest()
+    assert manifest["depth"]["sha256"] == on_disk
+    assert kitlib.depth_sha256(kit_dir) == on_disk
+
+
+def test_an_old_manifest_without_depth_sha256_still_loads(tmp_path):
+    """A kit built before 2026-09-06 has no depth.sha256 and real fires behind it; the
+    reader says None, it never refuses the kit."""
+    kit_dir = tmp_path / "Old-kit_001"
+    kit_dir.mkdir()
+    manifest = _manifest()
+    del manifest["depth"]["sha256"]
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
+    assert [e.path for e in kitlib.library_list(tmp_path)] == [kit_dir]
+    assert kitlib.depth_sha256(kit_dir) is None
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert kitlib.library_list(tmp_path)[0].verdict == "adhered"
+
+
+def test_depth_sha256_reads_a_new_manifest(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    assert kitlib.depth_sha256(kit_dir) == "b" * 64
+    assert kitlib.depth_sha256(tmp_path / "no-such-kit") is None
+
+
+def test_schema_requires_a_well_formed_depth_sha256():
+    """Accepted: 64 lowercase hex. Refused: anything else, and absence — on a NEW kit."""
+    import jsonschema
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.validate(_manifest(depth_sha256="0" * 64), schema)
+    for bad in ("", "xyz", "0" * 63, "A" * 64, "0" * 65):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_manifest(depth_sha256=bad), schema)
+    absent = _manifest()
+    del absent["depth"]["sha256"]
+    with pytest.raises(jsonschema.ValidationError, match="sha256"):
+        jsonschema.validate(absent, schema)
+
+
+def test_schema_version_stays_1_with_the_additive_key():
+    """Audit DC-6 ruling: additive keys do not bump schemaVersion; the schema says so."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    assert schema["properties"]["schemaVersion"] == {"const": 1}
+    assert "sha256" in schema["properties"]["depth"]["required"]
+    assert "additive" in schema.get("$comment", "").lower()
+
+
+# ------------------------------ fires[].generationId — the generation half of the join
+#
+# OSIDE's `generations.id` is the hub every store joins to. A fire that names it is a
+# row in the ledger; one that does not is a number in a human's memory.
+
+GEN = "3f2504e0-4f89-4d3c-9a6b-0305e82c3301"  # v4: version nibble 4, variant nibble a
+
+
+def test_a_fire_records_the_generation_it_became(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered", generation_id=GEN.upper())
+    saved = json.loads((kit_dir / "result.json").read_text())
+    assert saved["fires"][0]["generationId"] == GEN  # canonical: lowercase, hyphenated
+
+
+def test_a_fire_without_a_generation_is_unkeyed_as_before(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert "generationId" not in json.loads((kit_dir / "result.json").read_text())["fires"][0]
+
+
+@pytest.mark.parametrize("bad", [
+    "gen-42",
+    "",
+    "3f2504e0-4f89-4d3c-9a6b-0305e82c330",     # 11 in the last group
+    "3f2504e04f894d3c9a6b0305e82c3301",         # no hyphens
+    "3f2504e0-4f89-1d3c-9a6b-0305e82c3301",     # version nibble 1
+    "3f2504e0-4f89-4d3c-1a6b-0305e82c3301",     # variant nibble 1
+    "{3f2504e0-4f89-4d3c-9a6b-0305e82c3301}",   # braced form
+])
+def test_a_non_uuid_generation_is_refused_naming_the_grammar(tmp_path, bad):
+    kit_dir = _kit_on_disk(tmp_path)
+    with pytest.raises(ValueError, match="UUID v4") as e:
+        kitlib.record_result(kit_dir, verdict="adhered", generation_id=bad)
+    assert "8-4-4-4-12" in str(e.value)
+    assert not (kit_dir / "result.json").exists()  # refused before anything is written
+
+
+def test_an_old_result_json_without_generation_ids_still_loads(tmp_path):
+    """Every fire recorded before 2026-09-06 lacks the key; the log reads, and a new fire
+    appended beside it carries the id while the old one stays unkeyed."""
+    kit_dir = _kit_on_disk(tmp_path)
+    old = {"schemaVersion": 1, "kitName": kit_dir.name, "fires": [{
+        "firedAt": "2026-08-25T04:54:01+00:00", "verdict": "adhered",
+        "meaning": kitlib.VERDICTS["adhered"], "surface": "ark", "model": "ark-seedance-2.5",
+        "variant": "base", "outputSeconds": 5.0, "costUsd": 2.45,
+        "outputRef": "DOCS/livefire/x/1080p.mp4", "notes": "ratio 0.93, r0=+0.820",
+    }]}
+    (kit_dir / "result.json").write_text(json.dumps(old))
+    assert kitlib.read_results(kit_dir)["fires"][0]["verdict"] == "adhered"
+    kitlib.record_result(kit_dir, verdict="partial", generation_id=GEN)
+    fires = kitlib.read_results(kit_dir)["fires"]
+    assert "generationId" not in fires[0]
+    assert fires[1]["generationId"] == GEN
+
+
+def test_result_schema_governs_old_and_new_records(tmp_path):
+    import jsonschema
+
+    schema = json.loads(RESULT_SCHEMA_PATH.read_text())
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered", cost_usd=0.31)        # unkeyed, as before
+    kitlib.record_result(kit_dir, verdict="partial", generation_id=GEN)   # keyed
+    jsonschema.validate(kitlib.read_results(kit_dir), schema)
+    bad = kitlib.read_results(kit_dir)
+    bad["fires"][1]["generationId"] = "gen-42"
+    with pytest.raises(jsonschema.ValidationError, match="generationId|pattern"):
+        jsonschema.validate(bad, schema)
+    # The schema's verdict list IS kit.VERDICTS — the two cannot drift apart.
+    assert sorted(schema["properties"]["fires"]["items"]["properties"]["verdict"]["enum"]) \
+        == sorted(kitlib.VERDICTS)
+
+
+def test_every_tracked_result_json_validates():
+    """The per-kit records tracked by law (audit DC-4) are the schema's real subjects; an
+    empty subject set is a failed enumeration, not a pass."""
+    import subprocess
+
+    import jsonschema
+
+    root = Path(__file__).parent.parent
+    tracked = subprocess.run(
+        ["git", "ls-files", "Outbox/*/result.json"], cwd=root, capture_output=True, text=True,
+    ).stdout.split()
+    assert tracked, "no tracked Outbox/*/result.json — the DC-4 evidence set is empty"
+    schema = json.loads(RESULT_SCHEMA_PATH.read_text())
+    for rel in tracked:
+        jsonschema.validate(json.loads((root / rel).read_text()), schema)

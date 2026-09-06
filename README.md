@@ -222,7 +222,8 @@ allows.
 ### Measuring what a fire actually did
 
 ```bash
-./.tools/uv run depthc compare Sword-duel_Two-fighters_002 ~/Desktop/oside-<id>.mp4
+./.tools/uv run depthc compare Sword-duel_Two-fighters_002 ~/Desktop/oside-<id>.mp4 \
+    --generation 3f2504e0-4f89-4d3c-9a6b-0305e82c3301   # the OSIDE generation this download is
 ```
 
 Runs the generated video back through the same depth pipeline and compares its motion
@@ -257,7 +258,10 @@ now also records `regionEnergy` and `cameraPath` for the ref itself.
 
 It ends with a *suggested* verdict (`adhered` / `partial` / `ignored` / `late`) and a
 ready-to-paste `depthc result` command. The suggestion is a heuristic calibrated on the
-measured fires — watch the clip, then record what actually happened.
+measured fires — watch the clip, then record what actually happened. `--generation <id>`
+is the OSIDE generation's id (from its row or URL — a UUID v4; a non-UUID is refused
+before the depth pass, naming the grammar); `compare` never writes the fire itself, so the
+id rides into the pasted `depthc result` line, which is what records it.
 
 ### Describing a clip that has no kit
 
@@ -339,13 +343,31 @@ its clip. On the wandering Stage-2 take it reproduced the hand-derived Resolve g
 
 ```bash
 ./.tools/uv run depthc result Sword-duel_Two-fighters_002 \
-    --verdict adhered --surface oside --cost 0.31 --notes "followed the lunge exactly"
+    --verdict adhered --surface oside --cost 0.31 --notes "followed the lunge exactly" \
+    --generation 3f2504e0-4f89-4d3c-9a6b-0305e82c3301
 ```
 
 Verdicts are `adhered`, `partial`, `ignored`, `late`, `rejected`. Each fire appends to the
-kit's `result.json` and shows up in `depthc library list` and `Outbox/INDEX.txt`. A generation
-is the only evidence that says whether any of this works, and it costs money — the library has
-no other way to learn.
+kit's `result.json` (shape: `depthc/result_schema.json`) and shows up in `depthc library
+list` and `Outbox/INDEX.txt`. A generation is the only evidence that says whether any of
+this works, and it costs money — the library has no other way to learn.
+
+**The fire → generation join (2026-09-06, PLAN-SHARED-GENERATION-ID step d).** OSIDE's
+`generations.id` is the hub every evidence store joins to, and a fire joins it on two
+keys, both content or id, never a name:
+
+- `result.json` `fires[].generationId == generations.id` — written by `--generation <id>`
+  (a UUID v4, the id on the generation's row/URL in OSIDE). Without the flag the fire is
+  unkeyed, as every fire recorded before that day is; the key is absent, never null.
+- `kit.json` `depth.sha256 == request_payload.refs[].sha256` — every kit built from that
+  day records the SHA-256 of `depth.mp4` exactly as written (after the size gate and any
+  audio mux), and OSIDE's upload door hashes the uploaded bytes onto the reference. A
+  browser upload cannot read a sibling `kit.json`, which is why the join is the file's
+  content and not a kit id. Kits built earlier carry no hash; `compare` says so once and
+  carries on (`shasum -a 256 depth.mp4` gives the value by hand).
+
+The OSIDE side — `refs[].sha256` on the upload door — lands in OSIDE, not here. Neither
+schema bumps its version for these keys (additive, audit DC-6).
 
 ### Variants — five refs of one beat, one live-fire each
 

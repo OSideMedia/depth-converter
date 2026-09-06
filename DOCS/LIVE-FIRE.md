@@ -102,6 +102,9 @@ be read directly.
 ## Recording results
 
 Append below. What adhered, what drifted, what prompt wording changed, and the cost.
+Since 2026-09-06 a fire entry in a kit's `result.json` also carries `generationId` — the
+OSIDE generation it became, given as `--generation <id>` to `depthc compare` / `depthc
+result` (PLAN-SHARED-GENERATION-ID step d); every entry before that date is unkeyed.
 
 ### Results — 2026-07-25
 
