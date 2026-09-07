@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "kitName": "Sha256Proof_001",
+  "createdAt": "2026-09-07T00:07:34+00:00",
+  "tool": {
+    "name": "depthc",
+    "version": "0.13.0",
+    "model": "Video-Depth-Anything Small (vits, Apache-2.0)",
+    "vdaCommit": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+    "device": "mps",
+    "elapsedSeconds": 25.01
+  },
+  "promptDialect": "seedance-2.5",
+  "targetModel": {
+    "dialect": "seedance-2.5",
+    "refSeconds": [
+      2.0,
+      30.0
+    ],
+    "outputSeconds": [
+      4.0,
+      30.0
+    ],
+    "pixels": [
+      407696,
+      8295044
+    ],
+    "maxFileMb": 200.0,
+    "outputResolutions": [
+      "480p",
+      "720p",
+      "1080p"
+    ],
+    "refsWithStartFrame": true
+  },
+  "tags": [
+    "Sha256Proof"
+  ],
+  "description": "Live proof 2026-09-07: rebuilt from Probe1080p_001's 5s source (Pexels 2084066, free licence) so kit.json carries depth.sha256 for the OSIDE refs[].sha256 join. No fire.",
+  "source": {
+    "filename": "source.mp4",
+    "sha256": "c91bf578ec1d73060e609910be8615392efbb5d5a5db3c001137793a96427cba",
+    "durationSeconds": 5.005,
+    "fps": 23.976,
+    "width": 1920,
+    "height": 1080,
+    "trim": [
+      0.0,
+      5.0
+    ],
+    "crop": null
+  },
+  "depth": {
+    "filename": "depth.mp4",
+    "sha256": "2a134ac83d687fee9fbe26986ffd062f9e8508da2262a92c5a9510ffcdb2004d",
+    "durationSeconds": 5.0,
+    "fps": 24.0,
+    "width": 1280,
+    "height": 720,
+    "frameCount": 120,
+    "sizeBytes": 922046,
+    "pixels": 921600
+  },
+  "still": {
+    "filename": "still.png",
+    "frameIndex": 17,
+    "containsRealFaces": false,
+    "usage": "may be attached as an @Image look reference (never first_frame)"
+  },
+  "settings": {
+    "resolution": "720p",
+    "fps": "conform-24",
+    "invert": false,
+    "inputSize": 518,
+    "precision": "fp32",
+    "crop": "auto",
+    "keepAudio": false
+  },
+  "suggestedOutputSeconds": 5.0,
+  "checks": {
+    "tier": "PASS",
+    "findings": [
+      {
+        "tier": "PASS",
+        "check": "duration",
+        "detail": "5.00s is inside the 3-8s sweet spot.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "output coverage",
+        "detail": "5.00s is exactly requestable as an output length.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "file size",
+        "detail": "0.9 MB is within 200 MB.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "resolution",
+        "detail": "1280\u00d7720 = 921,600 px is in window.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "frame rate",
+        "detail": "24 fps matches Seedance's output cadence.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "still.png faces",
+        "detail": "Flagged as free of real photographic faces.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "motion signal",
+        "detail": "4.54 mean depth-space energy \u2014 a clear signal (\u2584\u2586\u2586\u2587\u2584\u2587\u2586\u2586\u2588\u2587).",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "depth retention",
+        "detail": "42% of the source's motion survived into depth.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "motion type",
+        "detail": "3% of the movement is whole-frame \u2014 this is a subject-motion reference.",
+        "remedy": ""
+      }
+    ]
+  },
+  "motion": {
+    "energy": 4.537,
+    "median": 4.408,
+    "peak": 7.967,
+    "headEnergy": 3.566,
+    "tailEnergy": 5.952,
+    "cameraShare": 0.029,
+    "bucketSeconds": 0.5,
+    "buckets": [
+      3.09,
+      4.35,
+      4.05,
+      5.3,
+      2.77,
+      5.15,
+      4.62,
+      4.36,
+      6.33,
+      5.43
+    ],
+    "sparkline": "\u2584\u2586\u2586\u2587\u2584\u2587\u2586\u2586\u2588\u2587",
+    "deadStretch": null,
+    "spikeSeconds": [],
+    "regionEnergy": [
+      [
+        4.08,
+        4.672,
+        3.433
+      ],
+      [
+        4.256,
+        5.765,
+        3.82
+      ],
+      [
+        4.356,
+        5.956,
+        4.443
+      ]
+    ],
+    "cameraPath": {
+      "dx": 0.024,
+      "dy": 0.0,
+      "radial": -0.023,
+      "label": "static"
+    },
+    "grid": "long-edge 160 (aspect-preserving, v2)",
+    "fps": 24.0,
+    "sourceEnergy": 10.867,
+    "retention": 0.418
+  },
+  "sheet": {
+    "filename": "sheet.png",
+    "usage": "local-only contact sheet"
+  }
+}
