@@ -187,6 +187,33 @@ survived. The kit was nearly deleted as a superseded `_001` draft before anyone 
 the sole record of a paid fire. The lesson the repo already paid for once: a fire is not
 recorded until it is in this file. `result.json` is the instrument's output, not the archive.
 
+**AND THE MEDIA DID NOT SURVIVE (ow-4ccd14).** "Nearly deleted" is true of the RECORD only.
+The delete took the folder; the restore returned `kit.json` and `result.json` — the two files
+`.gitignore` was amended to track on 2026-09-06 — and nothing else, because Outbox media is
+never tracked. **`Sha256Proof_001`'s `depth.mp4`, `source.mp4`, `still.png`, `sheet.png`,
+`prompt.txt`, `binding.txt` and `README.txt` are gone and cannot be recovered**: no Time
+Machine destination is configured, `~/.Trash` is empty, Spotlight finds only the folder, and
+a byte-exact sweep of `$HOME` for the recorded 922,046-byte clip found nothing. `Inbox/` and
+`Processed/` hold only their READMEs, so the SOURCE clip went with it. The kit that carried
+the only depth fire ever put through OSIDE's own door is now a husk, and `Outbox/INDEX.txt`
+says so on its face (`MEDIA GONE — record only`).
+
+What that costs, said plainly. The FINDINGS survive — they are the three paragraphs above,
+and the measured manifest (4.54 energy, 42% retention, 3% whole-frame, the tier and every
+check) is still in `kit.json`. What is gone is the ABILITY TO RE-MEASURE: the fired reference
+cannot be re-compared, re-cut, or fired again on another tier, and generation `441fe671`'s
+content key `2a134ac8…` now names bytes nobody holds. **A rebuild would be a NEW kit, not this
+one** — `kit.json` names Pexels 2084066 (free commercial licence) and source SHA
+`c91bf578…`, but a re-download that Pexels re-encoded at any point produces different bytes,
+a different depth clip and a different `depth.sha256`, so it could not carry this fire's join
+and must never be given this kit's name.
+
+The husk STAYS, and the folder is not tidied away. Two gates read it as their subject:
+`tests/test_kit.py::test_every_tracked_result_json_validates` fails on an empty DC-4 evidence
+set ("no tracked `Outbox/*/result.json`"), and OSIDE's `check-depth-kit-import` D4 fails its
+own "the subject set is real" assertion at zero kits. Deleting the husk would turn both red
+and buy nothing back.
+
 ## THE RESOLUTION LAW — shoot 720p or 4K, never 1080p — **ON SEEDANCE 2.0**
 
 **1080p is 0 for 3. Every other tier is 4 for 4.** (Fisher exact p ≈ 0.029.) This is the

@@ -789,6 +789,13 @@ def write_outbox_index(root: Path | None = None) -> Path:
     event that refreshes it — plus `depthc library index`, which is that rewrite with no
     conversion attached, for exactly the delete-by-hand case.
 
+    A kit folder can OUTLIVE ITS MEDIA, and the index says so. `kit.json` and `result.json`
+    are tracked (audit DC-4); `depth.mp4` and the rest never are, so restoring a deleted kit
+    from git returns the record and not the clip — which is what happened to Sha256Proof_001
+    on 2026-09-15 (ow-4ccd14). Such a folder is listed as `MEDIA GONE — record only`, because
+    every other line of this file tells the reader to open a README.txt and upload a
+    depth.mp4, and for a husk both of those files are gone.
+
     Delete INDEX.txt itself and the next build (or that command) brings it back.
     """
     root = Path(root) if root else library_root()
@@ -832,8 +839,9 @@ def write_outbox_index(root: Path | None = None) -> Path:
         source = entry.manifest.get("source", {})
         motion = entry.manifest.get("motion") or {}
         trim = source.get("trim")
+        media_gone = not (entry.path / depth.get("filename", "depth.mp4")).exists()
         lines += [
-            f"  {entry.name}",
+            f"  {entry.name}" + ("   ** MEDIA GONE — record only **" if media_gone else ""),
             f"      {depth.get('width', '?')}x{depth.get('height', '?')} · "
             f"{entry.duration:g}s · check: {entry.tier}"
             + (f" · motion {motion['energy']:.2f} {motion.get('sparkline', '')}"
@@ -841,6 +849,11 @@ def write_outbox_index(root: Path | None = None) -> Path:
             f"      from {source.get('filename', '?')}"
             + (f", trimmed {trim[0]:g}-{trim[1]:g}s" if trim else ""),
         ]
+        if media_gone:
+            lines.append("      Its depth.mp4 is not here and git cannot return it — Outbox "
+                         "media is never tracked.")
+            lines.append("      Nothing here can be fired. kit.json + result.json are kept "
+                         "as the record of what was built and what it did.")
         if entry.manifest.get("description"):
             lines.append(f"      {entry.manifest['description']}")
         fires = entry.fires

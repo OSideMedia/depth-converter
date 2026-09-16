@@ -21,8 +21,10 @@ generation started late. A kit with no FIRED line has never been tested.
 
 1 kit:
 
-  Sha256Proof_001
+  Sha256Proof_001   ** MEDIA GONE — record only **
       1280x720 · 5s · check: PASS · motion 4.54 ▄▆▆▇▄▇▆▆█▇
       from source.mp4, trimmed 0-5s
+      Its depth.mp4 is not here and git cannot return it — Outbox media is never tracked.
+      Nothing here can be fired. kit.json + result.json are kept as the record of what was built and what it did.
       Live proof 2026-09-07: rebuilt from Probe1080p_001's 5s source (Pexels 2084066, free licence) so kit.json carries depth.sha256 for the OSIDE refs[].sha256 join. No fire.
       FIRED 1x · last: partial — Watched 2026-09-07 (recorded by Claude on Peter's instruction): ref = man walking L→R in profile past a storefront, camera tracking so he stays mid-frame; gen (Seedance 2.0 480p 4s, Anime Style Constant) = a figure walking L→R in profile across a STATIC frame under a lamp. Walk, direction and profile framing followed; the tracking is not. compare's energy read was flat (ratio 0.096, r0=-0.423) because flat cel shading gives the depth pass no gradient — the metric, not the motion, is what failed here.
