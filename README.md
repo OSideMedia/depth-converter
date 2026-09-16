@@ -85,6 +85,7 @@ Processed/  ← sources file themselves here once converted
 
 # 3. browse what you've built
 ./.tools/uv run depthc library list --tag "tracking pull-back"
+./.tools/uv run depthc library index                   # rewrite Outbox/INDEX.txt from disk
 ```
 
 `--archive` moves the source to `Processed/` after a PASS or WARN. A **FAIL deliberately
@@ -147,7 +148,15 @@ just focuses the existing tab rather than launching a second server.
 Finished kits land in `Outbox/` — override with `--library` or `$DEPTHC_LIBRARY`. Each kit
 is one folder named from its tags plus an auto-incrementing index
 (`Sword-duel_Two-fighters_001/`), and `Outbox/INDEX.txt` lists them all, regenerated on
-every build so it cannot drift from what is on disk.
+every build.
+
+It *can* drift, and this file used to claim it could not: a **build** is the only event
+that refreshes it, so deleting a kit folder by hand leaves INDEX.txt listing a kit that is
+no longer there — which is exactly what three deleted drafts did on 2026-09-15.
+`./.tools/uv run depthc library index` is that rewrite with no conversion attached, for
+exactly that case. A kit folder whose `depth.mp4` is gone is listed as **`MEDIA GONE —
+record only`**: its `kit.json` and `result.json` are tracked in git and its media is not,
+so a restore brings back the record and never the clip.
 
 There is no database and never will be: the folder tree and the `kit.json` files *are* the
 index, so kits stay portable, greppable, and repairable with a text editor.

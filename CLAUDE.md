@@ -71,8 +71,9 @@ bundles for no real gain over doing it here.
    `fires[].generationId == generations.id`, plus the content half `kit.json.depth.sha256
    == request_payload.refs[].sha256` — every kit built from 2026-09-06 records the SHA-256
    of its depth.mp4 as written, and OSIDE's upload door hashes the uploaded bytes onto the
-   reference. The OSIDE half lands in OSIDE (branch feat/ref-sha256), not here. Ask Peter
-   for the id with the download.
+   reference. The OSIDE half is MERGED on OSIDE's main (`f094e558`, the upload door records
+   the clip's sha256 on the reference; `lib/fal/types.ts` carries the field) — it lives
+   there, not here. Ask Peter for the id with the download.
 
 8. A generation with **no kit** (fired from text alone) gets `depthc describe <clip>` —
    the same depth pass, described in prompt words (camera over time with a tempo word,

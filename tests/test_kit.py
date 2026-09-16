@@ -427,13 +427,18 @@ def test_manifest_untrimmed_and_uncropped_is_null_not_missing():
 
 # ------------------------------------------------------------------------- library scan
 
-def _write_kit(root: Path, name: str, tags: list[str], tier: str = "PASS") -> Path:
+def _write_kit(root: Path, name: str, tags: list[str], tier: str = "PASS",
+               with_media: bool = True) -> Path:
+    """A real kit folder. `with_media=False` builds a HUSK — kit.json restored from git with
+    the media it can never bring back (Outbox media is untracked by the rights law)."""
     kit_dir = root / name
     kit_dir.mkdir(parents=True)
     (kit_dir / "kit.json").write_text(json.dumps({
         "kitName": name, "tags": tags, "createdAt": "2026-07-24T12:00:00+00:00",
-        "depth": {"durationSeconds": 5.0}, "checks": {"tier": tier},
+        "depth": {"durationSeconds": 5.0, "filename": "depth.mp4"}, "checks": {"tier": tier},
     }))
+    if with_media:
+        (kit_dir / "depth.mp4").write_bytes(b"\x00not a real clip, but it is present")
     return kit_dir
 
 
@@ -618,6 +623,26 @@ def test_index_is_rewritten_not_appended(tmp_path):
 def test_index_creates_the_outbox_if_missing(tmp_path):
     target = tmp_path / "brand_new"
     assert kitlib.write_outbox_index(target).is_file()
+
+
+def test_index_marks_a_kit_whose_media_is_gone(tmp_path):
+    """A kit folder can outlive its media: kit.json and result.json are tracked, depth.mp4
+    never is, so a restore brings back the record alone (Sha256Proof_001, 2026-09-15,
+    ow-4ccd14). Every other line of INDEX.txt says "open its README.txt" and "upload
+    depth.mp4" — for a husk both files are gone, so the entry has to say so."""
+    _write_kit(tmp_path, "Alive_001", ["x"])
+    _write_kit(tmp_path, "Husk_001", ["y"], with_media=False)
+    text = kitlib.write_outbox_index(tmp_path).read_text()
+
+    husk_entry = text.split("Husk_001")[1].split("\n\n")[0]
+    assert "MEDIA GONE" in husk_entry, text
+    assert "Nothing here can be fired" in husk_entry
+
+    # ...and the kit that still HAS its clip is not marked. Without this the mark could be
+    # unconditional and the test would still be green.
+    alive_entry = text.split("Alive_001")[1].split("\n\n")[0]
+    assert "MEDIA GONE" not in alive_entry, alive_entry
+    assert "Nothing here can be fired" not in alive_entry, alive_entry
 
 
 def test_index_file_is_not_mistaken_for_a_kit(tmp_path):
