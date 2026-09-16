@@ -131,7 +131,9 @@ Kits land in **`Outbox/<Tags>_NNN/`** inside the project — not in the home fol
 `Processed/` on PASS/WARN; a FAIL deliberately stays in `Inbox/`.
 
 Each kit carries `README.txt` (what to do), `binding.txt` (the Variant A phrase alone, one
-line — for surfaces that HAVE a per-reference binding field; OSIDE does not, for uploads),
+line — for surfaces that HAVE a per-reference binding field: a hand upload in OSIDE does
+not, but the **Import blockout kit** door does and fills it from this file, hash-checked
+against `kit.json.binding.sha256`, which every kit records since 2026-09-15),
 and `sheet.png` (depth contact sheet with timestamps). **Exactly one file goes to OSIDE:
 `depth.mp4`, uploaded as the video reference. That is the whole handover.** The four
 surfaces that say so — this file, `README.md`, `Outbox/README.txt` and every kit's
@@ -201,10 +203,13 @@ instruction that is OPPOSITE on the two models, and the kit README prints the ri
   demotes to a reference image and the reference arrays still ride, so the depth ref is
   kept. Seed does not pin output, so the start frame is the only staging lock available.
 
-**Paste no binding phrase.** An uploaded video ref has no binding field — bindings are
-auto-generated for entity refs only — and the compiler already writes its own line from
-`refManifest.ts:117`. Adding Variant A on top is two instructions for one reference.
-Describe the LOOK only; the ref carries the motion.
+**Type no binding phrase — on either path, for different reasons.** On a HAND UPLOAD the
+video ref has no binding field at all (bindings are auto-generated for entity refs only)
+and the compiler already writes its own line from `refManifest.ts:117`; adding Variant A on
+top is two instructions for one reference. Through OSIDE's **Import blockout kit** door —
+being built to take depth kits, NOT merged as of 2026-09-15 — the field exists and the door
+sets it from `binding.txt`, verifying `kit.json.binding.sha256` against the file's bytes
+first. Either way, describe the LOOK only; the ref carries the motion.
 
 **One identity per body in the ref.** The ref sets the head-count and wins: given one
 identity against a two-body ref the model cloned it, in defiance of an explicit anti-twin

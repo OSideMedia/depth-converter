@@ -36,7 +36,8 @@ def _kit_readme() -> str:
         kit_name="Handover_001", source_path=Path("/tmp/x.mp4"), source_sha256="a" * 64,
         source_duration=8.0, source_fps=24.0, source_size=(1920, 1080), trim=(1.0, 6.0),
         crop=None, depth_duration=5.0, depth_fps=24.0, depth_size=(1280, 536),
-        depth_bytes=800_000, depth_sha256="b" * 64, frame_count=120, still_index=0, still_has_real_faces=False,
+        depth_bytes=800_000, depth_sha256="b" * 64, binding_sha256="c" * 64,
+        frame_count=120, still_index=0, still_has_real_faces=False,
         tags=["handover"], description="", settings={}, report=report, device="cpu",
         elapsed=1.0,
     )
@@ -79,6 +80,41 @@ def test_every_surface_says_depth_mp4_is_the_whole_handover(tmp_path):
 def test_every_surface_scopes_binding_txt_to_surfaces_with_a_binding_field(tmp_path):
     for name, text in surfaces(tmp_path).items():
         assert NOT_OSIDE.search(text), f"{name} does not scope binding.txt"
+
+
+# --------------------------------------------- the door that makes the rule conditional
+#
+# "Paste no binding phrase in OSIDE" was stated flat, and it is only true of a HAND UPLOAD:
+# an uploaded video ref has no binding field. OSIDE's Import blockout kit door — being built
+# to accept depth kits — does have one and fills it from binding.txt itself, hash-checked
+# against kit.json. Every surface has to name which path it is talking about, and none may
+# state the door as today's behaviour, because the OSIDE side is not merged.
+
+IMPORT_DOOR = re.compile(r"Import blockout kit", re.I)
+HAND_UPLOAD = re.compile(r"hand upload|by hand|uploaded video ref", re.I)
+NOT_MERGED = re.compile(r"not merged|being built|not .{0,20}behaviour today", re.I)
+
+
+def test_every_surface_names_both_paths(tmp_path):
+    for name, text in surfaces(tmp_path).items():
+        assert IMPORT_DOOR.search(text), f"{name} does not name the import door"
+        assert HAND_UPLOAD.search(text), f"{name} does not scope the rule to a hand upload"
+
+
+def test_no_surface_states_the_import_door_as_todays_default(tmp_path):
+    """The OSIDE side is not merged. A surface claiming the door already does this would
+    send the operator looking for a button that is not there."""
+    for name, text in surfaces(tmp_path).items():
+        assert NOT_MERGED.search(text), f"{name} states the door without saying it is unbuilt"
+
+
+def test_the_conditional_patterns_can_fire():
+    """The sentence every surface used to carry must trip both discriminating greps."""
+    old = ("In OSIDE, paste NO binding phrase - an uploaded video ref has no binding field "
+           "and the Composer writes its own line.")
+    assert not IMPORT_DOOR.search(old)
+    assert not NOT_MERGED.search(old)
+    assert HAND_UPLOAD.search(old)  # this one does NOT discriminate; the two above do
 
 
 def test_the_contradiction_patterns_can_fire():

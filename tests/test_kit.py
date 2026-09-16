@@ -340,6 +340,7 @@ def _manifest(**overrides):
         depth_size=(1280, 536),
         depth_bytes=1_500_000,
         depth_sha256="b" * 64,
+        binding_sha256="c" * 64,
         frame_count=120,
         still_index=7,
         still_has_real_faces=True,
@@ -703,9 +704,14 @@ def test_readme_always_explains_how_to_record_a_fire():
 # ------------------------------------------------------------------------ the fire log
 
 def _kit_on_disk(tmp_path, name: str = "Sword-duel_001") -> Path:
+    """A kit folder whose binding.txt really is the file kit.json records, so the binding
+    check passes on it — the state every freshly built kit is in."""
     kit_dir = tmp_path / name
     kit_dir.mkdir()
-    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(_manifest()))
+    binding = kit_dir / kitlib.BINDING_FILE
+    binding.write_text(kitlib.render_binding() + "\n")
+    manifest = _manifest(binding_sha256=kitlib.sha256_file(binding))
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
     return kit_dir
 
 
@@ -856,6 +862,141 @@ def test_schema_version_stays_1_with_the_additive_key():
     assert schema["properties"]["schemaVersion"] == {"const": 1}
     assert "sha256" in schema["properties"]["depth"]["required"]
     assert "additive" in schema.get("$comment", "").lower()
+
+
+# ------------------------------------------- binding.sha256 — the kit's words, bound to it
+#
+# `binding.txt` sat beside `depth.mp4` with nothing tying the two together: a kit recorded
+# the clip's hash from 2026-09-06 and the words' hash not at all. OSIDE's Import blockout
+# kit door fills a reference's binding field from this file, and the blockout kit — which
+# binds BOTH halves by SHA-256 — caught one kit's legend riding on another kit's clip.
+
+
+def test_manifest_binding_sha256_is_the_hash_of_the_written_file(tmp_path):
+    binding = tmp_path / "binding.txt"
+    binding.write_text(kitlib.render_binding() + "\n")
+    manifest = _manifest(binding_sha256=kitlib.sha256_file(binding))
+    assert manifest["binding"]["filename"] == "binding.txt"
+    assert manifest["binding"]["sha256"] == hashlib.sha256(binding.read_bytes()).hexdigest()
+    assert len(manifest["binding"]["sha256"]) == 64
+
+
+@pytest.mark.slow
+def test_a_built_kit_records_the_hash_of_its_own_binding_txt(clip_3s, tmp_path):
+    """End to end: the hash in kit.json is of the binding.txt that sits beside it, and the
+    kit it built verifies against itself."""
+    from typer.testing import CliRunner
+
+    from depthc import cli
+
+    lib = tmp_path / "lib"
+    result = CliRunner().invoke(
+        cli.app, ["kit", str(clip_3s), "--library", str(lib), "--tags", "binding"]
+    )
+    kit_dirs = [p for p in lib.iterdir() if p.is_dir()] if lib.is_dir() else []
+    assert kit_dirs, result.output
+    kit_dir = kit_dirs[0]
+    manifest = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())
+    on_disk = hashlib.sha256((kit_dir / "binding.txt").read_bytes()).hexdigest()
+    assert manifest["binding"]["sha256"] == on_disk
+    assert kitlib.binding_sha256(kit_dir) == on_disk
+    assert kitlib.verify_binding(kit_dir).tier is checks.Tier.PASS
+
+
+def test_an_old_manifest_without_binding_sha256_still_loads(tmp_path):
+    """A kit built before 2026-09-15 has no binding.sha256 and real fires behind it. The
+    reader says None and the verifier says None — a hash is never invented at read time,
+    because an invented one would certify whatever happens to be in the folder."""
+    kit_dir = _kit_on_disk(tmp_path)
+    manifest = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())
+    del manifest["binding"]
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
+    assert [e.path for e in kitlib.library_list(tmp_path)] == [kit_dir]
+    assert kitlib.binding_sha256(kit_dir) is None
+    assert kitlib.verify_binding(kit_dir) is None
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert kitlib.library_list(tmp_path)[0].verdict == "adhered"
+
+
+def test_binding_sha256_reads_a_new_manifest(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    assert kitlib.binding_sha256(kit_dir) == kitlib.sha256_file(kit_dir / "binding.txt")
+    assert kitlib.binding_sha256(tmp_path / "no-such-kit") is None
+
+
+def test_verify_binding_passes_on_the_file_the_kit_was_built_with(tmp_path):
+    finding = kitlib.verify_binding(_kit_on_disk(tmp_path))
+    assert finding.tier is checks.Tier.PASS
+    assert finding.check == "binding"
+
+
+def test_verify_binding_fails_on_a_single_changed_byte(tmp_path):
+    """The counterexample the check exists for: the naive reader — trust binding.txt because
+    it is in the folder — passes this kit, and the hashed one must not."""
+    kit_dir = _kit_on_disk(tmp_path)
+    binding = kit_dir / kitlib.BINDING_FILE
+    naive_verdict = binding.is_file() and bool(binding.read_text().strip())
+    binding.write_text(binding.read_text().replace("depth", "Depth", 1))
+
+    assert naive_verdict, "the naive check must PASS here, or this proves nothing"
+    finding = kitlib.verify_binding(kit_dir)
+    assert finding.tier is checks.Tier.FAIL
+    assert finding.check == "binding"
+    assert "does not match" in finding.detail
+    assert "templates/" in finding.remedy and "rebuild" in finding.remedy
+
+
+def test_verify_binding_fails_when_the_words_are_another_kits(tmp_path):
+    """The blockout door's real catch: two intact kits, the wrong words in one of them."""
+    a = _kit_on_disk(tmp_path, name="Duel_001")
+    b = _kit_on_disk(tmp_path, name="Walk-in_002")
+    (b / kitlib.BINDING_FILE).write_text(
+        (a / kitlib.BINDING_FILE).read_text() + "…and hold the final frame\n"
+    )
+    assert kitlib.verify_binding(a).tier is checks.Tier.PASS
+    assert kitlib.verify_binding(b).tier is checks.Tier.FAIL
+
+
+def test_verify_binding_fails_when_the_file_is_gone(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    (kit_dir / kitlib.BINDING_FILE).unlink()
+    finding = kitlib.verify_binding(kit_dir)
+    assert finding.tier is checks.Tier.FAIL
+    assert "not here" in finding.detail
+
+
+def test_the_remedy_names_the_dialect_that_would_rewrite_the_file(tmp_path):
+    """A remedy that says "restore it" without saying from where is not a remedy."""
+    kit_dir = _kit_on_disk(tmp_path)
+    manifest = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())
+    manifest["promptDialect"] = "seedance-2.0"
+    (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
+    (kit_dir / kitlib.BINDING_FILE).write_text("wrong words\n")
+    assert "templates/seedance-2.0.txt" in kitlib.verify_binding(kit_dir).remedy
+
+
+def test_schema_requires_a_well_formed_binding_sha256():
+    """Accepted: 64 lowercase hex. Refused: anything else, and absence — on a NEW kit."""
+    import jsonschema
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    jsonschema.validate(_manifest(binding_sha256="0" * 64), schema)
+    for bad in ("", "xyz", "0" * 63, "A" * 64, "0" * 65):
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_manifest(binding_sha256=bad), schema)
+    absent = _manifest()
+    del absent["binding"]
+    with pytest.raises(jsonschema.ValidationError, match="binding"):
+        jsonschema.validate(absent, schema)
+
+
+def test_schema_version_stays_1_with_the_binding_key():
+    """Additive, like depth.sha256 before it (audit DC-6 ruling)."""
+    schema = json.loads(SCHEMA_PATH.read_text())
+    assert schema["properties"]["schemaVersion"] == {"const": 1}
+    assert "binding" in schema["required"]
+    assert schema["properties"]["binding"]["required"] == ["filename", "sha256"]
+    assert "2026-09-15" in schema.get("$comment", "")
 
 
 # ------------------------------ fires[].generationId — the generation half of the join

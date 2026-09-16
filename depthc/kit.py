@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from depthc import VDA_COMMIT, __version__
-from depthc.checks import Report, Tier, suggested_output_seconds
+from depthc.checks import Finding, Report, Tier, suggested_output_seconds
 from depthc.checks import DEFAULT_DIALECT as checks_default_dialect
 from depthc.checks import dialect_for as checks_dialect_for
 
@@ -36,6 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LIBRARY = PROJECT_ROOT / "Outbox"
 DEFAULT_DIALECT = checks_default_dialect  # one source: checks.DEFAULT_DIALECT
 KIT_MANIFEST = "kit.json"
+BINDING_FILE = "binding.txt"
 
 STILL_SEARCH_FRAMES = 24
 VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mpg", ".mpeg", ".webm"}
@@ -295,8 +296,13 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         "  makes two instructions for one reference. Describe the LOOK only.",
         f"  Ask for about {manifest['suggestedOutputSeconds']:g}s of output.",
         *_resolution_lines(manifest),
-        "  binding.txt is for surfaces that HAVE a per-reference binding field - OSIDE",
-        "  does not, for uploads. See prompt.txt.",
+        "  The binding field: nothing for you to type, on either path. Uploading",
+        "  depth.mp4 by hand, there is no such field and the Composer writes its own",
+        "  line. Coming in through OSIDE's 'Import blockout kit' door, that door fills",
+        "  the field from binding.txt itself, hash-checked against kit.json - that is",
+        "  the door's behaviour and it is not merged yet.",
+        "  binding.txt is for surfaces that HAVE a per-reference binding field - that",
+        "  door, and the Ark console. See prompt.txt.",
         "",
         "EVERYTHING ELSE IS REFERENCE, NOT FOR UPLOAD",
         "--------------------------------------------",
@@ -420,6 +426,7 @@ def build_manifest(
     depth_size: tuple[int, int],
     depth_bytes: int,
     depth_sha256: str,
+    binding_sha256: str,
     frame_count: int,
     still_index: int,
     still_has_real_faces: bool,
@@ -481,6 +488,16 @@ def build_manifest(
             "frameCount": frame_count,
             "sizeBytes": depth_bytes,
             "pixels": width * height,
+        },
+        "binding": {
+            "filename": BINDING_FILE,
+            # The kit's WORDS, bound to the kit's clip. An importer that sets a reference's
+            # binding field from this file — OSIDE's Import blockout kit door — would
+            # otherwise have no way to tell that binding.txt belongs to the depth.mp4 beside
+            # it: the blockout kit binds BOTH its clip and its legend by SHA-256 for exactly
+            # that reason, and the pair caught one kit's words riding on another kit's clip.
+            # Hashed after the file is written, like depth.sha256 — the bytes as they ship.
+            "sha256": binding_sha256,
         },
         "still": {
             "filename": "still.png",
@@ -595,6 +612,63 @@ def depth_sha256(kit_dir: Path) -> str | None:
         return None
     value = (manifest.get("depth") or {}).get("sha256")
     return value if isinstance(value, str) and value else None
+
+
+def binding_sha256(kit_dir: Path) -> str | None:
+    """SHA-256 of the kit's binding.txt as recorded at build time, or None on a kit built
+    before 2026-09-15 — those carry no such key and are real kits with real fires behind
+    them, so a reader tolerates the absence (and says so once) rather than refusing the
+    kit. The schema requires the key on NEW kits only, exactly as `depth.sha256` is.
+    """
+    manifest = read_manifest(kit_dir)
+    if not manifest:
+        return None
+    value = (manifest.get("binding") or {}).get("sha256")
+    return value if isinstance(value, str) and value else None
+
+
+def verify_binding(kit_dir: Path) -> Finding | None:
+    """Do the kit's WORDS still belong to the kit's clip?
+
+    `binding.txt` sits beside `depth.mp4` and an importer that sets a reference's binding
+    field from it — OSIDE's Import blockout kit door — is trusting that the two came out of
+    the same build. The blockout kit binds both halves by SHA-256 and that pair caught one
+    kit's legend riding on another kit's clip; a depth kit recorded only the clip's hash
+    until 2026-09-15, so the same swap here was undetectable.
+
+    Returns a FAIL Finding when the bytes on disk are not the bytes kit.json recorded (or
+    the file is gone), a PASS Finding when they agree, and None when the manifest carries no
+    `binding.sha256` at all — that is the pre-2026-09-15 case, which is NOT a failure and is
+    never invented at read time; the caller names it the way `compare` names a missing
+    `depth.sha256`.
+    """
+    recorded = binding_sha256(kit_dir)
+    if recorded is None:
+        return None
+
+    path = Path(kit_dir) / BINDING_FILE
+    dialect = (read_manifest(kit_dir) or {}).get("promptDialect", DEFAULT_DIALECT)
+    remedy = (
+        f"binding.txt is the Variant A phrase from templates/{dialect}.txt (it is also "
+        f"inside this kit's prompt.txt) — restore it, or rebuild the kit, and do not import "
+        f"this folder until its words and its depth.mp4 come from the same build. "
+        f"`shasum -a 256 binding.txt` shows what is on disk now."
+    )
+    if not path.is_file():
+        return Finding(
+            Tier.FAIL, "binding", "kit.json records a binding.txt that is not here.", remedy,
+        )
+
+    actual = sha256_file(path)
+    if actual != recorded:
+        return Finding(
+            Tier.FAIL, "binding",
+            f"binding.txt does not match the hash kit.json recorded "
+            f"(recorded {recorded[:12]}…, on disk {actual[:12]}…) — these words were not "
+            f"built with this kit's depth.mp4.",
+            remedy,
+        )
+    return Finding(Tier.PASS, "binding", "binding.txt is the file this kit was built with.")
 
 
 # ------------------------------------------------------------------- the feedback loop
@@ -723,9 +797,12 @@ def write_outbox_index(root: Path | None = None) -> Path:
         "For every kit, the only file you hand to Seedance is:",
         "    depth.mp4     upload as the VIDEO reference. That is the whole handover.",
         "",
-        "In OSIDE, paste NO binding phrase — an uploaded video ref has no binding field and",
-        "the Composer writes its own line. binding.txt is only for surfaces that HAVE a",
-        "per-reference binding field (see each kit's README.txt).",
+        "In OSIDE you type NO binding phrase, on either path. Uploading depth.mp4 by hand,",
+        "an uploaded video ref has no binding field and the Composer writes its own line;",
+        "coming in through OSIDE's 'Import blockout kit' door, that door fills the field",
+        "from binding.txt itself, hash-checked against kit.json — the door's behaviour, not",
+        "merged yet. binding.txt is for surfaces that HAVE a per-reference binding field",
+        "(see each kit's README.txt).",
         "",
         "Everything else in a kit folder is reference or archive — do not upload it.",
         "",

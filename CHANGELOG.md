@@ -5,6 +5,22 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **`kit.json` `binding.sha256`** — the SHA-256 of `binding.txt` as written, required on
+  new kits, beside the `depth.sha256` that has bound the clip since 2026-09-06. The kit's
+  WORDS are now bound to the kit's clip: an importer that fills a reference's binding field
+  from `binding.txt` can prove the two came out of one build. The blockout kit binds both
+  halves the same way and that pair caught one kit's legend riding on another kit's clip.
+  `kit.verify_binding()` is the reader — FAIL when the bytes differ or the file is gone,
+  PASS when they agree, `None` on a kit built before today, which is reported the way a
+  missing `depth.sha256` already is and never invented at read time. `depthc compare` and
+  `depthc result` both check it, and neither loses evidence to it: the measurement prints
+  and the fire is written, and only then does the command exit 1. Additive, so
+  `schemaVersion` stays 1 (audit DC-6 ruling).
+- **"Paste no binding phrase in OSIDE" became conditional.** It is true of a HAND UPLOAD —
+  an uploaded video reference has no binding field there. OSIDE's **Import blockout kit**
+  door, being built to accept depth kits, does have one and fills it from `binding.txt`,
+  hash-checked. All six surfaces that state the rule now name which path the reader is on
+  and say the door is not merged yet; two new greps in `tests/test_handover.py` hold it.
 - **A fire records the OSIDE generation it became** (PLAN-SHARED-GENERATION-ID step d).
   `depthc compare` and `depthc result` take `--generation <id>` (UUID v4, the id on the
   generation's row/URL in OSIDE; anything else is refused naming the grammar). `result`

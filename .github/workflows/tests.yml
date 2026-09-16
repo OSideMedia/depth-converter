@@ -4,15 +4,17 @@
 #
 # What this runner CANNOT do, said out loud:
 #   * It has no MPS and never runs scripts/setup.sh, so vendor/Video-Depth-Anything and
-#     checkpoints/video_depth_anything_vits.pth are absent. The seven `slow` real-model tests
+#     checkpoints/video_depth_anything_vits.pth are absent. The nine `slow` real-model tests
 #     and the three `vendor` tests (they import the vendored module for the tqdm hook)
 #     SELF-SKIP with a reason naming exactly that (tests/conftest.py
 #     pytest_collection_modifyitems); `-rs` prints every skip so the count is visible in
 #     the log rather than folded into a green tick. Everything else — checks, kit, cli,
 #     ui helpers, motion, compare, look, describe, video_io, envelope, docs, gitignore —
-#     runs for real against ffmpeg-generated clips. Ten is the expected skip count (seven
-#     slow since 2026-09-06's kit-hash test; three vendor); an eleventh means a new test
-#     reached the model unmarked and should be looked at.
+#     runs for real against ffmpeg-generated clips. Twelve is the expected skip count (nine
+#     slow — seven, plus 2026-09-15's two binding tests: the kit records its binding.txt's
+#     hash, and compare prints its measurement before failing on a tampered one; three
+#     vendor); a thirteenth means a new test reached the model unmarked and should be
+#     looked at.
 #   * torch comes from the committed uv.lock. On linux that is the PyPI manylinux wheel,
 #     which drags the nvidia-* CUDA runtime packages along; they install fine without a
 #     GPU and torch runs on CPU. It is large (several GB), which is why there is no
@@ -34,7 +36,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && ffmpeg -version | head -1
       - name: Install from the committed lock (torch → CPU on this runner)
         run: uv sync --frozen
-      - name: Tests that need setup.sh's assets (the set that self-skips here — expect 10)
+      - name: Tests that need setup.sh's assets (the set that self-skips here — expect 12)
         run: uv run pytest --collect-only -q -m "slow or vendor" tests | tail -1
       - name: pytest (skips printed with their reason)
         run: uv run pytest -q -rs tests
