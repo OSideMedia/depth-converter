@@ -12,11 +12,18 @@ blocks. That is the precise failure the binding field exists to prevent.
 VARIANT A — FOR A SURFACE THAT HAS A PER-REFERENCE BINDING FIELD
 Paste into that field. Nothing else. The compiler wraps it and does its own numbering.
 
-NOT OSIDE, as of 2026-07-25. An UPLOADED video reference has no binding field there —
-bindings are auto-generated for entity refs only, and the compiler already writes
-"@Video 1 is a motion and camera reference — take movement, action and pacing from it."
-Pasting this on top is two instructions for one reference. In OSIDE, upload depth.mp4
-and write nothing about the motion; describe only the LOOK you want.
+NOT A HAND UPLOAD IN OSIDE, as of 2026-07-25. An UPLOADED video reference has no binding
+field there — bindings are auto-generated for entity refs only, and the compiler already
+writes "@Video 1 is a motion and camera reference — take movement, action and pacing from
+it." Putting this on top is two instructions for one reference. On that path, upload
+depth.mp4 and write nothing about the motion; describe only the LOOK you want.
+
+THE OTHER PATH IS THE IMPORT DOOR, and it needs nothing from you either. OSIDE's
+"Import blockout kit" door is being built to take depth kits: it reads binding.txt from
+the kit folder, verifies it against the hash in kit.json, and sets the reference's binding
+field from it — from this exact text. So the field is filled for you there, rather than
+left empty as it is on a hand upload. That is the DOOR's behaviour and it is not merged
+yet; until it ships, a depth kit reaches OSIDE as a hand upload.
 
 If you want the appearance-stripping clause the compiler's line lacks, paste only:
   "it carries structure only: take no color, texture, clothing, face, lighting, or
