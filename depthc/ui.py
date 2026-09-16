@@ -358,6 +358,10 @@ def _convert(
             dialect=d.name,
         )
         paths.prompt.write_text(prompt_text)
+        # Written BEFORE the manifest: kit.json records this file's hash, so the file has to
+        # exist first. The UI used to write it after — and used to skip it entirely while its
+        # own results panel told the user to take binding.txt to OSIDE.
+        paths.binding.write_text(kitlib.render_binding(d.name) + "\n")
 
         manifest = kitlib.build_manifest(
             kit_name=kit_dir.name, source_path=info.path,
@@ -367,7 +371,8 @@ def _convert(
             depth_duration=depth_info.duration, depth_fps=depth_info.fps,
             depth_size=(depth_info.width, depth_info.height),
             depth_bytes=paths.depth.stat().st_size,
-            depth_sha256=kitlib.sha256_file(paths.depth), frame_count=result.count,
+            depth_sha256=kitlib.sha256_file(paths.depth),
+            binding_sha256=kitlib.sha256_file(paths.binding), frame_count=result.count,
             still_index=chosen, still_has_real_faces=faces, tags=tag_list,
             description=description or "",
             settings={
@@ -383,9 +388,6 @@ def _convert(
             dialect=d.name,
         )
         kitlib.write_manifest(paths, manifest)
-        # The UI used to skip both of these while its own results panel told the user to take
-        # binding.txt to OSIDE — a kit built here was missing the file it was told to use.
-        paths.binding.write_text(kitlib.render_binding(d.name) + "\n")
         paths.readme.write_text(
             kitlib.render_kit_readme(manifest, report, has_preview=make_preview)
         )

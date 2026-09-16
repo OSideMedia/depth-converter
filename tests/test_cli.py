@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from depthc import cli
@@ -145,9 +146,20 @@ class TestDialectPreflight:
         assert "not renderable" in _text(result)
 
 
-def _fake_kit(tmp_path: Path, with_hash: bool = True) -> Path:
+def _fake_kit(
+    tmp_path: Path,
+    with_hash: bool = True,
+    binding: str | None = "bind to the depth motion blueprint\n",
+    with_binding_hash: bool = True,
+) -> Path:
     """A kit folder with a valid kit.json and a depth.mp4 that is not a video, so any
-    command reaching the decode dies there — everything BEFORE the decode is testable."""
+    command reaching the decode dies there — everything BEFORE the decode is testable.
+
+    `binding` is what lands in binding.txt (None writes no file at all); by default kit.json
+    records the hash OF THAT TEXT, so the kit reads as intact and a test that wants a
+    mismatch asks for one explicitly.
+    """
+    import hashlib
     import json
 
     from test_kit import _manifest
@@ -156,9 +168,15 @@ def _fake_kit(tmp_path: Path, with_hash: bool = True) -> Path:
 
     kit_dir = tmp_path / "Old_001"
     kit_dir.mkdir()
-    manifest = _manifest()
+    if binding is not None:
+        (kit_dir / kitlib.BINDING_FILE).write_text(binding)
+    manifest = _manifest(
+        binding_sha256=hashlib.sha256((binding or "").encode()).hexdigest()
+    )
     if not with_hash:
         del manifest["depth"]["sha256"]
+    if not with_binding_hash:
+        del manifest["binding"]["sha256"]
     (kit_dir / kitlib.KIT_MANIFEST).write_text(json.dumps(manifest))
     (kit_dir / "depth.mp4").write_bytes(b"not a video")
     return kit_dir
@@ -184,6 +202,92 @@ class TestCompareNamesAMissingDepthHash:
         kit_dir = self._kit(tmp_path, with_hash=True)
         result = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
         assert "no depth.sha256" not in _text(result)
+
+
+class TestEverySurfaceVerifiesTheBinding:
+    """A kit's WORDS have to belong to its clip. OSIDE's Import blockout kit door fills a
+    reference's binding field from binding.txt, so every command that reads a finished kit
+    checks that file against the hash kit.json recorded — the blockout kit's clip+legend
+    pair is what caught one kit's words riding on another kit's clip.
+
+    The FAIL never destroys evidence: `compare` prints its measurement first and `result`
+    writes the fire first; the exit code is what carries the failure out.
+    """
+
+    def _tampered(self, tmp_path: Path) -> Path:
+        kit_dir = _fake_kit(tmp_path)
+        (kit_dir / "binding.txt").write_text("someone else's words\n")
+        return kit_dir
+
+    def test_compare_names_the_mismatch_and_exits_nonzero(self, tmp_path):
+        kit_dir = self._tampered(tmp_path)
+        result = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        text = _text(result)
+        assert "[FAIL] binding" in text
+        assert "does not match" in text
+        assert "templates/" in text and "rebuild" in text
+        # The exit code here is the fake depth.mp4's, not the binding's — what discriminates
+        # is the text, against `test_compare_is_silent_on_an_intact_kit` below. The binding's
+        # own exit path is proven end to end in test_compare_measures_first_then_fails.
+        assert result.exit_code == 1
+
+    def test_compare_is_silent_on_an_intact_kit(self, tmp_path):
+        kit_dir = _fake_kit(tmp_path)
+        text = _text(runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")]))
+        assert "binding" not in text
+
+    def test_compare_names_a_kit_built_before_the_key_existed(self, tmp_path):
+        """Reported the way a missing depth.sha256 is — never invented, never a FAIL."""
+        kit_dir = _fake_kit(tmp_path, with_binding_hash=False)
+        text = _text(runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")]))
+        assert text.count("no binding.sha256") == 1
+        assert "2026-09-15" in text and "rebuild the kit" in text
+        assert "[FAIL] binding" not in text
+
+    def test_result_records_the_fire_first_then_fails(self, tmp_path):
+        """A generation is paid evidence: a broken text file must never cost a fire record."""
+        import json
+
+        kit_dir = self._tampered(tmp_path)
+        result = runner.invoke(cli.app, ["result", str(kit_dir), "--verdict", "adhered"])
+        saved = json.loads((kit_dir / "result.json").read_text())
+        assert saved["fires"][0]["verdict"] == "adhered"  # evidence landed
+        assert "[FAIL] binding" in _text(result)
+        assert result.exit_code == 1  # and the command still says the kit is broken
+
+    def test_result_on_an_intact_kit_succeeds(self, tmp_path):
+        kit_dir = _fake_kit(tmp_path)
+        result = runner.invoke(cli.app, ["result", str(kit_dir), "--verdict", "adhered"])
+        assert result.exit_code == 0, _text(result)
+        assert "binding" not in _text(result)
+
+    @pytest.mark.slow
+    def test_compare_measures_first_then_fails(self, clip_3s, tmp_path):
+        """A real kit, a real compare: the measurement is on screen AND the exit is 1. A
+        FAIL that swallowed the numbers would cost the operator the fire they paid for."""
+        lib = tmp_path / "lib"
+        built = runner.invoke(
+            cli.app, ["kit", str(clip_3s), "--library", str(lib), "--tags", "bindfail"]
+        )
+        kit_dir = next((p for p in lib.iterdir() if p.is_dir()), None)
+        assert kit_dir is not None, _text(built)
+
+        clean = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        assert clean.exit_code == 0, _text(clean)
+        assert "record it:" in _text(clean)
+
+        (kit_dir / "binding.txt").write_text("someone else's words\n")
+        tampered = runner.invoke(cli.app, ["compare", str(kit_dir), str(kit_dir / "depth.mp4")])
+        assert "[FAIL] binding" in _text(tampered)
+        assert "record it:" in _text(tampered)  # the measurement survived the failure
+        assert tampered.exit_code == 1
+
+    def test_a_missing_binding_file_is_the_same_failure(self, tmp_path):
+        kit_dir = _fake_kit(tmp_path)
+        (kit_dir / "binding.txt").unlink()
+        result = runner.invoke(cli.app, ["result", str(kit_dir), "--verdict", "adhered"])
+        assert "[FAIL] binding" in _text(result) and "not here" in _text(result)
+        assert result.exit_code == 1
 
 
 class TestGenerationFlag:

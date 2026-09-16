@@ -36,7 +36,8 @@ def _kit_readme() -> str:
         kit_name="Handover_001", source_path=Path("/tmp/x.mp4"), source_sha256="a" * 64,
         source_duration=8.0, source_fps=24.0, source_size=(1920, 1080), trim=(1.0, 6.0),
         crop=None, depth_duration=5.0, depth_fps=24.0, depth_size=(1280, 536),
-        depth_bytes=800_000, depth_sha256="b" * 64, frame_count=120, still_index=0, still_has_real_faces=False,
+        depth_bytes=800_000, depth_sha256="b" * 64, binding_sha256="c" * 64,
+        frame_count=120, still_index=0, still_has_real_faces=False,
         tags=["handover"], description="", settings={}, report=report, device="cpu",
         elapsed=1.0,
     )

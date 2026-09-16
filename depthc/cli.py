@@ -89,6 +89,36 @@ def _variant_ratio_basis(kit_dir: Path, variant: str) -> tuple[float | None, str
     return float(measured) / float(base), None
 
 
+def _check_kit_binding(kit_dir: Path) -> bool:
+    """Say whether this kit's WORDS still belong to its clip. True when the check FAILED.
+
+    Printed by every command that reads a finished kit, beside the note about a missing
+    `depth.sha256`, and for the same reason: OSIDE's Import blockout kit door fills a
+    reference's binding field from `binding.txt`, so the two halves of a kit have to be
+    provably from one build. The blockout kit binds both by SHA-256 and that pair caught one
+    kit's words riding on another kit's clip.
+
+    A kit built before 2026-09-15 has no recorded hash. That is named once, like the depth
+    one, and is NEVER treated as a failure — a hash is not invented at read time.
+    """
+    from depthc import checks, kit as kitlib
+
+    if kitlib.binding_sha256(kit_dir) is None:
+        _warn(
+            "kit.json carries no binding.sha256 (kit built before 2026-09-15) — nothing "
+            "binds this kit's binding.txt to its depth.mp4, so an import door cannot tell "
+            "the two came from one build; rebuild the kit to record it."
+        )
+        return False
+
+    finding = kitlib.verify_binding(kit_dir)
+    if finding is None or finding.tier is not checks.Tier.FAIL:
+        return False
+    typer.echo(f"{RED}[FAIL]{OFF} {finding.check}: {finding.detail}")
+    typer.echo(f"{DIM}      → {finding.remedy}{OFF}")
+    return True
+
+
 def _abandon_kit(kit_dir) -> None:
     """Remove a kit folder whose manifest never got written.
 
@@ -574,6 +604,10 @@ def kit(
         )
 
         paths.binding.write_text(kitlib.render_binding(dialect) + "\n")
+        # Hashed straight after the write, for the same reason depth.mp4 is: an import door
+        # that fills a reference's binding field from this file can only trust it if the
+        # words and the clip are bound to the same build.
+        binding_sha = kitlib.sha256_file(paths.binding)
 
         manifest = kitlib.build_manifest(
             kit_name=kit_dir.name,
@@ -589,6 +623,7 @@ def kit(
             depth_size=(depth_info.width, depth_info.height),
             depth_bytes=depth_bytes,
             depth_sha256=depth_sha,
+            binding_sha256=binding_sha,
             frame_count=job.result.count,
             still_index=chosen,
             still_has_real_faces=faces,
@@ -834,6 +869,11 @@ def result(
     if not (kit_dir / kitlib.KIT_MANIFEST).is_file():
         _die(f"No kit at {kit_dir} (expected a {kitlib.KIT_MANIFEST} inside)")
 
+    # Checked before the write and acted on after it: a generation is the only evidence this
+    # library learns from and it costs money, so a broken binding.txt never blocks recording
+    # the fire — it just makes the command exit non-zero once the evidence is safely on disk.
+    binding_failed = _check_kit_binding(kit_dir)
+
     try:
         log = kitlib.record_result(
             kit_dir, verdict=verdict, surface=surface, model=model,
@@ -852,6 +892,9 @@ def result(
         f"{DIM}({kitlib.VERDICTS[verdict]}) — fire {len(fires)} of this kit{OFF}"
     )
     typer.echo(f"{DIM}{kit_dir / 'result.json'}{OFF}")
+
+    if binding_failed:
+        raise typer.Exit(1)
 
 
 def _depth_profile(info, resolution: str, input_size: int, precision: str,
@@ -1021,6 +1064,11 @@ def compare(
             "`shasum -a 256 depth.mp4` gives the value by hand."
         )
 
+    # The kit's other half. Reported here, before the depth pass, so the operator sees it
+    # with the missing-hash note; the FAIL is carried to the END rather than raised, because
+    # a paid fire is already spent and its measurement must never be lost to a text file.
+    binding_failed = _check_kit_binding(kit_dir)
+
     # A processed variant is not measured in the same units as the depth.mp4 it came from:
     # midgrey caps luma at 190, so its motion energy is ~0.74x the base while the generation
     # returns at full range. The manifest already records BOTH energies, measured on the
@@ -1090,6 +1138,11 @@ def compare(
     typer.echo("")
     typer.echo(f"{DIM}record it:{OFF}")
     typer.echo(_record_hint(kit_name, comparison, generation_id))
+
+    # Measured first, failed after: the numbers are on screen and the exit code still says
+    # the kit is broken, so nothing downstream reads this kit as sound.
+    if binding_failed:
+        raise typer.Exit(1)
 
 
 def _record_hint(kit_name: str, comparison, generation_id: str | None) -> str:

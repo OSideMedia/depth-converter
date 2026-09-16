@@ -2,11 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oside.media/schemas/depthc-kit-1.json",
   "title": "Depth Converter kit manifest",
-  "$comment": "schemaVersion stays 1 across ADDITIVE changes (audit DC-6 ruling, 2026-09-06): a new key is added to `required` for kits built from that day on, and every reader tolerates its absence on older manifests. A key that changes meaning or goes away bumps the version. Additive history: 2026-09-06 depth.sha256 (the content key of the fire -> generation join; PLAN-SHARED-GENERATION-ID step d).",
+  "$comment": "schemaVersion stays 1 across ADDITIVE changes (audit DC-6 ruling, 2026-09-06): a new key is added to `required` for kits built from that day on, and every reader tolerates its absence on older manifests. A key that changes meaning or goes away bumps the version. Additive history: 2026-09-06 depth.sha256 (the content key of the fire -> generation join; PLAN-SHARED-GENERATION-ID step d); 2026-09-15 binding.sha256 (binds the kit's WORDS to its clip, so an import door can refuse a folder whose halves came from different builds).",
   "type": "object",
   "required": [
     "schemaVersion", "kitName", "createdAt", "tool", "promptDialect",
-    "tags", "description", "source", "depth", "still", "settings",
+    "tags", "description", "source", "depth", "binding", "still", "settings",
     "suggestedOutputSeconds", "checks", "targetModel"
   ],
   "additionalProperties": false,
@@ -93,6 +93,17 @@
         "frameCount": { "type": "integer", "exclusiveMinimum": 0 },
         "sizeBytes": { "type": "integer", "exclusiveMinimum": 0 },
         "pixels": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+
+    "binding": {
+      "description": "The kit's Variant A phrase as written to binding.txt, bound to the kit by content. An import door that sets a reference's binding field from this file (OSIDE's Import blockout kit door) verifies the hash first, so a folder whose words and depth.mp4 came from different builds is refused rather than fired — the blockout kit's clip+legend pair caught exactly that. Required on kits built from 2026-09-15; older manifests lack it and still load (kit.binding_sha256 returns None, kit.verify_binding returns None).",
+      "type": "object",
+      "required": ["filename", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "filename": { "const": "binding.txt" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       }
     },
 
