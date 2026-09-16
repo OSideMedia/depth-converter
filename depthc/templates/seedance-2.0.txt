@@ -19,11 +19,11 @@ it." Putting this on top is two instructions for one reference. On that path, up
 depth.mp4 and write nothing about the motion; describe only the LOOK you want.
 
 THE OTHER PATH IS THE IMPORT DOOR, and it needs nothing from you either. OSIDE's
-"Import blockout kit" door is being built to take depth kits: it reads binding.txt from
-the kit folder, verifies it against the hash in kit.json, and sets the reference's binding
-field from it — from this exact text. So the field is filled for you there, rather than
-left empty as it is on a hand upload. That is the DOOR's behaviour and it is not merged
-yet; until it ships, a depth kit reaches OSIDE as a hand upload.
+"Import kit" door takes depth kits since 2026-09-15: it reads binding.txt from the kit
+folder, verifies it against the hash in kit.json, and sets the reference's binding field
+from it — from this exact text. So the field is filled for you there, rather than left
+empty as it is on a hand upload. That is the DOOR's behaviour, not yours: on that path
+you still type no binding phrase, you just point the door at the kit folder.
 
 If you want the appearance-stripping clause the compiler's line lacks, paste only:
   "it carries structure only: take no color, texture, clothing, face, lighting, or

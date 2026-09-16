@@ -205,7 +205,7 @@ class TestCompareNamesAMissingDepthHash:
 
 
 class TestEverySurfaceVerifiesTheBinding:
-    """A kit's WORDS have to belong to its clip. OSIDE's Import blockout kit door fills a
+    """A kit's WORDS have to belong to its clip. OSIDE's Import kit door fills a
     reference's binding field from binding.txt, so every command that reads a finished kit
     checks that file against the hash kit.json recorded — the blockout kit's clip+legend
     pair is what caught one kit's words riding on another kit's clip.

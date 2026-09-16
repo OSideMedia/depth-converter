@@ -867,8 +867,8 @@ def test_schema_version_stays_1_with_the_additive_key():
 # ------------------------------------------- binding.sha256 — the kit's words, bound to it
 #
 # `binding.txt` sat beside `depth.mp4` with nothing tying the two together: a kit recorded
-# the clip's hash from 2026-09-06 and the words' hash not at all. OSIDE's Import blockout
-# kit door fills a reference's binding field from this file, and the blockout kit — which
+# the clip's hash from 2026-09-06 and the words' hash not at all. OSIDE's Import kit door
+# fills a reference's binding field from this file, and the blockout kit — which
 # binds BOTH halves by SHA-256 — caught one kit's legend riding on another kit's clip.
 
 

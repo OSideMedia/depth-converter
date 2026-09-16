@@ -97,7 +97,7 @@
     },
 
     "binding": {
-      "description": "The kit's Variant A phrase as written to binding.txt, bound to the kit by content. An import door that sets a reference's binding field from this file (OSIDE's Import blockout kit door) verifies the hash first, so a folder whose words and depth.mp4 came from different builds is refused rather than fired — the blockout kit's clip+legend pair caught exactly that. Required on kits built from 2026-09-15; older manifests lack it and still load (kit.binding_sha256 returns None, kit.verify_binding returns None).",
+      "description": "The kit's Variant A phrase as written to binding.txt, bound to the kit by content. An import door that sets a reference's binding field from this file (OSIDE's Import kit door, merged 2026-09-15) verifies the hash first, so a folder whose words and depth.mp4 came from different builds is refused rather than fired — the blockout kit's clip+legend pair caught exactly that. Required on kits built from 2026-09-15; older manifests lack it and still load (kit.binding_sha256 returns None, kit.verify_binding returns None).",
       "type": "object",
       "required": ["filename", "sha256"],
       "additionalProperties": false,

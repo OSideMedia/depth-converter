@@ -158,11 +158,12 @@ reference. That is the whole handover.
 Do **not** type a binding phrase there — on either path, for two different reasons. On a
 **hand upload**, the video reference has no binding field in the Composer at all, and the
 compiler already writes its own line for it; adding one on top is two instructions for the
-same reference. Through OSIDE's **Import blockout kit** door, which is being built to take
-depth kits, the field *is* there and the door fills it from `binding.txt` itself, verifying
-it against the `binding.sha256` in `kit.json` first — so the phrase arrives without you.
-That is the door's behaviour, not merged yet; today a depth kit reaches OSIDE as a hand
-upload. Either way, describe the *look* in your prompt and let the reference carry the
+same reference. Through OSIDE's **Import kit** door — the tile beside the upload card in
+video mode, which has taken depth kits since 2026-09-15 — the field *is* there and the door
+fills it from `binding.txt` itself, verifying it against the `binding.sha256` in `kit.json`
+first, so the phrase arrives without you. On that path you point the door at the whole kit
+folder (it reads `kit.json`, `binding.txt` and `depth.mp4` locally) and `depth.mp4` is still
+the only file that uploads. Either way, describe the *look* in your prompt and let the reference carry the
 motion. `binding.txt` exists for surfaces that do have a per-reference binding field — that
 door, and the Ark console block, which is Variant B in `prompt.txt`.
 
@@ -414,8 +415,9 @@ dialect is a new template file plus `--dialect`, with no code change.
    ref (the motion). That is the whole handover — **type no binding phrase**: an uploaded
    video ref has no binding field and the Composer writes its own line. `binding.txt` is
    for surfaces that HAVE a per-reference binding field — a hand upload does not, and
-   OSIDE's **Import blockout kit** door (being built to take depth kits, not merged yet)
-   fills it from `binding.txt` for you, hash-checked against `kit.json`.
+   OSIDE's **Import kit** door (takes depth kits since 2026-09-15) fills it from
+   `binding.txt` for you, hash-checked against `kit.json`, if you point it at the kit
+   folder instead of uploading by hand.
    The create-frame step is per model, and the kit's `README.txt` prints the right rule:
    on **seedance-2.0** skip it (refs-only — a start frame silently drops the depth ref);
    on **seedance-2.5** you may use it (the frame demotes to a reference image, refs ride).
