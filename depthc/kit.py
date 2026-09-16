@@ -298,9 +298,10 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         *_resolution_lines(manifest),
         "  The binding field: nothing for you to type, on either path. Uploading",
         "  depth.mp4 by hand, there is no such field and the Composer writes its own",
-        "  line. Coming in through OSIDE's 'Import blockout kit' door, that door fills",
-        "  the field from binding.txt itself, hash-checked against kit.json - that is",
-        "  the door's behaviour and it is not merged yet.",
+        "  line. Coming in through OSIDE's 'Import kit' door - merged 2026-09-15, the",
+        "  tile beside the upload card in video mode - you point it at this whole",
+        "  folder and that door fills the field from binding.txt itself, hash-checked",
+        "  against kit.json; depth.mp4 is still the only file that uploads.",
         "  binding.txt is for surfaces that HAVE a per-reference binding field - that",
         "  door, and the Ark console. See prompt.txt.",
         "",
@@ -492,7 +493,7 @@ def build_manifest(
         "binding": {
             "filename": BINDING_FILE,
             # The kit's WORDS, bound to the kit's clip. An importer that sets a reference's
-            # binding field from this file — OSIDE's Import blockout kit door — would
+            # binding field from this file — OSIDE's Import kit door, merged 2026-09-15 — would
             # otherwise have no way to tell that binding.txt belongs to the depth.mp4 beside
             # it: the blockout kit binds BOTH its clip and its legend by SHA-256 for exactly
             # that reason, and the pair caught one kit's words riding on another kit's clip.
@@ -631,7 +632,7 @@ def verify_binding(kit_dir: Path) -> Finding | None:
     """Do the kit's WORDS still belong to the kit's clip?
 
     `binding.txt` sits beside `depth.mp4` and an importer that sets a reference's binding
-    field from it — OSIDE's Import blockout kit door — is trusting that the two came out of
+    field from it — OSIDE's Import kit door, merged 2026-09-15 — is trusting that the two came out of
     the same build. The blockout kit binds both halves by SHA-256 and that pair caught one
     kit's legend riding on another kit's clip; a depth kit recorded only the clip's hash
     until 2026-09-15, so the same swap here was undetectable.
@@ -781,8 +782,14 @@ def zip_kit(kit_dir: Path, out_path: Path | None = None) -> Path:
 def write_outbox_index(root: Path | None = None) -> Path:
     """Rewrite `Outbox/INDEX.txt` — the answer to "what's finished and what do I use?".
 
-    Regenerated from the kit.json files on every build, so it can never drift from what is
-    actually on disk. Delete it and the next build brings it back.
+    Regenerated from the kit.json files on every BUILD. It used to say here that it "can
+    never drift from what is actually on disk", and that was wrong: nothing regenerates it
+    when a kit folder is removed by hand, and on 2026-09-15 three superseded drafts were
+    deleted and INDEX.txt went on listing them until it was rewritten. A build is the only
+    event that refreshes it — plus `depthc library index`, which is that rewrite with no
+    conversion attached, for exactly the delete-by-hand case.
+
+    Delete INDEX.txt itself and the next build (or that command) brings it back.
     """
     root = Path(root) if root else library_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -799,10 +806,10 @@ def write_outbox_index(root: Path | None = None) -> Path:
         "",
         "In OSIDE you type NO binding phrase, on either path. Uploading depth.mp4 by hand,",
         "an uploaded video ref has no binding field and the Composer writes its own line;",
-        "coming in through OSIDE's 'Import blockout kit' door, that door fills the field",
-        "from binding.txt itself, hash-checked against kit.json — the door's behaviour, not",
-        "merged yet. binding.txt is for surfaces that HAVE a per-reference binding field",
-        "(see each kit's README.txt).",
+        "coming in through OSIDE's 'Import kit' door — merged 2026-09-15 — you point it at",
+        "the kit folder and that door fills the field from binding.txt itself, hash-checked",
+        "against kit.json. binding.txt is for surfaces that HAVE a per-reference binding",
+        "field (see each kit's README.txt).",
         "",
         "Everything else in a kit folder is reference or archive — do not upload it.",
         "",

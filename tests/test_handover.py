@@ -85,14 +85,25 @@ def test_every_surface_scopes_binding_txt_to_surfaces_with_a_binding_field(tmp_p
 # --------------------------------------------- the door that makes the rule conditional
 #
 # "Paste no binding phrase in OSIDE" was stated flat, and it is only true of a HAND UPLOAD:
-# an uploaded video ref has no binding field. OSIDE's Import blockout kit door — being built
-# to accept depth kits — does have one and fills it from binding.txt itself, hash-checked
-# against kit.json. Every surface has to name which path it is talking about, and none may
-# state the door as today's behaviour, because the OSIDE side is not merged.
+# an uploaded video ref has no binding field. OSIDE's import door does have one and fills
+# it from binding.txt itself, hash-checked against kit.json. Every surface has to name
+# which path it is talking about.
+#
+# [AMENDED 2026-09-15] The door SHIPPED — OSIDE PR #278 (lib/import/depthKit.ts) — and the
+# tile and dialog were renamed from "Import blockout kit" to "Import kit", because one door
+# now takes both blockout kits and depth kits. Both of the things these surfaces used to say
+# about it are now false and user-facing: the name, and "not merged yet". So the gate
+# inverted. It used to REQUIRE the unbuilt caveat; it now REFUSES it, and refuses the old
+# name outright — a surface still printing "Import blockout kit" sends the operator hunting
+# a tile that no longer says that.
 
-IMPORT_DOOR = re.compile(r"Import blockout kit", re.I)
+IMPORT_DOOR = re.compile(r"Import kit", re.I)
+OLD_DOOR_NAME = re.compile(r"Import blockout kit", re.I)
 HAND_UPLOAD = re.compile(r"hand upload|by hand|uploaded video ref", re.I)
-NOT_MERGED = re.compile(r"not merged|being built|not .{0,20}behaviour today", re.I)
+# The caveats that were true until the door merged, and are now the stale claim to catch.
+UNBUILT = re.compile(r"not merged|being built|not yet merged|until it ships|NOT merged as of", re.I)
+# The door is merged: every surface has to say so, not merely stop saying it is not.
+MERGED = re.compile(r"merged 2026-09-15|MERGED 2026-09-15|since 2026-09-15|takes depth kits since", re.I)
 
 
 def test_every_surface_names_both_paths(tmp_path):
@@ -101,20 +112,95 @@ def test_every_surface_names_both_paths(tmp_path):
         assert HAND_UPLOAD.search(text), f"{name} does not scope the rule to a hand upload"
 
 
-def test_no_surface_states_the_import_door_as_todays_default(tmp_path):
-    """The OSIDE side is not merged. A surface claiming the door already does this would
-    send the operator looking for a button that is not there."""
+def test_no_surface_still_calls_the_door_by_its_old_name(tmp_path):
+    """The tile reads "Import kit". A surface saying "Import blockout kit" sends the
+    operator looking for a label that is not on the screen any more."""
     for name, text in surfaces(tmp_path).items():
-        assert NOT_MERGED.search(text), f"{name} states the door without saying it is unbuilt"
+        hit = OLD_DOOR_NAME.search(text)
+        assert hit is None, f"{name} still says {hit.group(0)!r}"
+
+
+def test_no_surface_still_says_the_door_is_unbuilt(tmp_path):
+    """The OSIDE side merged 2026-09-15. A surface still calling it unbuilt tells the
+    operator to hand-upload when the door is right there — the inverse of the old defect."""
+    for name, text in surfaces(tmp_path).items():
+        hit = UNBUILT.search(text)
+        assert hit is None, f"{name} still calls the door unbuilt: {hit.group(0)!r}"
+
+
+def test_every_surface_says_the_door_is_merged(tmp_path):
+    """Dropping the caveat is not the same as stating the fact; the date is what a reader
+    can check against the OSIDE changelog."""
+    for name, text in surfaces(tmp_path).items():
+        assert MERGED.search(text), f"{name} names the door without saying it shipped"
 
 
 def test_the_conditional_patterns_can_fire():
-    """The sentence every surface used to carry must trip both discriminating greps."""
+    """The sentence every surface carried BEFORE the door existed must trip the greps that
+    discriminate, and must not trip the ones that do not."""
     old = ("In OSIDE, paste NO binding phrase - an uploaded video ref has no binding field "
            "and the Composer writes its own line.")
     assert not IMPORT_DOOR.search(old)
-    assert not NOT_MERGED.search(old)
+    assert not MERGED.search(old)
     assert HAND_UPLOAD.search(old)  # this one does NOT discriminate; the two above do
+
+
+def test_the_stale_door_patterns_can_fire():
+    """A grep that never matches anything is a claim. The exact sentences these surfaces
+    carried until 2026-09-15 are kept here as the counterexample, so both refusals are
+    proven to see the thing they refuse."""
+    stale_readme = ("Through OSIDE's Import blockout kit door, which is being built to take "
+                    "depth kits, the field is there and the door fills it from binding.txt.")
+    stale_index = ("coming in through OSIDE's 'Import blockout kit' door, that door fills the "
+                   "field from binding.txt itself, hash-checked against kit.json - the door's "
+                   "behaviour, not merged yet.")
+    stale_claude = ("Through OSIDE's Import blockout kit door - being built to take depth kits, "
+                    "NOT merged as of 2026-09-15 - the field exists.")
+    for stale in (stale_readme, stale_index, stale_claude):
+        assert OLD_DOOR_NAME.search(stale), stale
+        assert UNBUILT.search(stale), stale
+        assert not MERGED.search(stale), stale
+    # and the wording that replaced them trips neither refusal
+    fixed = ("Coming in through OSIDE's 'Import kit' door - merged 2026-09-15 - you point it "
+             "at the kit folder and that door fills the field from binding.txt itself.")
+    assert IMPORT_DOOR.search(fixed)
+    assert not OLD_DOOR_NAME.search(fixed)
+    assert not UNBUILT.search(fixed)
+    assert MERGED.search(fixed)
+
+
+# ----------------------------------------------- the old name, everywhere it can be read
+#
+# surfaces() holds the five places that state the HANDOVER. The door's name is read in more
+# places than that — the prompt templates the kit's prompt.txt is rendered from, the kit
+# schema's own description, and the code comments that explain why binding.sha256 exists.
+# The subject set is globbed, not listed, so a new template or module is in it the day it
+# lands; CHANGELOG.md is out because its job is to record that the rename happened.
+OLD_NAME_SUBJECTS = sorted(
+    {
+        *ROOT.glob("depthc/**/*.py"),
+        *ROOT.glob("depthc/**/*.txt"),
+        *ROOT.glob("depthc/**/*.json"),
+        ROOT / "README.md",
+        ROOT / "CLAUDE.md",
+        ROOT / "Outbox" / "README.txt",
+    }
+)
+
+
+def test_the_old_name_subject_set_is_not_empty():
+    """A glob that matches nothing would make the sweep below pass by having nothing to
+    read. Name the floor, so the gate fails if the tree moves under it."""
+    names = {p.name for p in OLD_NAME_SUBJECTS}
+    assert {"kit.py", "cli.py", "kit_schema.json", "seedance-2.5.txt", "seedance-2.0.txt"} <= names
+    assert len(OLD_NAME_SUBJECTS) >= 10
+
+
+def test_nothing_shipped_still_says_import_blockout_kit():
+    """The rename is not a synonym: the tile reads "Import kit" and nothing else does."""
+    for path in OLD_NAME_SUBJECTS:
+        hit = OLD_DOOR_NAME.search(_flat(path.read_text(encoding="utf-8")))
+        assert hit is None, f"{path.relative_to(ROOT)} still says {hit.group(0)!r}"
 
 
 def test_the_contradiction_patterns_can_fire():

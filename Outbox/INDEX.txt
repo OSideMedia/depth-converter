@@ -8,10 +8,10 @@ For every kit, the only file you hand to Seedance is:
 
 In OSIDE you type NO binding phrase, on either path. Uploading depth.mp4 by hand,
 an uploaded video ref has no binding field and the Composer writes its own line;
-coming in through OSIDE's 'Import blockout kit' door, that door fills the field
-from binding.txt itself, hash-checked against kit.json — the door's behaviour, not
-merged yet. binding.txt is for surfaces that HAVE a per-reference binding field
-(see each kit's README.txt).
+coming in through OSIDE's 'Import kit' door — merged 2026-09-15 — you point it at
+the kit folder and that door fills the field from binding.txt itself, hash-checked
+against kit.json. binding.txt is for surfaces that HAVE a per-reference binding
+field (see each kit's README.txt).
 
 Everything else in a kit folder is reference or archive — do not upload it.
 

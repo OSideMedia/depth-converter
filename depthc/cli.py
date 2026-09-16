@@ -93,7 +93,7 @@ def _check_kit_binding(kit_dir: Path) -> bool:
     """Say whether this kit's WORDS still belong to its clip. True when the check FAILED.
 
     Printed by every command that reads a finished kit, beside the note about a missing
-    `depth.sha256`, and for the same reason: OSIDE's Import blockout kit door fills a
+    `depth.sha256`, and for the same reason: OSIDE's Import kit door (merged 2026-09-15) fills a
     reference's binding field from `binding.txt`, so the two halves of a kit have to be
     provably from one build. The blockout kit binds both by SHA-256 and that pair caught one
     kit's words riding on another kit's clip.
@@ -1393,6 +1393,24 @@ def library_list_cmd(
             f"{', '.join(entry.tags) or DIM + '—' + OFF}"
         )
     typer.echo(f"{DIM}{len(entries)} kit{'s' if len(entries) != 1 else ''}{OFF}")
+
+
+@library_app.command("index")
+def library_index_cmd(
+    library: Optional[Path] = typer.Option(None, "--library", help="Kit output root (default Outbox/)"),
+) -> None:
+    """Rewrite Outbox/INDEX.txt from the kit.json files on disk.
+
+    A build already does this. This is the same rewrite with no conversion attached, for
+    the one case a build does not cover: a kit folder deleted by hand leaves INDEX.txt
+    listing a kit that is gone, and until 2026-09-15 the only repair was to build another.
+    """
+    from depthc import kit as kitlib
+
+    root = kitlib.library_root(library)
+    path = kitlib.write_outbox_index(root)
+    entries = kitlib.library_list(root)
+    typer.echo(f"{path} — {len(entries)} kit{'s' if len(entries) != 1 else ''}")
 
 
 def main() -> None:  # pragma: no cover - console-script shim
