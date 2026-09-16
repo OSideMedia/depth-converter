@@ -252,6 +252,17 @@ kit), best-in-class temporal quality, zero Electron weight.
    so a frame-first shot would silently drop the depth ref. In Composer: add
    character/location/prop image refs (the look), upload `depth.mp4` as the video ref
    (the motion), paste the binding block from `prompt.txt`.
+
+   > **[AMENDED 2026-09-16] Two sentences of that step are superseded — CLAUDE.md and
+   > README.md carry the current law.** (a) *The create-frame rule is per model*: it is
+   > `refsWithStartFrame:false` on **seedance-2.0** only, so "skip create-frame" is a 2.0
+   > instruction; on **seedance-2.5** (`refsWithStartFrame:true`, the default dialect since
+   > 2026-09-06) a start frame demotes to a reference image and the depth ref still rides.
+   > (b) *Paste NO binding phrase in OSIDE, on either path* (audit DC-2, live run
+   > 2026-07-25): a hand-uploaded video ref has no binding field there and the compiler
+   > writes its own line, and OSIDE's **Import kit** door — merged 2026-09-15 — fills the
+   > field from `binding.txt` itself, hash-checked. `prompt.txt`'s binding block is
+   > Variant B, for the Ark console. The handover is ONE file: `depth.mp4`.
 5. **Fire** — generate. (The kit's still is an `@Image` look ref, never first_frame.)
 **Resolution guidance (also for README):** the depth ref itself is always ≤720p-class —
 it is a motion guide, not picture, and Seedance's ref-input window caps it anyway.

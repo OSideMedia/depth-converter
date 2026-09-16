@@ -96,6 +96,13 @@ otherwise see.
   from what is on disk". Corrected, with the delete-by-hand case and its one-command repair.
 - **`depthc library index` is now in the README's command list**, which named `library list`
   only — a command this release adds and the README did not mention.
+- **`PLAN.md`'s attach step still gave the contradiction the DC-2 sweep killed.** Step 4 of
+  "The end-to-end workflow" reads "paste the binding block from `prompt.txt`" and "SKIP the
+  create-frame step" unscoped — the two things every other surface was corrected on, in the
+  file `CLAUDE.md` orders read before any structural change. `test_handover.py` never saw
+  it: `PLAN.md` is not in its subject set, and the wording ("binding block from prompt.txt")
+  would not trip its greps even if it were. Amended in place, in the file's own dated
+  convention. **Growing that gate's subject set is a separate job** and is NOT done here.
 - **`CLAUDE.md` pointed at an in-flight OSIDE branch for work that shipped.** "The OSIDE half
   lands in OSIDE (branch `feat/ref-sha256`)" — verified merged on OSIDE's main (`f094e558`);
   it now says so. Same stale-claim class the import-door sweep above exists to kill.
