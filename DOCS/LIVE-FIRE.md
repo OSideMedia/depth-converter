@@ -164,6 +164,29 @@ render carrying a video reference is under-quoted — by 2x when ref length matc
 length. Approved ceiling was $1.91; settled $3.83. Recorded here because the estimate was
 wrong for a documented reason, not because the fire was.
 
+### Results — 2026-09-07 · the only depth kit ever fired through OSIDE's own door
+
+| Kit | Surface | Res | Cost | Verdict | What followed | What did not |
+|---|---|---|---|---|---|---|
+| Sha256Proof_001 | **oside** | 480p, 4 s | $0.39 | **partial** | walk, direction, profile framing | the camera tracking |
+
+Generation `441fe671-0bd9-4e62-80ce-a0de60d86d8e`, fired 2026-09-07 01:33 UTC, Seedance 2.0
+480p 4 s, Anime Style Constant. Reference: a man walking L→R in profile past a storefront,
+camera tracking so he stays mid-frame. Generated: a figure walking L→R in profile across a
+**static** frame under a lamp.
+
+**The metric failed here, not the motion.** `compare` read the energy flat — ratio 0.096,
+r0 = −0.423 — because flat cel shading gives the depth pass no gradient to measure. Read that
+as a limit of the instrument on stylised output, never as a verdict on adherence; the watch
+says three of four things were followed.
+
+**Why this row exists at all (2026-09-15).** It lived only in `Outbox/Sha256Proof_001/result.json`
+and in no tracked document — the same shape as the 2026-08-24 loss recorded above, where
+`Outbox/*` swallowed every 2026-07-25 kit's `result.json` and only the findings in THIS file
+survived. The kit was nearly deleted as a superseded `_001` draft before anyone noticed it was
+the sole record of a paid fire. The lesson the repo already paid for once: a fire is not
+recorded until it is in this file. `result.json` is the instrument's output, not the archive.
+
 ## THE RESOLUTION LAW — shoot 720p or 4K, never 1080p — **ON SEEDANCE 2.0**
 
 **1080p is 0 for 3. Every other tier is 4 for 4.** (Fisher exact p ≈ 0.029.) This is the
