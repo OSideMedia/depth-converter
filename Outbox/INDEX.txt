@@ -19,7 +19,11 @@ Everything else in a kit folder is reference or archive — do not upload it.
 ref actually carries. 4.40 = a sword duel that behaved, 0.94 = a crawl whose
 generation started late. A kit with no FIRED line has never been tested.
 
-1 kit:
+2 kits:
+
+  Clay-close-alone_001
+      1280x720 · 4s · check: WARN · motion 0.55 ▄▆▆▅█▆▄▄
+      from clay-close-alone.mp4
 
   Sha256Proof_001   ** MEDIA GONE — record only **
       1280x720 · 5s · check: PASS · motion 4.54 ▄▆▆▇▄▇▆▆█▇

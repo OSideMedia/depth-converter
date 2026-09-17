@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "kitName": "Clay-close-alone_001",
+  "createdAt": "2026-09-17T01:30:05+00:00",
+  "tool": {
+    "name": "depthc",
+    "version": "0.14.0",
+    "model": "Video-Depth-Anything Small (vits, Apache-2.0)",
+    "vdaCommit": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+    "device": "mps",
+    "elapsedSeconds": 20.02
+  },
+  "promptDialect": "seedance-2.5",
+  "targetModel": {
+    "dialect": "seedance-2.5",
+    "refSeconds": [
+      2.0,
+      30.0
+    ],
+    "outputSeconds": [
+      4.0,
+      30.0
+    ],
+    "pixels": [
+      407696,
+      8295044
+    ],
+    "maxFileMb": 200.0,
+    "outputResolutions": [
+      "480p",
+      "720p",
+      "1080p"
+    ],
+    "refsWithStartFrame": true
+  },
+  "tags": [],
+  "description": "",
+  "source": {
+    "filename": "clay-close-alone.mp4",
+    "sha256": "e21032e16e6d3f4298ded8d4118b1a645df65285ce85a679da830d57c7a06fc7",
+    "durationSeconds": 4.0,
+    "fps": 24.0,
+    "width": 1280,
+    "height": 720,
+    "trim": null,
+    "crop": null
+  },
+  "depth": {
+    "filename": "depth.mp4",
+    "sha256": "a971c4369001e3f41cb83385fbf29879f3bbd3a3f5ca3de49beef57fb8e30818",
+    "durationSeconds": 4.0,
+    "fps": 24.0,
+    "width": 1280,
+    "height": 720,
+    "frameCount": 96,
+    "sizeBytes": 401052,
+    "pixels": 921600
+  },
+  "binding": {
+    "filename": "binding.txt",
+    "sha256": "ec3b022bb48e228d20537c27907f862ef47d5cd764eb6b6debbc8198086dcfe2"
+  },
+  "still": {
+    "filename": "still.png",
+    "frameIndex": 16,
+    "containsRealFaces": false,
+    "usage": "may be attached as an @Image look reference (never first_frame)"
+  },
+  "settings": {
+    "resolution": "720p",
+    "fps": "conform-24",
+    "invert": false,
+    "inputSize": 518,
+    "precision": "fp32",
+    "crop": "auto",
+    "keepAudio": false
+  },
+  "suggestedOutputSeconds": 4.0,
+  "checks": {
+    "tier": "WARN",
+    "findings": [
+      {
+        "tier": "PASS",
+        "check": "duration",
+        "detail": "4.00s is inside the 3-8s sweet spot.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "output coverage",
+        "detail": "4.00s is exactly requestable as an output length.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "file size",
+        "detail": "0.4 MB is within 200 MB.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "resolution",
+        "detail": "1280\u00d7720 = 921,600 px is in window.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "frame rate",
+        "detail": "24 fps matches Seedance's output cadence.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "still.png faces",
+        "detail": "Flagged as free of real photographic faces.",
+        "remedy": ""
+      },
+      {
+        "tier": "WARN",
+        "check": "motion signal",
+        "detail": "0.55 mean depth-space energy is weak \u2014 below 1.5 the model has little to lock onto and tends to free-run (\u2584\u2586\u2586\u2585\u2588\u2586\u2584\u2584).",
+        "remedy": "Reference points: 4.40 = a sword duel that behaved, 0.94 = the prone crawl whose generation started late. Run `depthc scout` for a stronger window."
+      },
+      {
+        "tier": "WARN",
+        "check": "depth retention",
+        "detail": "352% \u2014 the depth channel carries MORE motion than the source. The surplus is usually depth flicker on a low-texture source, not choreography.",
+        "remedy": "Watch depth.mp4 / sheet.png for shimmer in flat areas before firing; a ratio far above 100% is a noise flag, not good news."
+      },
+      {
+        "tier": "PASS",
+        "check": "motion type",
+        "detail": "0% of the movement is whole-frame \u2014 this is a subject-motion reference.",
+        "remedy": ""
+      }
+    ]
+  },
+  "motion": {
+    "energy": 0.545,
+    "median": 0.49,
+    "peak": 1.463,
+    "headEnergy": 0.422,
+    "tailEnergy": 0.393,
+    "cameraShare": 0.001,
+    "bucketSeconds": 0.5,
+    "buckets": [
+      0.33,
+      0.58,
+      0.61,
+      0.49,
+      0.88,
+      0.6,
+      0.43,
+      0.42
+    ],
+    "sparkline": "\u2584\u2586\u2586\u2585\u2588\u2586\u2584\u2584",
+    "deadStretch": null,
+    "spikeSeconds": [],
+    "regionEnergy": [
+      [
+        0.452,
+        0.474,
+        0.584
+      ],
+      [
+        0.496,
+        0.573,
+        0.54
+      ],
+      [
+        0.67,
+        0.606,
+        0.507
+      ]
+    ],
+    "cameraPath": {
+      "dx": -0.0,
+      "dy": 0.0,
+      "radial": 0.0,
+      "label": "static"
+    },
+    "grid": "long-edge 160 (aspect-preserving, v2)",
+    "fps": 24.0,
+    "sourceEnergy": 0.155,
+    "retention": 3.516
+  },
+  "sheet": {
+    "filename": "sheet.png",
+    "usage": "local-only contact sheet"
+  }
+}
