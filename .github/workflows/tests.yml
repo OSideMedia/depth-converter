@@ -54,7 +54,32 @@ jobs:
           set -o pipefail
           # "--" ends the options, so a tracked file named --write or --help is a path.
           git ls-files -z | xargs -0 python3 .github/scripts/sanitize.py --
-          # Given files one by one, the scanner checks each file's own name and not its
-          # parent directories', so the list of tracked paths is scanned as text as well.
-          git ls-files -z | tr '\0' '\n' > "${RUNNER_TEMP:-/tmp}/tracked-paths.txt"
-          python3 .github/scripts/sanitize.py -- "${RUNNER_TEMP:-/tmp}/tracked-paths.txt"
+          # Given files one by one, the scanner judges each file's own name and not the
+          # directories above it, so every directory name on a tracked path goes through
+          # the scanner's own name check here. In a name a TAB, CR or LF is a hit as well.
+          # ponytail: glue around that gap, repeated in four repos. When sanitize.py judges
+          # the directories of a named file itself (in claude-commands), delete this block.
+          python3 -I - <<'PY'
+          import os, subprocess, sys
+          sys.dont_write_bytecode = True
+          sys.path.insert(0, ".github/scripts")
+          from sanitize import name_offsets
+          listed = subprocess.run(["git", "ls-files", "-z"], check=True, capture_output=True).stdout
+          paths = [os.fsdecode(p) for p in listed.split(b"\0") if p]
+          if not paths:
+              sys.exit("no tracked paths listed: the directory-name check read nothing")
+          dirs = set()
+          for path in paths:
+              parts = path.split("/")
+              dirs.update("/".join(parts[:i]) for i in range(1, len(parts)))
+          bad = 0
+          for d in sorted(dirs):
+              name = d.rsplit("/", 1)[-1]
+              hits = name_offsets(name)
+              if hits:
+                  bad += 1
+                  points = ", ".join(sorted({f"U+{ord(name[i]):04X}" for i in hits}))
+                  print(f"  invisible code point(s) in a directory NAME: {ascii(d)} ({points})")
+          print(f"checked {len(dirs)} tracked directory name(s), {bad} with a hit")
+          sys.exit(1 if bad else 0)
+          PY
