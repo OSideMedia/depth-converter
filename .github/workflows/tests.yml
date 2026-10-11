@@ -41,24 +41,10 @@ jobs:
       - name: pytest (skips printed with their reason)
         run: uv run pytest -q -rs tests
       - name: No invisible code points in tracked text
-        # Zero-width, bidi-override and tag-block characters are the defect class a
-        # human reviewer cannot see. Same classes as claude-commands' skill-audit
-        # sanitize.py and the explainer repo's selftests.yml; a hit fails the job and
-        # names it.
-        run: |
-          python3 - <<'PY'
-          import subprocess, sys
-          bad = set(range(0x200B,0x2010)) | set(range(0x2060,0x2065)) | {0xFEFF} | set(range(0x202A,0x202F)) | set(range(0x2066,0x206A)) | set(range(0xE0000,0xE0080))
-          files = subprocess.run(["git","ls-files"], capture_output=True, text=True).stdout.split()
-          hits = []
-          for f in files:
-              if f.endswith((".png",".jpg",".jpeg",".gif",".mp4",".mov",".wav",".pdf",".zip",".woff",".woff2",".pth")): continue
-              try: txt = open(f, encoding="utf-8").read()
-              except (UnicodeDecodeError, OSError): continue
-              for i, ch in enumerate(txt):
-                  if i == 0 and ch == "\ufeff": continue  # a leading BOM is encoding, not concealment
-                  if ord(ch) in bad: hits.append(f"{f}: U+{ord(ch):04X} at offset {i}")
-          print(f"scanned {len(files)} tracked file(s); {len(hits)} invisible code point(s)")
-          for h in hits[:50]: print("  " + h)
-          sys.exit(1 if hits else 0)
-          PY
+        # Zero-width, bidi-override, tag and variation-selector characters are the defect
+        # class a human reviewer cannot see. .github/scripts/sanitize.py is a byte-for-byte
+        # copy of claude-commands' skills/skill-audit/scripts/sanitize.py: never edit it
+        # here, re-copy it (sync-warden compares the two before a claude-commands tag).
+        # Exit 1 names each hit. Exit 2 means the scan could not finish (a tracked file it
+        # cannot read or cannot prove binary), and that fails the job too, by design.
+        run: git ls-files -z | xargs -0 python3 .github/scripts/sanitize.py
