@@ -41,24 +41,45 @@ jobs:
       - name: pytest (skips printed with their reason)
         run: uv run pytest -q -rs tests
       - name: No invisible code points in tracked text
-        # Zero-width, bidi-override and tag-block characters are the defect class a
-        # human reviewer cannot see. Same classes as claude-commands' skill-audit
-        # sanitize.py and the explainer repo's selftests.yml; a hit fails the job and
-        # names it.
+        # Zero-width, bidi-override, tag and variation-selector characters are the defect
+        # class a human reviewer cannot see (ordinary emoji sequences are allowed).
+        # .github/scripts/sanitize.py is a byte-for-byte copy of claude-commands'
+        # skills/skill-audit/scripts/sanitize.py: never edit it here, re-copy it. The
+        # sync-warden registry in claude-commands lists this copy and compares the two.
+        # The scanner exits 1 when a file carries a hit (it names the file and the count)
+        # and 2 when the scan is incomplete: a tracked file it cannot read or cannot prove
+        # binary. Both fail the job (GNU xargs reports either as 123). A new binary type
+        # going red here is the scanner asking to be taught that type, in claude-commands.
         run: |
-          python3 - <<'PY'
-          import subprocess, sys
-          bad = set(range(0x200B,0x2010)) | set(range(0x2060,0x2065)) | {0xFEFF} | set(range(0x202A,0x202F)) | set(range(0x2066,0x206A)) | set(range(0xE0000,0xE0080))
-          files = subprocess.run(["git","ls-files"], capture_output=True, text=True).stdout.split()
-          hits = []
-          for f in files:
-              if f.endswith((".png",".jpg",".jpeg",".gif",".mp4",".mov",".wav",".pdf",".zip",".woff",".woff2",".pth")): continue
-              try: txt = open(f, encoding="utf-8").read()
-              except (UnicodeDecodeError, OSError): continue
-              for i, ch in enumerate(txt):
-                  if i == 0 and ch == "\ufeff": continue  # a leading BOM is encoding, not concealment
-                  if ord(ch) in bad: hits.append(f"{f}: U+{ord(ch):04X} at offset {i}")
-          print(f"scanned {len(files)} tracked file(s); {len(hits)} invisible code point(s)")
-          for h in hits[:50]: print("  " + h)
-          sys.exit(1 if hits else 0)
+          set -o pipefail
+          # "--" ends the options, so a tracked file named --write or --help is a path.
+          git ls-files -z | xargs -0 python3 .github/scripts/sanitize.py --
+          # Given files one by one, the scanner judges each file's own name and not the
+          # directories above it, so every directory name on a tracked path goes through
+          # the scanner's own name check here. In a name a TAB, CR or LF is a hit as well.
+          # ponytail: glue around that gap, repeated in four repos. When sanitize.py judges
+          # the directories of a named file itself (in claude-commands), delete this block.
+          python3 -I - <<'PY'
+          import os, subprocess, sys
+          sys.dont_write_bytecode = True
+          sys.path.insert(0, ".github/scripts")
+          from sanitize import name_offsets
+          listed = subprocess.run(["git", "ls-files", "-z"], check=True, capture_output=True).stdout
+          paths = [os.fsdecode(p) for p in listed.split(b"\0") if p]
+          if not paths:
+              sys.exit("no tracked paths listed: the directory-name check read nothing")
+          dirs = set()
+          for path in paths:
+              parts = path.split("/")
+              dirs.update("/".join(parts[:i]) for i in range(1, len(parts)))
+          bad = 0
+          for d in sorted(dirs):
+              name = d.rsplit("/", 1)[-1]
+              hits = name_offsets(name)
+              if hits:
+                  bad += 1
+                  points = ", ".join(sorted({f"U+{ord(name[i]):04X}" for i in hits}))
+                  print(f"  invisible code point(s) in a directory NAME: {ascii(d)} ({points})")
+          print(f"checked {len(dirs)} tracked directory name(s), {bad} with a hit")
+          sys.exit(1 if bad else 0)
           PY
