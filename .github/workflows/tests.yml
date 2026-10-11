@@ -42,9 +42,19 @@ jobs:
         run: uv run pytest -q -rs tests
       - name: No invisible code points in tracked text
         # Zero-width, bidi-override, tag and variation-selector characters are the defect
-        # class a human reviewer cannot see. .github/scripts/sanitize.py is a byte-for-byte
-        # copy of claude-commands' skills/skill-audit/scripts/sanitize.py: never edit it
-        # here, re-copy it (sync-warden compares the two before a claude-commands tag).
-        # Exit 1 names each hit. Exit 2 means the scan could not finish (a tracked file it
-        # cannot read or cannot prove binary), and that fails the job too, by design.
-        run: git ls-files -z | xargs -0 python3 .github/scripts/sanitize.py
+        # class a human reviewer cannot see (ordinary emoji sequences are allowed).
+        # .github/scripts/sanitize.py is a byte-for-byte copy of claude-commands'
+        # skills/skill-audit/scripts/sanitize.py: never edit it here, re-copy it. The
+        # sync-warden registry in claude-commands lists this copy and compares the two.
+        # The scanner exits 1 when a file carries a hit (it names the file and the count)
+        # and 2 when the scan is incomplete: a tracked file it cannot read or cannot prove
+        # binary. Both fail the job (GNU xargs reports either as 123). A new binary type
+        # going red here is the scanner asking to be taught that type, in claude-commands.
+        run: |
+          set -o pipefail
+          # "--" ends the options, so a tracked file named --write or --help is a path.
+          git ls-files -z | xargs -0 python3 .github/scripts/sanitize.py --
+          # Given files one by one, the scanner checks each file's own name and not its
+          # parent directories', so the list of tracked paths is scanned as text as well.
+          git ls-files -z | tr '\0' '\n' > "${RUNNER_TEMP:-/tmp}/tracked-paths.txt"
+          python3 .github/scripts/sanitize.py -- "${RUNNER_TEMP:-/tmp}/tracked-paths.txt"
