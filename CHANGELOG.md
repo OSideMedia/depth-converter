@@ -3,6 +3,29 @@
 Per-kit evidence lives in `Outbox/*/result.json` and `DOCS/LIVE-FIRE.md`; this file is
 the code's history. Started 2026-09-06.
 
+## Unreleased
+
+- **`depthc stability <take>`** — boil, flicker and grain on an RGB take, for ranking takes
+  of the same shot and finding the bad second. Boil is the band-passed, exposure-matched
+  error after a forward-backward flow warp at 480 px, so film grain mostly cancels;
+  flicker is signed, so a pump shows as alternation; grain is Immerkær's σ on the flattest
+  half of full-resolution frames sampled at 2 fps. `--still` reads the repaint from a start still to
+  the first frame, `--after` the seam from a prior take's real last frame (read at its own
+  rate, not a 24 fps conform). A join or a clip below the tracking floor says "not scored"
+  and never prints a zero. Uncalibrated against a human eye.
+- **`read_frames` without an `fps` conform now returns every decoded frame once**
+  (`-fps_mode passthrough`). rawvideo's default output sync was CFR at the nominal rate,
+  which dropped bunched frames of a VFR source, a take's real last frame among them. Every
+  caller that conforms (`fps=`) is unchanged.
+- **The camera-path reader is calibrated against a known camera** (`depthc/calibrate.py`,
+  `scripts/calibrate_camera_path.py`, `DOCS/CAMERA-PATH-CALIBRATION.md`). Twenty Blender
+  clay moves with the exact camera track and Z pass, scored through `describe`'s own
+  wording (`describe.path_buckets`, extracted, output unchanged). The shipped reader never
+  invented motion (0 false of 140 buckets on every reader) and under-reads slow and
+  long-lens moves. Two diagnostics (a textured-pixel median, a similarity fit) are
+  measured, neither dominates, and nothing in `depthc` changed because of them. $0: Blender
+  and the depth model run locally.
+
 ## v0.14.0 — 2026-09-16
 
 32 commits since v0.13.0 (2026-08-23). This file only started on 2026-09-06, so the last

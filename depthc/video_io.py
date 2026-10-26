@@ -369,6 +369,11 @@ def read_frames(
         filters.append(f"scale={width}:{height}:flags=lanczos")
     if filters:
         cmd += ["-vf", ",".join(filters)]
+    if not fps:
+        # No conform asked for: every decoded frame, once. rawvideo's default output sync is
+        # CFR at the nominal rate, which drops bunched frames of a VFR source — the last
+        # frame of a take among them (Codex review 2026-10-26).
+        cmd += ["-fps_mode", "passthrough"]
 
     cmd += ["-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
 

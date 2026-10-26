@@ -265,26 +265,40 @@ def _segments(labels: list[str], bucket_seconds: float) -> list[Segment]:
     return out
 
 
-def camera_segments(profile: MotionProfile, bucket_seconds: float = BUCKET_SECONDS) -> list[Segment]:
-    """The camera path named per bucket, then collapsed into runs ("pans left 0-1.5s")."""
-    if profile.path is None or not profile.path.size:
+def path_buckets(
+    path: np.ndarray | None, fps: float, bucket_seconds: float = BUCKET_SECONDS,
+) -> list[tuple[str, float, tuple[float, float, float]]]:
+    """Per bucket: (label, speed, mean (dx, dy, radial) over the gaps that moved).
+
+    The one place a path series becomes words. `camera_segments` collapses these into runs;
+    the camera-path calibration (`depthc.calibrate`) scores them bucket by bucket against a
+    Blender ground truth — so what the calibration measures is exactly what describe says.
+    """
+    if path is None or not path.size:
         return []
-    step = max(1, int(round(bucket_seconds * profile.fps)))
-    n = profile.path.shape[0] - step + 1
+    step = max(1, int(round(bucket_seconds * fps)))
+    n = path.shape[0] - step + 1
     if n <= 0:
         return []
-    labels: list[str] = []
-    speeds: list[float] = []
+    out: list[tuple[str, float, tuple[float, float, float]]] = []
     for i in range(0, n, step):
-        chunk = profile.path[i:i + step]
+        chunk = path[i:i + step]
         moving = np.any(chunk != 0, axis=1)
         if not moving.any():
-            labels.append("static")
-            speeds.append(0.0)
+            out.append(("static", 0.0, (0.0, 0.0, 0.0)))
             continue
         dx, dy, radial = (float(v) for v in chunk[moving].mean(axis=0))
-        labels.append(path_label(dx, dy, radial))
-        speeds.append(path_speed(dx, dy, radial))
+        out.append((path_label(dx, dy, radial), path_speed(dx, dy, radial), (dx, dy, radial)))
+    return out
+
+
+def camera_segments(profile: MotionProfile, bucket_seconds: float = BUCKET_SECONDS) -> list[Segment]:
+    """The camera path named per bucket, then collapsed into runs ("pans left 0-1.5s")."""
+    buckets = path_buckets(profile.path, profile.fps, bucket_seconds)
+    if not buckets:
+        return []
+    labels = [label for label, _, _ in buckets]
+    speeds = [speed for _, speed, _ in buckets]
     segments = _segments(labels, bucket_seconds)
     # Tempo is graded over the whole run, not per bucket: a per-bucket adverb would split
     # one "pans left" into fragments at every flicker across a band edge.

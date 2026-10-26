@@ -1351,6 +1351,129 @@ def look_compare(
 
 
 @app.command()
+def stability(
+    clip: Path = typer.Argument(..., help="A generated take"),
+    still: Optional[Path] = typer.Option(
+        None, "--still",
+        help="The start frame the take was fired from — measures the REPAINT, still → first frame",
+    ),
+    after: Optional[Path] = typer.Option(
+        None, "--after",
+        help="The take this one continues — measures the SEAM, its last frame → this first frame",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
+) -> None:
+    """How much a take BOILS and FLICKERS once its motion is warped away.
+
+    Flow both ways per frame gap, the next frame warped back, untrackable pixels dropped;
+    what still changed is boil (structure re-rolling: hair, foliage, fabric) and flicker
+    (exposure breathing). RGB, not depth — this is a reading of the picture. Measured at
+    480 px through a band-pass so film grain mostly cancels (add grain in the grade, after).
+    For ranking takes of the SAME shot and finding the bad second; not a grade, and not
+    calibrated against a human eye.
+    """
+    import json
+
+    import cv2
+
+    from depthc import stability as stab
+    from depthc.video_io import VideoIOError, probe as probe_file, read_frames
+
+    def frames_of(info):
+        return read_frames(info, fps=24.0, size=stab.stability_size(info.width, info.height))
+
+    def end_frame(info, first: bool) -> np.ndarray | None:
+        # the real first or last frame, at the clip's own rate: a 24 fps conform can drop it
+        # (Codex review 2026-10-26), and the join is about exactly that frame. The window
+        # widens until it holds one: a 2 fps clip, or a VFR clip whose last frame is long,
+        # has no frame in its final quarter second.
+        # ponytail: the last widening decodes the whole clip, fine at 480 px for a take; a
+        # seek-to-last-keyframe read if long VFR sources ever come through here. A final frame
+        # far shorter than one frame interval can round onto the -t cutoff and be cut (Codex
+        # 2026-10-26; not reproduced here, H.264, FFV1 and PNG encodes all re-time it): read
+        # to EOF instead of -t if a source like that ever turns up
+        size = stab.stability_size(info.width, info.height)
+        reach = 0.25
+        while True:
+            span = (0.0, min(info.duration, reach)) if first else (max(0.0, info.duration - reach), info.duration)
+            try:
+                got = read_frames(info, trim=span, size=size)
+            except VideoIOError:
+                if reach >= info.duration:
+                    raise
+                got = ()
+            if len(got):
+                return got[0] if first else got[-1]
+            if reach >= info.duration:
+                return None
+            reach *= 4
+
+    def join(previous: np.ndarray, current: np.ndarray, name: str) -> dict:
+        g = stab.gap(to_size(previous, current), current)
+        # below the clip summary's tracking floor the gap's numbers are sentinels, not readings
+        if g.valid < stab.MIN_VALID_SHARE:
+            return {"from": name, "tracked": round(g.valid, 3), "scored": False}
+        return {"from": name, "boil": round(g.boil, 3), "exposure": round(g.flicker, 3),
+                "tracked": round(g.valid, 3), "scored": True}
+
+    def to_size(picture: np.ndarray, like: np.ndarray) -> np.ndarray:
+        h, w = like.shape[:2]
+        return picture if picture.shape[:2] == (h, w) else cv2.resize(picture, (w, h), interpolation=cv2.INTER_AREA)
+
+    try:
+        info = probe_file(clip)
+        frames = frames_of(info)
+        if frames.shape[0] < 2:
+            _die(f"{clip.name}: fewer than two frames — nothing to compare")
+        # grain is read on a few frames at the take's own resolution: the 480 px grid averages it away
+        result = stab.measure(frames, 24.0, grain_frames=read_frames(info, fps=2.0))
+        joins: dict[str, dict] = {}
+        opening = end_frame(info, first=True) if still is not None or after is not None else None
+        if (still is not None or after is not None) and opening is None:
+            _die(f"{clip.name}: could not read its first frame")
+        if still is not None:
+            bgr = cv2.imread(str(still), cv2.IMREAD_COLOR)
+            if bgr is None:
+                _die(f"cannot read the still {still}")
+            joins["repaint"] = join(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), opening, still.name)
+        if after is not None:
+            closing = end_frame(probe_file(after), first=False)
+            if closing is None:
+                _die(f"{after.name}: could not read its last frame")
+            joins["seam"] = join(closing, opening, after.name)
+    except VideoIOError as e:
+        _die(str(e))
+    except KeyboardInterrupt:
+        typer.echo("\ncancelled", err=True)
+        raise typer.Exit(130)
+
+    summary = result.summary()
+    if as_json:
+        typer.echo(json.dumps({"clip": clip.name, **summary, **joins}, indent=2))
+        return
+    typer.echo(f"{BOLD}{clip.name}{OFF}  {DIM}{info.summary()}{OFF}")
+    if not summary.get("scored"):
+        _die("no gap could be tracked — a slideshow of cuts, or a flash throughout")
+    worst = ", ".join(f"{w['t']:g}s ({w['boil']:.2f})" for w in summary["worstBoil"])
+    typer.echo(f"  boil     median {summary['boilMedian']:.2f}  p95 {summary['boilP95']:.2f}   worst at {worst}")
+    typer.echo(f"  flicker  std {summary['flickerStd']:.2f}  max {summary['flickerMaxAbs']:.2f} grey levels")
+    if "grainMedian" in summary:
+        typer.echo(f"  grain    σ {summary['grainMedian']:.2f} grey levels at full resolution (flat half of the frame)")
+    untracked = summary["gaps"] - summary["scored"]
+    typer.echo(f"  tracked  {summary['validMedian']:.0%} of pixels (median gap)"
+               + (f"  {YELLOW}{untracked} gap(s) lost the flow, not scored{OFF}" if untracked else ""))
+    for name, label in (("repaint", "repaint  still → first frame"), ("seam", "seam     prior last → first")):
+        if name in joins:
+            j = joins[name]
+            if not j["scored"]:
+                typer.echo(f"  {label}: {YELLOW}not scored, only {j['tracked']:.0%} of pixels tracked{OFF}")
+                continue
+            typer.echo(f"  {label}: boil {j['boil']:.2f}, exposure {j['exposure']:+.2f}, tracked {j['tracked']:.0%}")
+    typer.echo(f"{DIM}Grey levels at 480 px. Rank takes of the same shot with it; a cut reads as the worst spike."
+               f" Uncalibrated against a human eye.{OFF}")
+
+
+@app.command()
 def ui(
     port: int = typer.Option(7861, "--port", help="Chosen to avoid OSIDE's dev server on 3000"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a tab"),
