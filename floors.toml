@@ -1,0 +1,54 @@
+# floors.toml — Depth Converter as a building, read by ~/.claude/building.py (/building).
+# Floor list approved by Peter 2026-10-27 ("i trust that you can build it"); he owns it.
+# A floor may name a `check` command; none does yet, so this file lets nothing run.
+# Paths are relative to the repo root; `*` stays in one folder, `**` crosses folders,
+# and when two patterns match a file the LAST one wins.
+building = "Depth Converter"
+owed_repo = ["Depth Converter"]
+
+[[floor]]
+id = "B1"
+name = "Plant room (tests, setup, docs)"
+paths = ["*", "tests/**", "scripts/**", ".github/**", "DOCS/**", "LICENSES/**", "Inbox/**",
+         "Processed/**"]
+words = ["test", "CI", "setup", "docs", "gate"]
+support = true      # lights only when a commit touches nothing else
+
+[[floor]]
+id = "F1"
+name = "Clip to depth video"
+paths = ["depthc/engine.py", "depthc/video_io.py", "depthc/vendor_path.py", "depthc/smoke.py"]
+words = ["depth", "Video-Depth-Anything", "VDA", "decode", "encode", "torch"]
+
+[[floor]]
+id = "F2"
+name = "Kit builder"
+paths = ["depthc/kit.py", "depthc/kit_schema.json", "depthc/templates/**", "depthc/describe.py",
+         "depthc/look.py", "depthc/__init__.py"]
+words = ["kit", "prompt template", "motion library", "describe"]
+
+[[floor]]
+id = "F3"
+name = "Seedance rules and checks"
+paths = ["depthc/checks.py", "depthc/seedance-envelope.json", "depthc/result_schema.json",
+         "depthc/motion.py"]
+words = ["envelope", "seedance", "dialect", "checker"]
+
+[[floor]]
+id = "F4"
+name = "Did the take follow the kit"
+paths = ["depthc/compare.py", "depthc/stability.py", "depthc/calibrate.py",
+         "scripts/calibrate_camera_path.py"]
+words = ["adherence", "compare", "stability", "calibrat", "verdict", "camera path"]
+
+[[floor]]
+id = "F5"
+name = "Screen and commands"
+paths = ["depthc/cli.py", "depthc/ui.py"]
+words = ["UI", "gradio", "command line", "launcher", "convert tab"]
+
+[[floor]]
+id = "F6"
+name = "Finished kits"
+paths = ["Outbox/**"]
+words = ["outbox", "motion kit"]
