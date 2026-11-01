@@ -176,3 +176,12 @@ def test_a_dialect_this_tool_has_no_template_for_is_left_out_with_a_notice(tmp_p
     table = checks.load_envelope(_write(tmp_path, payload), warn=notices.append)
     assert "seedance-3.0" not in table
     assert any("seedance-3.0" in n for n in notices)
+
+
+def test_the_names_read_at_import_are_the_names_the_table_holds():
+    assert set(checks.DIALECT_NAMES) == set(checks.DIALECTS)
+
+
+def test_an_unknown_module_attribute_is_still_an_attribute_error():
+    with pytest.raises(AttributeError):
+        checks.NOT_A_THING  # noqa: B018

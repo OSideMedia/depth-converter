@@ -295,6 +295,24 @@ def test_picking_a_kit_from_a_library_kept_elsewhere_serves_a_copy(tmp_path, mon
     assert path == str(clip.parent)  # the kit is still where the library says it is
 
 
+def test_picking_a_kit_whose_prompt_is_not_text_still_loads_it(tmp_path, monkeypatch):
+    clip = _outside_every_folder_gradio_allows(tmp_path, monkeypatch)
+    (clip.parent / "prompt.txt").write_bytes(b"\xff\xfe not text")
+    rows = [["name", "1s", "pass", "", "", str(clip.parent)]]
+    _depth, prompt, path = ui._library_pick(rows, SimpleNamespace(index=[0, 0]))
+    assert "not text" in prompt
+    assert path == str(clip.parent)
+
+
+def test_picking_a_kit_whose_files_are_folders_still_loads_it(tmp_path, monkeypatch):
+    clip = _outside_every_folder_gradio_allows(tmp_path, monkeypatch)
+    clip.unlink()
+    clip.mkdir()
+    (clip.parent / "prompt.txt").mkdir()
+    rows = [["name", "1s", "pass", "", "", str(clip.parent)]]
+    assert ui._library_pick(rows, SimpleNamespace(index=[0, 0])) == (None, "", str(clip.parent))
+
+
 def test_the_finished_conversion_goes_through_the_same_door():
     source = Path(ui.__file__).read_text(encoding="utf-8")
     assert "_servable(paths.depth)" in source and "_servable(paths.preview)" in source

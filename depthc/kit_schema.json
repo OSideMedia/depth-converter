@@ -83,7 +83,7 @@
       "properties": {
         "filename": { "const": "depth.mp4" },
         "sha256": {
-          "description": "SHA-256 of depth.mp4 exactly as written (after the size gate and any audio mux) — the one file that goes to OSIDE. OSIDE's upload door records the uploaded clip's SHA-256 on the reference (request_payload.refs[].sha256), so kit.json.depth.sha256 == refs[].sha256 names the kit a generation rode. Required on kits built from 2026-09-06; older manifests lack it and still load (kit.depth_sha256 returns None).",
+          "description": "SHA-256 of depth.mp4 exactly as written (after the size gate and any audio mux) — the one file that goes to OSIDE. OSIDE's upload door records the uploaded clip's SHA-256 on the reference (request_payload.request.refs[].sha256), so kit.json.depth.sha256 == refs[].sha256 names the kit a generation rode. Required on kits built from 2026-09-06; older manifests lack it and still load (kit.depth_sha256 returns None).",
           "type": "string", "pattern": "^[0-9a-f]{64}$"
         },
         "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },

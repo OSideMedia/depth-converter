@@ -27,7 +27,7 @@
           "outputRef": { "type": "string" },
           "notes": { "type": "string" },
           "generationId": {
-            "description": "OSIDE generations.id (UUID v4, canonical lowercase) — the generation this fire became. fires[].generationId == generations.id is the generation half of the join; kit.json.depth.sha256 == request_payload.refs[].sha256 is the content half. Absent on every fire recorded before 2026-09-06 and on any fire recorded without --generation.",
+            "description": "OSIDE generations.id (UUID v4, canonical lowercase) — the generation this fire became. fires[].generationId == generations.id is the generation half of the join; kit.json.depth.sha256 == request_payload.request.refs[].sha256 is the content half. Absent on every fire recorded before 2026-09-06 and on any fire recorded without --generation.",
             "type": "string",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           }

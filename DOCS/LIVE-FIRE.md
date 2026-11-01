@@ -104,7 +104,9 @@ be read directly.
 Append below. What adhered, what drifted, what prompt wording changed, and the cost.
 Since 2026-09-06 a fire entry in a kit's `result.json` also carries `generationId` — the
 OSIDE generation it became, given as `--generation <id>` to `depthc compare` / `depthc
-result` (PLAN-SHARED-GENERATION-ID step d); every entry before that date is unkeyed.
+result` (PLAN-SHARED-GENERATION-ID step d); every entry before that date is unkeyed. Name
+`--model` on every fire, and write down before firing what will count as followed: which of
+subject, direction, framing and camera the shot has to hold.
 
 ### Results — 2026-07-25
 
@@ -179,6 +181,20 @@ camera tracking so he stays mid-frame. Generated: a figure walking L→R in prof
 r0 = −0.423 — because flat cel shading gives the depth pass no gradient to measure. Read that
 as a limit of the instrument on stylised output, never as a verdict on adherence; the watch
 says three of four things were followed.
+
+**What this record cannot show (audit DC-5, written 2026-11-01).**
+
+- `partial` is a by-eye verdict that overrides the tool, whose reading was `ignored`. Both are
+  written here on purpose. The fire's job was to prove the join, and nobody wrote down beforehand
+  what would count as passing, so the verdict describes the take and passes nothing.
+- The kit was graded for Seedance 2.5 and fired on 2.0, so the checks it passed were not the
+  limits of the model that ran it. It is no evidence about 2.5.
+- `result.json` has an empty `model`, and it stays empty. The notes say Seedance 2.0. The row
+  that would give the id is not in OSIDE's database (looked up 2026-11-01: its oldest generation
+  is from 2026-10-19), so filling it in would be a guess.
+- For the same reason the content half of the join was never shown on this fire: the kit's
+  `depth.sha256` matches no row there. What that lookup does settle is where the digest lives:
+  the one row with references holds them at `request_payload.request.refs[]`, none at the top.
 
 **Why this row exists at all (2026-09-15).** It lived only in `Outbox/Sha256Proof_001/result.json`
 and in no tracked document — the same shape as the 2026-08-24 loss recorded above, where

@@ -18,7 +18,7 @@ from depthc import __version__
 from depthc.vendor_path import SetupIncomplete
 # Also eager, and also torch-free (numpy only): the `--dialect` option's default and its
 # help text are evaluated at import time, and they must name the dialects that actually
-# exist rather than a literal that can drift from DIALECTS.
+# exist rather than a literal that can drift from them. Importing it reads no envelope.
 from depthc import checks
 
 app = typer.Typer(
@@ -41,6 +41,25 @@ def _die(message: str) -> None:
 
 def _warn(message: str) -> None:
     typer.echo(f"{YELLOW}warning:{OFF} {message}")
+
+
+# These two grade nothing: `result` records paid evidence and `library` reads what is already
+# built, so neither waits on a table it never looks at (audit DC-6). Every other command is
+# refused here rather than partway through a depth pass.
+NEEDS_NO_ENVELOPE = {"result", "library"}
+
+
+@app.callback()
+def _refuse_a_broken_envelope(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand in NEEDS_NO_ENVELOPE:
+        return
+    try:
+        checks.dialect_for()
+    except checks.EnvelopeError as e:
+        _die(
+            f"{e}\n  Grading needs that file. Replace it from a good copy (git restore "
+            "depthc/seedance-envelope.json); depthc result and depthc library still work."
+        )
 
 
 def _variant_ratio_basis(kit_dir: Path, variant: str) -> tuple[float | None, str | None]:
@@ -437,7 +456,7 @@ def kit(
     dialect: str = typer.Option(
         checks.DEFAULT_DIALECT, "--dialect",
         help="Target model: selects BOTH the prompt template and the constraint envelope "
-             f"({', '.join(sorted(checks.DIALECTS))})",
+             f"({', '.join(checks.DIALECT_NAMES)})",
     ),
     library: Optional[Path] = typer.Option(
         None, "--library", help="Kit output root (default Outbox/ in the project)"
@@ -893,6 +912,10 @@ def result(
         f"{DIM}({kitlib.VERDICTS[verdict]}) — fire {len(fires)} of this kit{OFF}"
     )
     typer.echo(f"{DIM}{kit_dir / 'result.json'}{OFF}")
+    if generation and not model:
+        # Recorded either way. The only keyed fire in the library went in like this, and what
+        # it ran on now rests on its notes (audit DC-5).
+        _warn("no --model named, so this fire does not say which model made it; add it to result.json.")
 
     if binding_failed:
         raise typer.Exit(1)
@@ -1426,6 +1449,13 @@ def stability(
                 return None
             reach *= 4
 
+    def grain_sample(info) -> np.ndarray | None:
+        """2 frames a second, or 2 frames from a clip too short for that rate to land on any."""
+        try:
+            return read_frames(info, fps=max(2.0, 2.0 / max(info.duration, 1 / 30)))
+        except VideoIOError:
+            return None  # the clip was measured: its grain reading is absent, never guessed
+
     def join(previous: np.ndarray, current: np.ndarray, name: str) -> dict:
         g = stab.gap(to_size(previous, current), current)
         # below the clip summary's tracking floor the gap's numbers are sentinels, not readings
@@ -1444,7 +1474,7 @@ def stability(
         if frames.shape[0] < 2:
             _die(f"{clip.name}: fewer than two frames — nothing to compare")
         # grain is read on a few frames at the take's own resolution: the 480 px grid averages it away
-        result = stab.measure(frames, 24.0, grain_frames=read_frames(info, fps=2.0))
+        result = stab.measure(frames, 24.0, grain_frames=grain_sample(info))
         joins: dict[str, dict] = {}
         opening = end_frame(info, first=True) if still is not None or after is not None else None
         if (still is not None or after is not None) and opening is None:
