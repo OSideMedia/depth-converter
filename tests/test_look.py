@@ -222,6 +222,19 @@ def test_a_file_that_is_not_a_package_is_refused(tmp_path, clip_tiny):
     assert "not an oside-davinci/v1 package" in done.output
 
 
+def test_a_link_that_loops_costs_one_clip_and_not_the_whole_comparison(tmp_path, clip_tiny):
+    look_json, manifest = _package(
+        tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}, {"file": "videos/loop.mp4"}],
+    )
+    loop = manifest.parent / "videos" / "loop.mp4"
+    loop.symlink_to(loop)
+    done = _look_compare(look_json, manifest, "--json")
+    assert done.exit_code == 0, done.output
+    clips = {c["file"]: c for c in json.loads(done.output)["clips"]}
+    assert clips["videos/loop.mp4"]["error"]
+    assert not clips["videos/shot.mp4"].get("error")
+
+
 def test_the_cdl_goes_in_place_of_a_symlink_and_not_through_it(tmp_path, clip_tiny):
     look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}])
     precious = tmp_path / "my-document.txt"

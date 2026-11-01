@@ -15,8 +15,9 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
-import tempfile
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -722,14 +723,23 @@ def write_replacing(path: Path, text: str) -> None:
     itself. It also means a crash mid-write cannot leave paid evidence half written.
     """
     path = Path(path)
-    fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    # A file that was private stays private. Not the mode of a link's target: that is someone
+    # else's file. A new file gets what the umask allows, which os.open applies to 0o666.
+    try:
+        before = os.lstat(path)
+        keep = stat.S_IMODE(before.st_mode) if stat.S_ISREG(before.st_mode) else None
+    except FileNotFoundError:
+        keep = None
+    temp = path.with_name(f".{path.name}.{secrets.token_hex(8)}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as out:
-            os.fchmod(out.fileno(), 0o644)  # mkstemp's 0600 would hide the file from other readers
+            if keep is not None:
+                os.fchmod(out.fileno(), keep)
             out.write(text)
         os.replace(temp, path)
     except BaseException:
-        Path(temp).unlink(missing_ok=True)
+        temp.unlink(missing_ok=True)
         raise
 
 

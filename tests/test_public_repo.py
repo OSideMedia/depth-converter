@@ -250,9 +250,11 @@ def test_a_port_that_is_not_a_number_stops_the_build(tmp_path):
     assert not (tmp_path / "Depth Converter.app").exists()
 
 
-def _a_process(argv0: str) -> subprocess.Popen:
-    # exec -a sets what `ps -o command=` shows, which is what the Stop app reads
-    return subprocess.Popen(["bash", "-c", f'exec -a "{argv0}" sleep 60'])
+def _a_process(argv0: str, cwd: Path) -> subprocess.Popen:
+    # exec -a sets what `ps -o command=` shows, one of the two things the Stop app reads;
+    # the other is the folder the process runs in
+    cwd.mkdir(parents=True, exist_ok=True)
+    return subprocess.Popen(["bash", "-c", f'exec -a "{argv0}" sleep 60'], cwd=cwd)
 
 
 def _run_stop_with_pidfile_naming(process: subprocess.Popen, tmp_path: Path) -> None:
@@ -266,8 +268,10 @@ def _run_stop_with_pidfile_naming(process: subprocess.Popen, tmp_path: Path) -> 
     assert not (tmp_path / ".depthc-ui.pid").exists()
 
 
-def test_stop_leaves_a_process_that_is_not_ours(tmp_path):
-    other = _a_process("someone-elses-server")
+@pytest.mark.parametrize("argv0", ["someone-elses-server", "python3 -m http.server --directory /tmp/depthc ui"])
+def test_stop_leaves_a_process_that_is_not_ours(tmp_path, argv0):
+    # The second one runs elsewhere with our words in its arguments: the words alone prove nothing.
+    other = _a_process(argv0, tmp_path / "elsewhere")
     try:
         _run_stop_with_pidfile_naming(other, tmp_path)
         assert other.poll() is None, "Stop killed a process that was not the app"
@@ -277,7 +281,7 @@ def test_stop_leaves_a_process_that_is_not_ours(tmp_path):
 
 
 def test_stop_stops_ours(tmp_path):
-    ours = _a_process("depthc ui --port 47911")
+    ours = _a_process("depthc ui --port 47911", tmp_path / "repo")
     try:
         _run_stop_with_pidfile_naming(ours, tmp_path)
         assert ours.wait(timeout=10) is not None

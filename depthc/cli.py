@@ -1305,7 +1305,12 @@ def look_compare(
             path = base / rel
             # The manifest may have come from someone else, so it names files in its own package
             # and nowhere else: not an absolute path, a ../ or a link pointing out of it.
-            if not path.resolve().is_relative_to(base.resolve()):
+            try:
+                inside = path.resolve().is_relative_to(base.resolve())
+            except (OSError, RuntimeError) as e:  # a link that loops raises RuntimeError on Python 3.12
+                scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error=str(e).splitlines()[0][:80]))
+                continue
+            if not inside:
                 scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error="outside the package"))
                 continue
             try:

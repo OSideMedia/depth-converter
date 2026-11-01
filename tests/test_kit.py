@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -1128,12 +1129,49 @@ def test_a_symlinked_result_json_is_replaced_and_its_target_left_alone(tmp_path)
     assert json.loads((kit_dir / "result.json").read_text())["fires"][0]["verdict"] == "adhered"
 
 
-def test_a_replaced_file_is_readable_and_leaves_no_temp_file(tmp_path):
+@pytest.fixture
+def umask_022():
+    before = os.umask(0o022)
+    yield
+    os.umask(before)
+
+
+def test_a_replaced_file_is_readable_and_leaves_no_temp_file(tmp_path, umask_022):
     target = tmp_path / "result.json"
     kitlib.write_replacing(target, "{}\n")
     assert target.read_text() == "{}\n"
     assert target.stat().st_mode & 0o777 == 0o644
     assert [p.name for p in tmp_path.iterdir()] == ["result.json"]
+
+
+def test_a_replaced_file_keeps_the_mode_it_had(tmp_path, umask_022):
+    target = tmp_path / "result.json"
+    target.write_text("old")
+    target.chmod(0o600)
+    kitlib.write_replacing(target, "new")
+    assert target.read_text() == "new"
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_new_file_follows_the_umask(tmp_path):
+    before = os.umask(0o077)
+    try:
+        kitlib.write_replacing(tmp_path / "result.json", "{}\n")
+    finally:
+        os.umask(before)
+    assert (tmp_path / "result.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_a_file_in_place_of_a_link_does_not_take_the_mode_of_what_it_pointed_at(tmp_path, umask_022):
+    open_to_all = tmp_path / "open.txt"
+    open_to_all.write_text("mine")
+    open_to_all.chmod(0o666)
+    target = tmp_path / "result.json"
+    target.symlink_to(open_to_all)
+    kitlib.write_replacing(target, "{}\n")
+    assert not target.is_symlink()
+    assert target.stat().st_mode & 0o777 == 0o644
+    assert open_to_all.read_text() == "mine"
 
 
 def test_a_manifest_that_is_not_an_object_is_skipped_everywhere(tmp_path):

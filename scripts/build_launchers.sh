@@ -58,6 +58,15 @@ PLIST
 
 say "Building launchers in $APPS (port $PORT)"
 
+# Both apps need the same answer to "is this our server?". Its name in the command line is not
+# proof: any program can carry those words in an argument. It must also run in this project's
+# folder, which is where the Start app puts it. A folder name with a newline in it reads as
+# not ours, so the apps leave the server alone rather than kill something else.
+IS_OURS="is_ours() {
+  ps -o command= -p \"\$1\" 2>/dev/null | grep -q 'depthc ui' || return 1
+  [ \"\$(lsof -a -p \"\$1\" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')\" = \"\$(cd \"\$ROOT\" 2>/dev/null && pwd -P)\" ]
+}"
+
 # ------------------------------------------------------------------------ start
 make_app "Depth Converter" "#!/bin/bash
 # Launch the Depth Converter UI, wait for the port, then open a browser tab.
@@ -67,11 +76,13 @@ PIDFILE=$QPIDFILE
 LOG=\"\$HOME/Library/Logs/depthc-ui.log\"
 mkdir -p \"\$(dirname \"\$LOG\")\"
 
+$IS_OURS
+
 # Already running? Just focus the tab rather than starting a second server. Another program
 # on this port is not us, and opening it would show the wrong app.
 HOLDER=\$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null | head -1)
 if [ -n \"\$HOLDER\" ]; then
-  if ps -o command= -p \"\$HOLDER\" | grep -q 'depthc ui'; then
+  if is_ours \"\$HOLDER\"; then
     open \"http://127.0.0.1:\$PORT\"
     exit 0
   fi
@@ -106,10 +117,11 @@ make_app "Depth Stop" "#!/bin/bash
 # Stop the Depth Converter UI: pidfile first, then our own server if it still holds the port.
 # Only ever ours: a stale pidfile can name a process the system has since reused, a browser
 # tab counts as using the port, and another program can be listening on it.
+ROOT=$QROOT
 PORT=$PORT
 PIDFILE=$QPIDFILE
 
-is_ours() { ps -o command= -p \"\$1\" 2>/dev/null | grep -q 'depthc ui'; }
+$IS_OURS
 
 if [ -f \"\$PIDFILE\" ]; then
   PID=\$(cat \"\$PIDFILE\")
