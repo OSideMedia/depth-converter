@@ -549,3 +549,174 @@ def test_raw_deltas_still_get_their_floor_rescaled():
     # The same series read as raw 24 fps is genuinely below the floor and must NOT fire.
     at24 = m.MotionProfile(fps=24.0, deltas=raw.copy())
     assert not at24.spikes
+
+
+# ------------------------------------------------------------ the path, read where it shows
+# Every clip below has a known camera. Most are built so the all-pixel reader this replaced gets
+# them wrong, or so a reader without the guard the test names does. The rest pin what the old reader
+# already got right.
+
+def _dots(
+    height: int = 180, width: int = 320, top: int = 0, bottom: int | None = None, seed: int = 3, density: float = 0.012,
+) -> np.ndarray:
+    """Hard-edged blocks on a flat grey field, only between `top` and `bottom`: clay, in effect."""
+    bottom = height if bottom is None else bottom
+    field = np.full((height, width), 120, dtype=np.uint8)
+    rng = np.random.default_rng(seed)
+    for _ in range(int(density * width * (bottom - top))):
+        y, x = int(rng.integers(top, max(top + 1, bottom - 7))), int(rng.integers(0, width - 7))
+        field[y:y + 6, x:x + 6] = int(rng.integers(20, 240))
+    return field
+
+
+def _warped(base: np.ndarray, frames: int, dx: float = 0.0, dy: float = 0.0, zoom: float = 1.0) -> np.ndarray:
+    """`base` moved each frame by (dx, dy) pixels and scaled by `zoom` about the frame's centre."""
+    import cv2
+
+    height, width = base.shape
+    out = []
+    for i in range(frames):
+        s = zoom ** i
+        cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
+        matrix = np.array([[s, 0.0, cx * (1 - s) + dx * i], [0.0, s, cy * (1 - s) + dy * i]], dtype=np.float64)
+        out.append(cv2.warpAffine(base, matrix, (width, height), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT))
+    return np.stack(out)
+
+
+def _words(clip: np.ndarray) -> set[str]:
+    from depthc.describe import path_buckets
+
+    return {label for label, _, _ in path_buckets(m.flow_series(clip).path, 24.0)}
+
+
+def test_a_push_with_all_its_texture_above_centre_is_a_push_and_not_a_tilt():
+    # The clay finding: boxes on the horizon above a bare ground. The all-pixel reader saw a flat
+    # field voting zero; a texture-masked median saw the boxes' outward flow as a tilt down.
+    clip = _warped(_dots(top=10, bottom=80), 48, zoom=1.006)
+    assert _words(clip) == {"pushes in"}
+
+
+def test_a_pull_with_all_its_texture_above_centre_is_a_pull():
+    clip = _warped(_dots(top=10, bottom=80), 48, zoom=1 / 1.006)
+    assert _words(clip) == {"pulls out"}
+
+
+def test_a_slow_pan_over_a_mostly_flat_field_is_seen():
+    # 0.3 grid px/frame on a field of few blocks: most pixels are flat and vote zero.
+    clip = _warped(_dots(top=70, bottom=110), 48, dx=0.6)
+    assert _words(clip) == {"pans left"}
+
+
+def test_a_pan_and_a_push_at_once_are_both_named():
+    clip = _warped(_dots(), 48, dx=2.0, zoom=1.006)
+    assert _words(clip) == {"pans left, pushes in"}
+
+
+def test_a_zoom_on_full_texture_reads_at_about_its_true_rate():
+    # A real take has texture everywhere. Stretch 0.8% per frame, read at the grid's mean radius.
+    clip = _warped(textured(), 48, zoom=1.008)
+    series = m.flow_series(clip)
+    height, width = GRID
+    ys, xs = np.mgrid[0:height, 0:width]
+    mean_radius = float(np.hypot(xs - (width - 1) / 2, ys - (height - 1) / 2).mean())
+    assert _words(clip) == {"pushes in"}
+    assert float(np.median(series.path[:, 2])) == pytest.approx(0.008 * mean_radius, rel=0.2)
+
+
+def test_a_truck_past_layers_at_different_depths_is_not_a_zoom():
+    # One side of the frame slides faster than the other, which reads as a stretch across. Nothing
+    # stretches up and down, and a zoom has to stretch both.
+    base = _dots(seed=5)
+    width = base.shape[1]
+    clip = np.stack([
+        np.concatenate([np.roll(base, 3 * i, axis=1)[:, :width // 2], np.roll(base, i, axis=1)[:, width // 2:]], axis=1)
+        for i in range(48)
+    ])
+    assert _words(clip) == {"pans left"}
+
+
+def test_a_stretch_most_votes_contradict_is_not_a_zoom(monkeypatch):
+    # Layers interleaved along one band of texture. Each side's median slides at a different speed,
+    # so a stretch reads out of them and leaves most votes explained, but four votes in ten go the
+    # other way. A real zoom has nearly all of them agreeing.
+    x = np.array([-70.0, -60, -50, -40, -30] * 2 + [30.0, 40, 50, 60, 70] * 2)
+    y = np.full(x.size, -30.0)
+    fx = np.array([3.0, 1, 3, 1, 3, 1, 3, 3, 1, 3] + [1.0, 3, 1, 3, 1, 3, 1, 1, 3, 1])
+    fy = np.zeros(x.size)
+    assert m._read_camera(fx, fy, x, y, 80.0, 45.0)[2] == 0.0
+    monkeypatch.setattr(m, "PATH_ZOOM_AGREEMENT", 0.0)
+    assert m._read_camera(fx, fy, x, y, 80.0, 45.0)[2] != 0.0
+
+
+def test_a_figure_filling_one_side_of_a_still_frame_is_not_a_zoom():
+    # A band of world, its left third carried along by a figure. The two sides of the frame
+    # disagree and every vote agrees with the stretch they imply, but most of the picture has not
+    # moved: the fit leaves more unexplained than the plain shift of nothing.
+    base = _dots(top=20, bottom=70, seed=11)
+    third = base.shape[1] // 3
+    frames = []
+    for i in range(48):
+        frame = base.copy()
+        frame[:, :third] = np.roll(base[:, :third], 2 * i, axis=1)
+        frames.append(frame)
+    assert _words(np.stack(frames)) == {"static"}
+
+
+def test_a_crane_stretches_one_axis_and_is_not_a_zoom():
+    # Flow down the frame that grows toward the bottom, and none across: the near ground sliding
+    # faster than the far as the camera rises. Two checks stop this, both axes and the better fit,
+    # so it goes red only with both off.
+    import cv2
+
+    base = _dots(seed=9)
+    height, width = base.shape
+    frames = []
+    for i in range(48):
+        s = 1.012 ** i
+        matrix = np.array([[1.0, 0.0, 0.0], [0.0, s, (height - 1) / 2.0 * (1 - s) + 1.5 * i]], dtype=np.float64)
+        frames.append(cv2.warpAffine(base, matrix, (width, height), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT))
+    assert all("pushes" not in w and "pulls" not in w for w in _words(np.stack(frames)))
+
+
+def _figure_on(field: np.ndarray, frames: int, x0: int, x1: int, grow: float = 1.0) -> np.ndarray:
+    out = []
+    height, width = field.shape
+    for i in range(frames):
+        frame = field.copy()
+        f = i / max(frames - 1, 1)
+        size = int(30 * grow ** i)
+        x, y = int(x0 + (x1 - x0) * f), height // 2
+        frame[max(0, y - size):y + size, max(0, x - size // 2):x + size // 2] = 250
+        out.append(frame)
+    return np.stack(out)
+
+
+def test_a_lone_figure_on_a_bare_field_names_no_camera():
+    # The only texture in the picture is the figure, so its movement cannot be told from the
+    # camera's. Without PATH_MIN_REGIONS this reads as the figure's own pan.
+    clip = _figure_on(np.full((180, 320), 120, dtype=np.uint8), 48, 60, 240)
+    series = m.flow_series(clip)
+    assert not series.moving.any()
+    assert _words(clip) == {"static"}
+
+
+def test_a_lone_figure_walking_at_the_lens_on_a_bare_field_is_no_push():
+    clip = _figure_on(np.full((180, 320), 120, dtype=np.uint8), 48, 160, 160, grow=1.02)
+    assert _words(clip) == {"static"}
+
+
+def test_a_hard_silhouette_does_not_silence_the_soft_world_behind_it():
+    # A bright box's corner is far stronger than blurred texture. Measured against the frame's
+    # strongest corner alone, the texture drops out and the box's crossing reads as a pan.
+    assert _words(moving_clip(72, speed=5)) == {"static"}
+
+
+def test_a_figure_crossing_in_front_of_a_world_names_no_camera():
+    assert _words(_figure_on(_dots(top=20, bottom=160), 48, 40, 280)) == {"static"}
+
+
+def test_a_flat_or_tiny_picture_is_read_as_nothing_and_does_not_fail():
+    flat = np.full((12, 180, 320), 90, dtype=np.uint8)
+    assert not m.flow_series(flat).moving.any()
+    tiny = np.random.default_rng(1).integers(0, 255, (6, 2, 2), dtype=np.uint8)
+    assert m.flow_series(tiny).path.shape == (5, 3)

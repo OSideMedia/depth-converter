@@ -376,11 +376,11 @@ left→right crossing and its mirror image draw the same sparkline and correlate
 **REGIONS** repeats the zero-lag correlation cell by cell on a 3×3 grid, weighted by where the
 ref's energy actually sits, and runs the same check against the horizontally *mirrored*
 generation: when the mirror wins clearly, the report says `MIRRORED — moves the other way`.
-**PATH** names the median-flow camera move on both sides in camera terms (`pans left, pushes
+**PATH** names the camera move on both sides in camera terms (`pans left, pushes
 in`) and, when the ref is a camera-path ref, scores direction agreement as a cosine; on a body
 ref it is named but not judged. Neither moves the suggested verdict: no measured fire has been
 scored on them yet, so they inform your read. `--no-regions` and `--no-camera-path` switch them
-off. The camera reader was checked against a known Blender camera in
+off. The camera reader was scored against a known Blender camera, clay only, in
 [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md).
 
 It ends with a *suggested* verdict (`adhered`, `partial`, `ignored`, `late`) and a ready-to-paste
