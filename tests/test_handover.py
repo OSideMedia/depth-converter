@@ -38,7 +38,7 @@ CONTRADICTIONS = [
 # file is held to every test below like any other surface. No other surface keeps history.
 AMENDED = re.compile(r"\[AMENDED \d{4}-\d{2}-\d{2}")
 ABOUT_THE_HANDOVER = re.compile(r"binding|create-frame|depth\.mp4|handover", re.I)
-SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
+SENTENCE_END = re.compile(r"[.!?](?:\*|\s|$)")  # a bold sentence ends ".**"
 STRUCK_WITHIN = 400  # characters of flattened prose: the length of the longest such sentence
 
 
@@ -273,6 +273,8 @@ def test_an_amendment_about_something_else_strikes_nothing():
     # Nor does the next paragraph's subject count as the note's.
     spill = stale + " [AMENDED 2026-11-01] Corrected a spelling elsewhere. Use binding.txt only in Ark."
     assert live_contradictions(spill, record=True)
+    bold = stale + " **[AMENDED 2026-11-01] TWO-VARIANT LAW.** Paste no binding phrase."
+    assert live_contradictions(bold, record=True)
 
 
 def test_a_note_naming_the_one_file_handover_strikes_the_sentence():
