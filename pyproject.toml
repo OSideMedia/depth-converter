@@ -1,8 +1,10 @@
 [project]
 name = "depthc"
 version = "0.14.0"
-description = "Convert a reference clip into a Seedance-ready depth motion kit"
+description = "Turn a short reference clip into a Seedance-ready depth video and motion kit, locally on an Apple Silicon Mac"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "LICENSES/*"]
 requires-python = ">=3.11"
 dependencies = [
     # torch>=2.5 is a hard floor: MPS autocast (used by VDA's infer_video_depth)
@@ -21,6 +23,16 @@ dependencies = [
 
 # NEVER add xformers (no macOS story; VDA's motion_module.py try/excepts it)
 # NEVER add decord (no reliable arm64 macOS wheels; we own our video I/O)
+
+[project.urls]
+Repository = "https://github.com/OSideMedia/depth-converter"
+Changelog = "https://github.com/OSideMedia/depth-converter/blob/main/CHANGELOG.md"
+
+[tool.uv]
+# ponytail: gradio caps pillow<13 while every fix for 39 pillow advisories is 13.0.0. depthc never
+# imports PIL itself (gradio and torchvision do), and tests/test_ui.py plus a real `depthc ui`
+# launch cover the path it could break. Delete this override when gradio lifts its cap.
+override-dependencies = ["pillow>=13.0.0"]
 
 [project.scripts]
 depthc = "depthc.cli:app"

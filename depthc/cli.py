@@ -461,7 +461,7 @@ def kit(
     variants: bool = typer.Option(
         False,
         "--variants",
-        help="Also write contrast-stretched, inverted, moderation-capped (midgrey) and "
+        help="Also write contrast-stretched, inverted, luma-capped (midgrey) and "
         "edge-map versions of the same beat into variants/, to compare across live-fires. "
         "Upload exactly one per generation.",
     ),
@@ -852,7 +852,7 @@ def result(
     notes: str = typer.Option("", "--notes", help="What actually happened, in your words"),
     generation: Optional[str] = typer.Option(
         None, "--generation",
-        help="The OSIDE generation this fire became — its id (UUID v4) from the generation's row/URL",
+        help="OSIDE only: the generation this fire became — its id (UUID v4) from its row/URL",
     ),
     library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
 ) -> None:
@@ -1014,7 +1014,7 @@ def compare(
     ),
     generation: Optional[str] = typer.Option(
         None, "--generation",
-        help="The OSIDE generation this download IS — its id (UUID v4) from the generation's "
+        help="OSIDE only: the generation this download IS — its id (UUID v4) from the generation's "
              "row/URL; carried into the `depthc result` line that records the fire",
     ),
 ) -> None:
@@ -1155,10 +1155,11 @@ def _record_hint(kit_name: str, comparison, generation_id: str | None) -> str:
     """
     ratio = comparison.ratio if comparison.ratio is not None else "n/a"
     r0 = comparison.r0 if comparison.r0 is not None else "n/a"
-    generation = f" --generation {generation_id}" if generation_id else ""
+    # An OSIDE id is the only evidence of the surface here; without one, nothing is assumed.
+    generation = f" --surface oside --generation {generation_id}" if generation_id else ""
     return (
         f'{DIM}  ./.tools/uv run depthc result "{kit_name}" --verdict {comparison.suggestion} '
-        f'--surface oside --seconds {comparison.overlap_seconds:g}{generation} \\\n'
+        f'--seconds {comparison.overlap_seconds:g}{generation} \\\n'
         f'      --notes "ratio {ratio} r0={r0} — <what you saw>"{OFF}'
     )
 
@@ -1475,7 +1476,7 @@ def stability(
 
 @app.command()
 def ui(
-    port: int = typer.Option(7861, "--port", help="Chosen to avoid OSIDE's dev server on 3000"),
+    port: int = typer.Option(7861, "--port", help="Port on 127.0.0.1"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a tab"),
 ) -> None:
     """Launch the local web UI."""

@@ -550,9 +550,9 @@ def build() -> gr.Blocks:
                             reveal_btn = gr.Button("Reveal in Finder")
                             zip_note = gr.Markdown(
                                 '<span class="depthc-note">Kits land in <b>Outbox/</b>. '
-                                "OSIDE upload uses <b>depth.mp4</b> only — no binding "
-                                "phrase (binding.txt is for other surfaces); the kit's "
-                                "README.txt has the steps.</span>"
+                                "Upload <b>depth.mp4</b> only, as the video reference; "
+                                "the kit's README.txt has the steps for your "
+                                "surface.</span>"
                             )
 
                 video.change(_probe_readout, video, [readout, start, end])

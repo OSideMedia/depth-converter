@@ -308,8 +308,9 @@ def load_envelope(
     age = envelope_age_days(payload, now)
     if age > limit:
         warn(
-            f"{path.name} is {age:.0f} days old (staleAfterDays {limit:g}); refresh it "
-            f"in OSIDE with `{ENVELOPE_REFRESH.format(path=path)}`"
+            f"{path.name} is {age:.0f} days old (staleAfterDays {limit:g}), so Seedance's limits "
+            f"may have moved: check them against the vendor's docs, or with an OSIDE checkout "
+            f"refresh it with `{ENVELOPE_REFRESH.format(path=path)}`"
         )
     return merged
 

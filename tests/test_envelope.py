@@ -154,7 +154,15 @@ def test_a_fresh_export_does_not_warn(tmp_path):
 
 
 def test_the_committed_export_is_within_its_own_window():
-    """If this goes red the fix is in OSIDE: re-run the exporter and commit the file."""
+    """If this goes red the fix is in OSIDE: re-run the exporter and commit the file.
+
+    Only someone with an OSIDE checkout can do that, so it holds there and is a labelled skip
+    everywhere else: a stranger's clone must not go red because of the calendar. Everyone
+    still gets the run-time warning, tested above.
+    """
+    exporter = Path(__file__).resolve().parent.parent.parent / "OSIDE AI FILMMAKER" / "package.json"
+    if not (exporter.is_file() and "export:seedance-envelope" in exporter.read_text(encoding="utf-8")):
+        pytest.skip("no OSIDE checkout beside this repo, so nothing here can refresh the export")
     payload = _payload()
     assert checks.envelope_age_days(payload) <= payload["staleAfterDays"]
 

@@ -28,12 +28,12 @@ if a generation comes back wrong.
       Its checker must report PASS or WARN. **Do not live-fire a FAIL.**
 - [ ] Read the kit's `prompt.txt`. Note its `suggestedOutputSeconds`.
 
-## Identity references — use WILLIAM or ANNA
+## Identity references — use Character A or Character B
 
 Both are already registered and approved in the Ark asset-library likeness system. Use them
 via their `asset://` refs or crowned stills in OSIDE, **not** ad-hoc AI images.
 
-Two reasons: they are pre-cleared against the real-face input filter, and they give a
+Two reasons: they are approved for use on Ark, and they give a
 known-good identity baseline — so any drift observed is attributable to the depth ref's
 weighting rather than to an unfamiliar identity reference.
 
@@ -44,7 +44,7 @@ weighting rather than to an unfamiliar identity reference.
 1. Pick a 5–8 s single-action reference clip. CLIP A, B, or D all qualify.
 2. Upload `depth.mp4` through OSIDE's upload route (→ `references` bucket) or attach it
    directly in Composer.
-3. Add WILLIAM and/or ANNA as identity `@Image` refs.
+3. Add Character A and/or Character B as identity `@Image` refs.
 4. **Do not paste any binding phrase.** [CORRECTED 2026-07-25, from the live run.] An
    *uploaded* video reference has **no binding field** in the Composer — bindings are
    auto-generated only for entity refs (characters, elements), and an upload is serialized
@@ -83,7 +83,7 @@ enforced rather than suggested.
 
 One 4K generation to test whether adherence holds at 4K with a video ref. Supported by the
 standard model on paper, untested, and several× the cost. Upscaling a 720p/1080p master
-(already in Peter's stack) is usually the cheaper path to 4K.
+(already in the owner's stack) is usually the cheaper path to 4K.
 
 ## Also on this checklist — the console doc check
 
@@ -110,14 +110,14 @@ result` (PLAN-SHARED-GENERATION-ID step d); every entry before that date is unke
 
 | Kit | Cast | Res | Cost | Verdict | Energy vs ref | Adherence |
 |---|---|---|---|---|---|---|
-| Prone-crawl_002 | ANNA | 720p | $0.00 | **rejected** | — | blocked at input moderation |
-| Sword-duel_002 | ANNA | 720p | $0.93 | **adhered** | +8% | r = **+0.950** |
-| Sword-duel_002 | ANNA + WILLIAM | 720p | $0.93 | **adhered** | +8% | r = **+0.916** |
+| Prone-crawl_002 | Character A | 720p | $0.00 | **rejected** | — | blocked at input moderation |
+| Sword-duel_002 | Character A | 720p | $0.93 | **adhered** | +8% | r = **+0.950** |
+| Sword-duel_002 | Character A + Character B | 720p | $0.93 | **adhered** | +8% | r = **+0.916** |
 | Sword-duel_002 | + custom location | 720p | $0.93 | **adhered** | +8% | r = **+0.926** |
-| Sword-duel_002 | ANNA + WILLIAM | **1080p** | $2.29 | **partial** | **+32%** | r = +0.721 |
-| Sword-duel_002 | ANNA + WILLIAM | **1080p** | $2.29 | **ignored** | **+31%** | r = **−0.056** |
-| Sword-duel_002 | ANNA + WILLIAM | **4K** | — | **adhered** | +6% | r = +0.747 |
-| Sword-duel_HD_001 | ANNA + WILLIAM | **1080p** (1080p ref) | $2.29 | **ignored** | **+22%** | r = +0.107 |
+| Sword-duel_002 | Character A + Character B | **1080p** | $2.29 | **partial** | **+32%** | r = +0.721 |
+| Sword-duel_002 | Character A + Character B | **1080p** | $2.29 | **ignored** | **+31%** | r = **−0.056** |
+| Sword-duel_002 | Character A + Character B | **4K** | — | **adhered** | +6% | r = +0.747 |
+| Sword-duel_HD_001 | Character A + Character B | **1080p** (1080p ref) | $2.29 | **ignored** | **+22%** | r = +0.107 |
 
 Total spend ~$11.00. Per-kit detail lives in each kit's `result.json`.
 
@@ -327,18 +327,19 @@ opposite of the "started very late" complaint that motivated the motion gate.
 - **Cost is roughly 3× the pre-run estimate**: $0.93 for 5 s at 720p with a video reference,
   against the $0.10–0.40 guessed above for 480p. Budget accordingly.
 
-### The moderation boundary — real, and narrower than feared
+### The one content refusal
 
 `Prone-crawl_002` was refused before generation: `[content-policy] InputVideoSensitiveContent
 Detected`. The sword duel, from the same tool and the same pipeline, sailed through twice.
 
-So **human depth maps are not categorically blocked.** The likely trigger is specific: depth
+So **human depth maps are not categorically refused.** The likely reason is specific: depth
 strips clothing, so every figure is a smooth featureless body-shape, and that clip's last
 2.5 s is two of them prone, overlapping and blown to near-white filling the frame. Upright,
 separated, clothed-reading figures pass.
 
 Working constraint until more data: **avoid prone, intertwined, or close-to-camera bodies.**
-A rejection costs nothing, so probing the boundary is cheap.
+The refused kit was not billed. A refusal is the provider's call; nothing here tries to get
+around one.
 
 ### One failure that was not ours
 

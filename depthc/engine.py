@@ -80,7 +80,7 @@ def load_model(device: str | None = None) -> tuple[torch.nn.Module, str]:
     from video_depth_anything.video_depth import VideoDepthAnything
 
     model = VideoDepthAnything(**MODEL_CONFIG)
-    model.load_state_dict(torch.load(checkpoint, map_location="cpu"), strict=True)
+    model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True), strict=True)
     model = model.to(device).eval()
     _MODEL_CACHE[device] = model
     return model, device

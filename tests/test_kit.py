@@ -523,14 +523,14 @@ def test_kit_readme_names_the_one_file_to_upload():
 
     It was two until the 2026-07-25 live run: an uploaded video reference has no binding
     field in OSIDE, and the compiler writes its own @Video line, so pasting binding.txt on
-    top was two instructions for one reference. The README must not send Peter looking for
+    top was two instructions for one reference. The README must not send the operator looking for
     a field that isn't there.
     """
     report = check(duration=5.0, width=1280, height=536, fps=24.0,
                    size_bytes=800_000, still_has_real_faces=True)
     text = kitlib.render_kit_readme(_manifest(), report, has_preview=True)
 
-    assert "TAKE THIS ONE FILE TO OSIDE" in text
+    assert "TAKE THIS ONE FILE TO SEEDANCE" in text
     assert "depth.mp4    upload as the VIDEO reference" in text
     assert "WRITE NOTHING ABOUT THE MOTION" in text
     assert text.index("TAKE THIS ONE FILE") < text.index("EVERYTHING ELSE")

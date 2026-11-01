@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://oside.media/schemas/depthc-kit-1.json",
+  "$id": "https://raw.githubusercontent.com/OSideMedia/depth-converter/main/depthc/kit_schema.json",
   "title": "Depth Converter kit manifest",
   "$comment": "schemaVersion stays 1 across ADDITIVE changes (audit DC-6 ruling, 2026-09-06): a new key is added to `required` for kits built from that day on, and every reader tolerates its absence on older manifests. A key that changes meaning or goes away bumps the version. Additive history: 2026-09-06 depth.sha256 (the content key of the fire -> generation join; PLAN-SHARED-GENERATION-ID step d); 2026-09-15 binding.sha256 (binds the kit's WORDS to its clip, so an import door can refuse a folder whose halves came from different builds).",
   "type": "object",

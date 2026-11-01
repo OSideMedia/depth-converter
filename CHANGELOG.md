@@ -5,6 +5,23 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **Ready for a public repo.** MIT `LICENSE`, `CONTRIBUTING.md` and `SECURITY.md`; a README that
+  says what the tool does and whether you need OSIDE (no) before it says anything else; name and
+  provider wording cleaned from the tracked docs. `tests/test_public_repo.py` holds the badges, the
+  order of the README and the hardening below.
+- **`scripts/setup.sh` worked only by accident on a clean machine.** `UV_UNMANAGED_INSTALL` sat on
+  `curl`, not on the installer, so a machine with no `.tools/uv` got uv written to the home folder and
+  then a FATAL. It now reaches the installer, the uv version is pinned, the checkpoint is checked
+  against its SHA-256 before it lands, and the script stops early on anything but Apple Silicon.
+- **`torch.load` runs with `weights_only=True`.** Nothing in `pyproject.toml` guaranteed the safe default.
+- **Dependencies with known advisories bumped**: brotli, certifi, filelock, setuptools and Pillow.
+  Pillow needs an override past gradio's `pillow<13` cap; depthc never imports it directly.
+- **The kit README is written for any Seedance surface**, with OSIDE's steps in their own block. A
+  `compare` run with no `--generation` no longer prints `--surface oside` in its paste line.
+- **The stale-envelope warning no longer assumes OSIDE**, and the age test only holds where someone
+  can act on it, so a clone does not go red by the calendar.
+- **`MODERATION_CEILING` is `MIDGREY_CEILING`.** Same value. The name described a hope, not the code.
+
 - **`depthc stability <take>`** — boil, flicker and grain on an RGB take, for ranking takes
   of the same shot and finding the bad second. Boil is the band-passed, exposure-matched
   error after a forward-backward flow warp at 480 px, so film grain mostly cancels;
@@ -156,7 +173,7 @@ otherwise see.
   the function exists to prevent. The yuv420p planes are now built in numpy, so no scaler
   sits in the encode path on any ffmpeg version. Found by CI on its first run, by no test on
   this Mac (ffmpeg 9.0.1).
-- **The per-kit text records are tracked** (audit DC-4, Peter's call, its own commit so it
+- **The per-kit text records are tracked** (audit DC-4, the owner's call, its own commit so it
   can be reverted alone): `kit.json`, `result.json` and `Outbox/INDEX.txt` are in git while
   every byte of media stays out. `Outbox/*` wholesale had already swallowed every 2026-07-25
   kit's `result.json` — paid evidence, gone.
