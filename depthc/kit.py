@@ -606,7 +606,7 @@ def read_manifest(kit_dir: Path) -> dict | None:
     """The kit's manifest, or None when there is no readable kit.json there."""
     try:
         data = json.loads((Path(kit_dir) / KIT_MANIFEST).read_text())
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # ValueError holds bad JSON and bytes that are not text
         return None
     return data if isinstance(data, dict) else None
 
@@ -752,13 +752,15 @@ def read_results(kit_dir: Path) -> dict:
             data = json.loads(path.read_text())
             if isinstance(data, dict) and isinstance(data.get("fires"), list):
                 return data
-        except (json.JSONDecodeError, OSError):
+        except (ValueError, OSError):  # ValueError holds bad JSON and bytes that are not text
             pass
     return {"schemaVersion": RESULT_SCHEMA_VERSION, "kitName": Path(kit_dir).name, "fires": []}
 
 
 def _refuse_a_recorded_generation(kit_dir: Path, generation: str) -> None:
     """Raise if a kit in this library already holds this generation. A broken log holds nothing."""
+    # ponytail: scan then write, no lock. Two `depthc result` runs at the same instant on sibling
+    # kits could both pass. A person types these; a lock file if this ever runs unattended.
     kit_dir = Path(kit_dir)
     siblings = sorted(p.parent for p in kit_dir.parent.glob("*/result.json") if p.parent != kit_dir)
     for holder in (kit_dir, *siblings):
@@ -979,7 +981,7 @@ def library_list(root: Path | None = None, tag: str | None = None) -> list[Libra
     for manifest_path in sorted(root.glob(f"*/{KIT_MANIFEST}")):
         try:
             manifest = json.loads(manifest_path.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (ValueError, OSError):  # ValueError holds bad JSON and bytes that are not text
             continue
         if not isinstance(manifest, dict):  # valid JSON and still not a manifest: skipped the same way
             continue

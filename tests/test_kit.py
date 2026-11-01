@@ -474,6 +474,15 @@ def test_library_list_skips_malformed_manifests(tmp_path):
     assert [e.name for e in entries] == ["Good_001"]
 
 
+def test_a_manifest_that_is_not_text_is_skipped_like_any_broken_one(tmp_path):
+    _write_kit(tmp_path, "Good_001", ["ok"])
+    bad = tmp_path / "Bad_001"
+    bad.mkdir()
+    (bad / "kit.json").write_bytes(b"\xff\xfe not text")
+    assert [e.name for e in kitlib.library_list(tmp_path)] == ["Good_001"]
+    assert kitlib.read_manifest(bad) is None
+
+
 def test_library_list_ignores_folders_without_a_manifest(tmp_path):
     _write_kit(tmp_path, "Good_001", ["ok"])
     (tmp_path / "random_folder").mkdir()
@@ -1234,6 +1243,8 @@ def test_a_broken_log_on_a_sibling_kit_never_stops_a_fire_being_recorded(tmp_pat
     (sibling / "result.json").write_text("{not json")
     odd = _kit_on_disk(tmp_path, "Sword-duel_003")
     (odd / "result.json").write_text(json.dumps({"fires": ["not a fire", {"generationId": 7}]}))
+    binary = _kit_on_disk(tmp_path, "Sword-duel_004")
+    (binary / "result.json").write_bytes(b"\xff\xfe not text")
     log = kitlib.record_result(_kit_on_disk(tmp_path), verdict="adhered", generation_id=GEN)
     assert log["fires"][0]["generationId"] == GEN
 
