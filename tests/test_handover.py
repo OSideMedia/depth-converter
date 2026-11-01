@@ -33,15 +33,25 @@ CONTRADICTIONS = [
     re.compile(r"skip the create-frame step", re.I),
 ]
 # PLAN.md is a record: it keeps a superseded sentence and follows it with a dated note, so a hit
-# struck that way is history, not an instruction. Anything further off is still live. The note has
-# to carry the law as well, because the file is held to every test below like any other surface.
+# struck that way is history, not an instruction. Anything further off is still live, and so is a
+# hit followed by a note about something else. The note has to carry the law as well, because the
+# file is held to every test below like any other surface. No other surface keeps history.
 AMENDED = re.compile(r"\[AMENDED \d{4}-\d{2}-\d{2}")
+ABOUT_THE_HANDOVER = re.compile(r"binding|create-frame", re.I)
 STRUCK_WITHIN = 400  # characters of flattened prose: the length of the longest such sentence
+NOTE_NAMES_IT_WITHIN = 200  # characters from the date: each real note names its subject early
 
 
-def live_contradictions(text: str) -> list[str]:
+def _struck(text: str, end: int) -> bool:
+    return any(
+        ABOUT_THE_HANDOVER.search(text, note.end(), note.end() + NOTE_NAMES_IT_WITHIN)
+        for note in AMENDED.finditer(text, end, end + STRUCK_WITHIN)
+    )
+
+
+def live_contradictions(text: str, *, record: bool = False) -> list[str]:
     hits = (m for pattern in CONTRADICTIONS for m in pattern.finditer(text))
-    return [m.group(0) for m in hits if not AMENDED.search(text, m.end(), m.end() + STRUCK_WITHIN)]
+    return [m.group(0) for m in hits if not (record and _struck(text, m.end()))]
 
 
 # The truth, in the words every surface must carry.
@@ -87,7 +97,7 @@ def surfaces(tmp_path: Path) -> dict[str, str]:
 
 def test_no_surface_tells_the_operator_to_paste_binding_txt_into_oside(tmp_path):
     for name, text in surfaces(tmp_path).items():
-        assert live_contradictions(text) == [], name
+        assert live_contradictions(text, record=name == "PLAN.md") == [], name
 
 
 def test_every_surface_says_depth_mp4_is_the_whole_handover(tmp_path):
@@ -246,13 +256,23 @@ def test_plans_own_phrasings_trip_the_gate_unless_a_dated_note_strikes_them():
         "**Variant A — FOR OSIDE COMPOSER (binding phrase only).** A bare noun phrase",
         "paste the kit's **Variant A binding phrase** into the ref's binding field",
     ]
-    note = " > **[AMENDED 2026-09-16] That is superseded.**"
+    note = " > **[AMENDED 2026-09-16] Superseded: paste no binding phrase in OSIDE.**"
     for sentence in old_plan:
-        assert live_contradictions(sentence), sentence
-        assert live_contradictions(sentence + note) == [], sentence
+        assert live_contradictions(sentence, record=True), sentence
+        assert live_contradictions(sentence + note, record=True) == [], sentence
         # too far away to be striking this sentence, and an undated note strikes nothing
-        assert live_contradictions(sentence + " x" * STRUCK_WITHIN + note), sentence
-        assert live_contradictions(sentence + " > **[AMENDED] That is superseded.**"), sentence
+        assert live_contradictions(sentence + " x" * STRUCK_WITHIN + note, record=True), sentence
+        assert live_contradictions(sentence + " > **[AMENDED] Paste no binding phrase.**", record=True), sentence
+
+
+def test_an_amendment_about_something_else_strikes_nothing():
+    stale = "Take exactly two files to OSIDE."
+    assert live_contradictions(stale + " [AMENDED 2026-11-01] Corrected a spelling elsewhere.", record=True)
+
+
+def test_only_the_record_keeps_a_struck_sentence():
+    # A note on a README sentence is not history. That file has to say the current thing.
+    assert live_contradictions("Take exactly two files to OSIDE. [AMENDED 2026-11-01] No binding phrase.")
 
 
 def test_plan_md_before_its_amendment_is_what_the_gate_was_missing():
@@ -261,6 +281,6 @@ def test_plan_md_before_its_amendment_is_what_the_gate_was_missing():
     shown = subprocess.run(["git", "show", f"{PRE_AMENDMENT}:PLAN.md"], cwd=ROOT, capture_output=True, text=True)
     if shown.returncode != 0:
         pytest.skip(f"{PRE_AMENDMENT} is not in this clone's history (a shallow checkout)")
-    hits = live_contradictions(_flat(shown.stdout))
+    hits = live_contradictions(_flat(shown.stdout), record=True)
     assert any("binding block" in hit for hit in hits), hits
     assert any("create-frame" in hit for hit in hits), hits
