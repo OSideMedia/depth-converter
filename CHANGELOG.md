@@ -18,6 +18,9 @@ the code's history. Started 2026-09-06.
 - **A `kit.json` that is valid JSON but not an object is skipped** rather than crashing the listing.
 - **The kit's 2.5 advice catches up with the recorded fire:** 1080p has one good result on a gentle
   reference, and a hard one is unfired.
+- **The handover gate now reads `PLAN.md`,** in the phrasings that file actually uses. It keeps a
+  superseded sentence with a dated `[AMENDED]` note after it, so a hit struck that way is history and
+  any other hit is live. That found two more stale instructions, now amended.
 - **Ready for a public repo.** MIT `LICENSE`, `CONTRIBUTING.md` and `SECURITY.md`; a README that
   says what the tool does and whether you need OSIDE (no) before it says anything else; name and
   provider wording cleaned from the tracked docs. `tests/test_public_repo.py` holds the badges, the

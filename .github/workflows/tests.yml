@@ -32,6 +32,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tests/test_handover.py reads PLAN.md from before its amendment, out of history
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: false

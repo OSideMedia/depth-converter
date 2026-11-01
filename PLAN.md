@@ -263,7 +263,9 @@ kit), best-in-class temporal quality, zero Electron weight.
    > 2026-07-25): a hand-uploaded video ref has no binding field there and the compiler
    > writes its own line, and OSIDE's **Import kit** door — merged 2026-09-15 — fills the
    > field from `binding.txt` itself, hash-checked. `prompt.txt`'s binding block is
-   > Variant B, for the Ark console. The handover is ONE file: `depth.mp4`.
+   > Variant B, for the Ark console.
+   > `binding.txt` is for surfaces that HAVE a per-reference binding field.
+   > The handover is ONE file: `depth.mp4`. That is the whole handover.
 5. **Fire** — generate. (The kit's still is an `@Image` look ref, never first_frame.)
 **Resolution guidance (also for README):** the depth ref itself is always ≤720p-class —
 it is a motion guide, not picture, and Seedance's ref-input window caps it anyway.
@@ -302,6 +304,10 @@ So `prompt.txt` carries **two clearly labeled sections**:
 **Variant A — FOR OSIDE COMPOSER (binding phrase only).** A bare noun phrase to paste
 into the video ref's binding field; the compiler wraps it into its own block and does the
 `@Video N` numbering (matches the `motionOnlyBinding()` house style):
+
+> **[AMENDED 2026-11-01] Not for a hand upload in OSIDE,** which has no binding field for a
+> video ref; OSIDE's Import kit door fills the field itself. See the attach step above.
+
 ```
 the depth motion blueprint (grayscale depth map of a real performance) — follow its body
 motion, choreography, camera path, and timing exactly, beat for beat; it carries structure
@@ -652,6 +658,10 @@ technique/weighting, never the adapter:
    characters, §1a), a known-good identity baseline;
    paste the kit's **Variant A binding phrase** into the ref's binding field (never the
    standalone block — the Composer compiles its own ACTIVE REFERENCES).
+
+   > **[AMENDED 2026-11-01] Superseded by the 2026-07-25 live run:** paste no binding phrase
+   > in OSIDE. See the attach step above.
+
 3. Generate at 480p first (with-video billing is the cheaper token rate; expect roughly
    $0.10–$0.40 at 480p/5 s based on the app's existing ledger scale). Evaluate: does
    motion/camera/timing track the source? **Set output duration ≈ the ref duration
