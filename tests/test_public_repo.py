@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -26,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 SETUP = (ROOT / "scripts" / "setup.sh").read_text(encoding="utf-8")
+LAUNCHERS = (ROOT / "scripts" / "build_launchers.sh").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------- the badges
@@ -196,3 +199,124 @@ def test_the_schema_ids_point_at_files_in_this_repo():
         schema_id = json.loads((ROOT / "depthc" / name).read_text(encoding="utf-8"))["$id"]
         assert schema_id.startswith(base), schema_id
         assert (ROOT / schema_id.removeprefix(base)).is_file(), schema_id
+
+
+# ---------------------------------------------------------------------- setup and the lock
+
+def test_setup_stops_on_a_macos_the_locked_torch_has_no_wheel_for():
+    lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+    wheels = re.findall(r"torch-[0-9.]+-[^\s\"]*macosx_(\d+)_0_arm64\.whl", lock)
+    assert wheels, "no torch wheels for this platform in the lock: this check read nothing"
+    oldest = min(int(major) for major in wheels)
+    assert f'-lt {oldest} ]' in SETUP
+    assert SETUP.index("sw_vers -productVersion") < SETUP.index("install.sh")
+    assert f"macOS {oldest} or newer" in README
+    assert f"<string>{oldest}.0</string>" in LAUNCHERS
+
+
+def test_setup_puts_no_python_on_the_path():
+    assert re.search(r'python install --no-bin cpython-', SETUP)
+    assert not re.search(r'python install cpython-', SETUP)
+
+
+# ---------------------------------------------------------------------- the launchers
+
+def _build_launchers(root: Path, apps: Path, home: Path, port: str = "7861") -> subprocess.CompletedProcess:
+    (root / "scripts").mkdir(parents=True)
+    shutil.copy(ROOT / "scripts" / "build_launchers.sh", root / "scripts" / "build_launchers.sh")
+    return subprocess.run(
+        ["bash", str(root / "scripts" / "build_launchers.sh"), str(apps)],
+        capture_output=True, text=True, timeout=30,
+        env={**os.environ, "HOME": str(home), "DEPTHC_PORT": port},
+    )
+
+
+def test_a_project_folder_name_is_data_in_the_launcher(tmp_path):
+    root = tmp_path / "repo$(touch PWNED)"
+    built = _build_launchers(root, tmp_path, tmp_path)
+    assert built.returncode == 0, built.stderr
+    script = (tmp_path / "Depth Converter.app" / "Contents" / "MacOS" / "run").read_text()
+    assignment = next(line for line in script.splitlines() if line.startswith("ROOT="))
+    read_back = subprocess.run(
+        ["bash", "-c", f'{assignment}\nprintf %s "$ROOT"'], cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert read_back.stdout == str(root)
+    assert not (tmp_path / "PWNED").exists()
+
+
+def test_a_port_that_is_not_a_number_stops_the_build(tmp_path):
+    built = _build_launchers(tmp_path / "repo", tmp_path, tmp_path, port="1;touch PWNED")
+    assert built.returncode == 1
+    assert not (tmp_path / "Depth Converter.app").exists()
+
+
+def _a_process(argv0: str) -> subprocess.Popen:
+    # exec -a sets what `ps -o command=` shows, which is what the Stop app reads
+    return subprocess.Popen(["bash", "-c", f'exec -a "{argv0}" sleep 60'])
+
+
+def _run_stop_with_pidfile_naming(process: subprocess.Popen, tmp_path: Path) -> None:
+    built = _build_launchers(tmp_path / "repo", tmp_path, tmp_path, port="47911")
+    assert built.returncode == 0, built.stderr
+    (tmp_path / ".depthc-ui.pid").write_text(str(process.pid))
+    subprocess.run(
+        ["bash", str(tmp_path / "Depth Stop.app" / "Contents" / "MacOS" / "run")],
+        check=True, timeout=30, env={**os.environ, "HOME": str(tmp_path)},
+    )
+    assert not (tmp_path / ".depthc-ui.pid").exists()
+
+
+def test_stop_leaves_a_process_that_is_not_ours(tmp_path):
+    other = _a_process("someone-elses-server")
+    try:
+        _run_stop_with_pidfile_naming(other, tmp_path)
+        assert other.poll() is None, "Stop killed a process that was not the app"
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_stop_stops_ours(tmp_path):
+    ours = _a_process("depthc ui --port 47911")
+    try:
+        _run_stop_with_pidfile_naming(ours, tmp_path)
+        assert ours.wait(timeout=10) is not None
+    finally:
+        ours.kill()
+        ours.wait()
+
+
+def test_stop_and_start_look_only_at_listeners():
+    assert LAUNCHERS.count("-sTCP:LISTEN") == 3
+    assert "lsof -ti :" not in LAUNCHERS  # that form also matches a browser tab using the port
+
+
+# ---------------------------------------------------------------------- what gets pasted
+
+def test_the_paste_lines_quote_what_they_echo():
+    comparison = SimpleNamespace(ratio=1.05, r0=0.9, suggestion="adhered", overlap_seconds=5.0)
+    hint = cli._record_hint("kit$(touch PWNED)", comparison, None)
+    assert "'kit$(touch PWNED)'" in hint
+    source = (ROOT / "depthc" / "cli.py").read_text(encoding="utf-8")
+    assert "depthc kit {shlex.quote(str(clip))}" in source
+
+
+# ---------------------------------------------------------------------- the words
+
+def test_the_2_5_advice_does_not_call_a_measured_tier_unmeasured():
+    source = (ROOT / "depthc" / "kit.py").read_text(encoding="utf-8") \
+        + (ROOT / "depthc" / "templates" / "seedance-2.5.txt").read_text(encoding="utf-8")
+    assert "UNMEASURED" not in source
+
+
+def test_the_readme_does_not_promise_every_ref_is_720p():
+    assert "always ≤720p" not in README
+    assert "cannot fail if the code is" not in README
+
+
+def test_no_tracked_doc_carries_a_ticket_id_a_reader_cannot_look_up():
+    ticket = re.compile(r"\bow-[0-9a-f]{6}\b")
+    assert ticket.search("(ow-4ccd14)")
+    readers = [ROOT / "README.md", ROOT / "CHANGELOG.md", *sorted((ROOT / "DOCS").glob("*.md")),
+               *sorted((ROOT / "depthc").glob("*.py"))]
+    assert [p.name for p in readers if ticket.search(p.read_text(encoding="utf-8"))] == []

@@ -187,7 +187,7 @@ survived. The kit was nearly deleted as a superseded `_001` draft before anyone 
 the sole record of a paid fire. The lesson the repo already paid for once: a fire is not
 recorded until it is in this file. `result.json` is the instrument's output, not the archive.
 
-**AND THE MEDIA DID NOT SURVIVE (ow-4ccd14).** "Nearly deleted" is true of the RECORD only.
+**AND THE MEDIA DID NOT SURVIVE.** "Nearly deleted" is true of the RECORD only.
 The delete took the folder; the restore returned `kit.json` and `result.json` — the two files
 `.gitignore` was amended to track on 2026-09-06 — and nothing else, because Outbox media is
 never tracked. **`Sha256Proof_001`'s `depth.mp4`, `source.mp4`, `still.png`, `sheet.png`,
@@ -337,9 +337,9 @@ strips clothing, so every figure is a smooth featureless body-shape, and that cl
 2.5 s is two of them prone, overlapping and blown to near-white filling the frame. Upright,
 separated, clothed-reading figures pass.
 
-Working constraint until more data: **avoid prone, intertwined, or close-to-camera bodies.**
-The refused kit was not billed. A refusal is the provider's call; nothing here tries to get
-around one.
+Until there is more data, expect the same answer on a clip like that one, and do not build a
+shot on it. The refused kit was not billed. A refusal is the provider's call; nothing here tries
+to get around one.
 
 ### One failure that was not ours
 

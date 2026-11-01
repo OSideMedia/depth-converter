@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+
 import numpy as np
 import pytest
 
@@ -312,3 +314,23 @@ def test_keep_fps_rejects_a_vfr_artifact_rate(clip_3s):
     info.fps = 1000.0
     with pytest.raises(VideoIOError):
         resolve_fps(info, "keep")
+
+
+# ------------------------------------------------------------------ names that are not ffmpeg syntax
+
+def test_a_file_named_like_an_option_is_read_as_a_file(clip_tiny, tmp_path, monkeypatch):
+    shutil.copy(clip_tiny, tmp_path / "-clip.mp4")
+    monkeypatch.chdir(tmp_path)
+    info = probe("-clip.mp4")
+    assert (info.width, info.height) == (140, 140)
+    assert read_frames(info).shape[0] > 0
+
+
+def test_a_file_named_like_a_protocol_is_read_as_itself(clip_tiny, clip_3s, tmp_path, monkeypatch):
+    # Beside it, the file ffmpeg would open instead if it read the name as `file:` + a path.
+    shutil.copy(clip_tiny, tmp_path / "file:clip.mp4")
+    shutil.copy(clip_3s, tmp_path / "clip.mp4")
+    monkeypatch.chdir(tmp_path)
+    info = probe("file:clip.mp4")
+    assert (info.width, info.height) == (140, 140)
+    assert read_frames(info).shape[1:3] == (140, 140)

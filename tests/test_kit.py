@@ -310,7 +310,8 @@ def test_the_2_5_template_does_not_present_the_0_of_3_as_its_own_result():
     """
     text = _render(dialect="seedance-2.5")
     assert "DOES NOT TRANSFER" in text
-    assert "UNMEASURED, not condemned" in text
+    assert "a hard reference is unfired" in text
+    assert "UNMEASURED" not in text  # the 2026-08-24 fire measured it, once
 
 
 def test_prompt_carries_the_suggested_output_length():
@@ -627,8 +628,8 @@ def test_index_creates_the_outbox_if_missing(tmp_path):
 
 def test_index_marks_a_kit_whose_media_is_gone(tmp_path):
     """A kit folder can outlive its media: kit.json and result.json are tracked, depth.mp4
-    never is, so a restore brings back the record alone (Sha256Proof_001, 2026-09-15,
-    ow-4ccd14). Every other line of INDEX.txt says "open its README.txt" and "upload
+    never is, so a restore brings back the record alone (Sha256Proof_001,
+    2026-09-15). Every other line of INDEX.txt says "open its README.txt" and "upload
     depth.mp4" — for a husk both files are gone, so the entry has to say so."""
     _write_kit(tmp_path, "Alive_001", ["x"])
     _write_kit(tmp_path, "Husk_001", ["y"], with_media=False)
@@ -1112,3 +1113,33 @@ def test_every_tracked_result_json_validates():
     schema = json.loads(RESULT_SCHEMA_PATH.read_text())
     for rel in tracked:
         jsonschema.validate(json.loads((root / rel).read_text()), schema)
+
+
+# ------------------------------------------------------------------ a kit from someone else
+
+def test_a_symlinked_result_json_is_replaced_and_its_target_left_alone(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    precious = tmp_path / "my-document.txt"
+    precious.write_text("mine")
+    (kit_dir / "result.json").symlink_to(precious)
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert precious.read_text() == "mine"
+    assert not (kit_dir / "result.json").is_symlink()
+    assert json.loads((kit_dir / "result.json").read_text())["fires"][0]["verdict"] == "adhered"
+
+
+def test_a_replaced_file_is_readable_and_leaves_no_temp_file(tmp_path):
+    target = tmp_path / "result.json"
+    kitlib.write_replacing(target, "{}\n")
+    assert target.read_text() == "{}\n"
+    assert target.stat().st_mode & 0o777 == 0o644
+    assert [p.name for p in tmp_path.iterdir()] == ["result.json"]
+
+
+def test_a_manifest_that_is_not_an_object_is_skipped_everywhere(tmp_path):
+    good = _kit_on_disk(tmp_path, "Good_001")
+    bad = tmp_path / "Bad_001"
+    bad.mkdir()
+    (bad / kitlib.KIT_MANIFEST).write_text("[]")
+    assert [e.path for e in kitlib.library_list(tmp_path)] == [good]
+    assert kitlib.write_outbox_index(tmp_path).is_file()

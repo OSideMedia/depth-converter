@@ -61,8 +61,8 @@ upload is the same anywhere, but no fire recorded in this repo used Variant B di
 
 ## Requirements
 
-- **An Apple Silicon Mac.** `setup.sh` stops on anything else. The model runs on the GPU
-  through PyTorch's MPS backend.
+- **An Apple Silicon Mac on macOS 14 or newer.** `setup.sh` stops on anything else. The model runs
+  on the GPU through PyTorch's MPS backend.
 - **ffmpeg and ffprobe on your `PATH`.** Setup does not install them: `brew install ffmpeg`.
 - **git, curl and a network connection for setup,** which downloads about 1.1 GB. After that,
   everything runs locally.
@@ -81,8 +81,9 @@ bash scripts/setup.sh
 
 Everything lands inside the project folder: a pinned `uv` in `.tools/`, Python and the
 locked dependencies in `.venv/`, Video Depth Anything at a pinned commit in `vendor/`, and the
-116 MB checkpoint in `checkpoints/`, verified against its SHA-256. Deleting the folder undoes
-it, apart from the Python build `uv` keeps in its own cache. Always run through `./.tools/uv`.
+116 MB checkpoint in `checkpoints/`, verified against its SHA-256. Deleting the folder undoes it,
+apart from the Python build and download cache `uv` keeps in your home folder (`~/.local/share/uv`
+and `~/.cache/uv`). Always run through `./.tools/uv`.
 
 ## Quick start
 
@@ -115,10 +116,8 @@ of a clip rather than the clip itself:
 - **strips appearance**, so no identity, colour, texture or style bleeds from the source;
 - **keeps what pose skeletons throw away**: camera path, props and scene geometry survive
   (a sword, a market stall and a crane move all live in depth);
-- **carries no face.** Seedance rejects photographic faces in references, so raw footage of
-  people often cannot be used as a reference at all. A depth video holds shape and motion
-  with no face or identity in it. (That raw footage is often refused comes from community
-  reports, not vendor documentation.)
+- **carries no face.** A depth video holds shape and motion with no face or identity in it, so
+  nobody's likeness rides into the generation.
 
 ## Usage: the inbox loop
 
@@ -291,8 +290,9 @@ A FAIL exits non-zero, so `depthc kit` is safe to use in a script. Limits are pe
 together. On 2.0 a reference can run to 15 s, on 2.5 to 30 s, and both take up to 200 MB
 (limits as exported 2026-10-26).
 
-Duration, file size, resolution and fps are shape checks that cannot fail if the code is
-right. The findings that actually predict a bad generation are about **motion**:
+Duration, file size, resolution and fps are shape checks, and a kit rarely trips them (a very wide
+source at `--resolution 480p` can fall under the pixel floor). The findings that actually predict a
+bad generation are about **motion**:
 
 | finding | what it catches |
 |---|---|
@@ -486,9 +486,10 @@ In OSIDE, a fire also joins the generation it became, on two keys:
 
 ## Resolution
 
-The depth ref is always ≤720p-class: it is a motion guide, not picture, and Seedance's
-reference-input window caps it anyway. Output resolution is a separate choice, and the rule is per
-model. The kit's `README.txt` prints the right one.
+The depth ref defaults to 720p-class or below: it is a motion guide, not picture.
+`--resolution source` keeps a larger source as it is, up to the pixel ceiling the checker enforces.
+Output resolution is a separate choice, and the rule is per model. The kit's `README.txt` prints
+the right one.
 
 **On Seedance 2.0: test at 480p, confirm at 720p, master at 720p or 4K. Never 1080p.** That is the
 one hard operational rule the 2026-07-25 runs produced, and it cost $6.87 to find:

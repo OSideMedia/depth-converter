@@ -5,7 +5,8 @@
 # rather than relying on the machine-wide uv. Until 2026-08-24 the Homebrew uv was
 # x86_64 and could not resolve PyTorch's arm64-only macOS wheels; Homebrew is native
 # arm64 now (/opt/homebrew) and the local pin stands on reproducibility alone — see
-# CLAUDE.md "Always use the project-local uv". Nothing outside this folder is modified.
+# CLAUDE.md "Always use the project-local uv". Everything lands in this folder except what uv
+# keeps for itself in the home folder: the Python build and its download cache.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,6 +34,11 @@ if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "FATAL: this needs an Apple Silicon Mac in a native shell (found $(uname -s) $(uname -m))." >&2
   exit 1
 fi
+# The locked torch has wheels for macOS 14 and newer only, and no source build to fall back on.
+if [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 14 ]; then
+  echo "FATAL: this needs macOS 14 or newer (found $(sw_vers -productVersion))." >&2
+  exit 1
+fi
 for tool in ffmpeg ffprobe; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "NOTE: $tool is not on PATH. depthc needs it to run: brew install ffmpeg" >&2
@@ -55,7 +61,8 @@ echo "uv: $("$UV" --version) ($(file -b "$UV" | sed 's/,.*//'))"
 
 # --------------------------------------------------------- 2. arm64 CPython + deps
 say "Python environment (arm64 CPython 3.12)"
-"$UV" python install cpython-3.12.13-macos-aarch64-none
+# --no-bin: the project only reaches this Python through .venv, so nothing goes on the PATH.
+"$UV" python install --no-bin cpython-3.12.13-macos-aarch64-none
 "$UV" sync --locked
 
 # ------------------------------------------------------------- 3. vendor VDA
