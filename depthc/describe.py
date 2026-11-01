@@ -9,8 +9,9 @@ description in prompt vocabulary — "camera pans left then pushes in; subject e
 frame-left and travels to frame-right, arriving late; strong, sustained" — so the check
 becomes: read the prompt, read the description, do they say the same thing?
 
-EVERYTHING HERE IS UNCALIBRATED. The labels are the same measurements compare reports,
-read as words. Nothing votes; there is no verdict. It measures WHAT MOVED and WHICH WAY,
+EVERYTHING HERE IS UNCALIBRATED against a fire. The labels are the same measurements compare
+reports, read as words; the camera words alone have a clay score
+(DOCS/CAMERA-PATH-CALIBRATION.md). Nothing votes; there is no verdict. It measures WHAT MOVED and WHICH WAY,
 in depth space (the channel Seedance actually reads a ref through), on the same analysis
 grid as a kit — so a description of a generation and the profile of the kit that drove it
 speak the same units. It cannot read intent, identity, mood, or whether the "subject" is

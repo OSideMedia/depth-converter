@@ -6,7 +6,8 @@ checked against a camera whose move was known. This is that check. It cost $0: B
 and the depth model both run on this Mac, and nothing calls a paid API.
 
 ```bash
-./.tools/uv run python scripts/calibrate_camera_path.py                       # the main report
+./.tools/uv run python scripts/calibrate_camera_path.py                       # the tuned clips
+./.tools/uv run python scripts/calibrate_camera_path.py --holdout --tag holdout  # the unseen clips
 ./.tools/uv run python scripts/calibrate_camera_path.py \
     --estimators rgb-tex,blender-tex,vda-tex --tag texture                     # diagnostic 1
 ./.tools/uv run python scripts/calibrate_camera_path.py \
@@ -18,9 +19,10 @@ is gitignored media. The numbers below are copied from those reports.
 
 ## How it works
 
-1. **The scenes.** There are 20 cases × 4 s at 24 fps. Each one is an `oside-blockout/v1`
-   spec rendered by oside-blender-mcp: a clay ground plane, rows of coloured boxes at 8–90 m,
-   and sky. Blender writes the exact Z pass and `camera_track.json` alongside the clay.
+1. **The scenes.** There are 24 cases the reader was tuned on and 9 held back from it, each
+   4 s at 24 fps. Each one is an `oside-blockout/v1` spec rendered by oside-blender-mcp: a clay
+   ground plane, usually rows of coloured boxes at 8–90 m, and sky. Blender writes the exact Z
+   pass and `camera_track.json` alongside the clay.
 2. **The truth.** `depthc.calibrate` projects the static world through the recorded camera
    with the Z pass to get the TRUE screen motion per frame, on the same analysis grid, in
    the same (dx, dy, radial) units that `motion.flow_series` produces.
@@ -37,7 +39,67 @@ is gitignored media. The numbers below are copied from those reports.
 take has texture everywhere. A miss here is a lower bound on the reader, not a forecast of
 what it does on a real take.
 
-## Main result — the shipped reader
+## The reader now — regions vote (2026-11-01)
+
+The two diagnostics further down left a decision open, and this is the answer to it.
+`motion.flow_series` now reads the camera in four steps:
+
+1. **Find what can show motion.** A pixel counts when its corner strength clears 1% of the
+   frame's strongest, a bar capped at an absolute value so one hard silhouette cannot silence
+   a softer world.
+2. **Vote by region.** Each cell of an 8×8 grid holding texture casts one vote: the median
+   flow of its textured pixels. Fewer than 12 voting cells names no camera at all, which is a
+   lone figure on a bare field.
+3. **Read the stretch first.** It comes from opposite sides of the frame, where a shift
+   cancels, and the shift is read after it.
+4. **Refuse a stretch that does not earn the word.** A zoom has to stretch both axes the same
+   way when both can be measured, most votes have to agree with it, and it has to leave less
+   unexplained than a plain shift.
+
+Exact buckets, rgb / blender / vda, the old all-pixel reader against this one on the same
+frames:
+
+| clips | all-pixel | regions |
+|---|---|---|
+| the original 20 (of 140) | 111 / 99 / 97 | 138 / 140 / 139 |
+| 4 hard cases added while tuning (of 28) | 14 / 16 / 14 | 24 / 26 / 26 |
+| **9 unseen clips, thresholds frozen first (of 63)** | **32 / 25 / 25** | **50 / 58 / 55** |
+
+**The last row is the number to quote.** The first two were tuned on. Missed motion on the
+unseen clips falls from 20 / 27 / 28 buckets to 4 / 2 / 2, and false motion stays 0 on every
+row for both readers. On those clips translation is right on 59 / 61 / 60 of 63 and the radial
+word on 54 / 60 / 58.
+
+What the unseen clips still get wrong:
+
+- **Long-lens pushes** read 3–5 of 7 and under-read speed. The speed ratio is 0.67–0.80 on the
+  unseen clips against 0.92–0.98 on the tuned ones, so a tempo word can sit one band slow.
+- **A few false zoom words beside a pan.** `holdout-truck-left-85mm` picks up "pulls out" on rgb,
+  and `holdout-truck-right-subject-crosses` picks up "pushes in" on rgb and vda.
+- **The truth is not spotless either.** It keeps the median-then-radial reduction, so on
+  `holdout-push-in-horizon` it says "tilts up" on two buckets where the camera only pushes.
+
+Each refusal in step 4, turned off, on the unseen clips (exact buckets, then false zoom buckets):
+
+| | rgb | blender | vda |
+|---|---|---|---|
+| as built | 50, 4 | 58, 0 | 55, 2 |
+| no agreement check | 46, 8 | 56, 2 | 52, 5 |
+| no better-fit check | 50, 4 | 55, 4 | 51, 6 |
+| neither | 43, 11 | 49, 10 | 47, 10 |
+
+**A known limit.** With texture on one side of centre only, one axis has to speak alone, so a
+truck whose left half slides uniformly faster than its right reads as a zoom. It is marked in
+`motion.py`.
+
+**Camera share moves too,** because it is read from the same shift. Real camera moves rise
+(`pan-left-85mm` 0.09 → 0.85) and locked-off frames stay low: static 0.00–0.12, a box crossing
+≤ 0.01, a figure approaching ≤ 0.05, the unseen near figure ≤ 0.26. Pushes and pulls stay ≤ 0.14,
+since a zoom is left in the residual on purpose. `static-handheld` reads 0.48 / 0.22 / 0.34: that
+camera truly shakes. The one other kit measured moves from under 0.01 to about 0.2, still counts as
+subject motion, and reads static in words both ways.
+
+## First result — the all-pixel reader (2026-10-26)
 
 | reader | exact | translation right | radial right | missed motion | false motion | speed ratio |
 |---|---|---|---|---|---|---|
@@ -77,9 +139,11 @@ clay that carries no motion signal, and on a clay frame that is most of the pixe
 The misses left are in the radial cases:
 
 - **`push-in`** is exact on only 1, 1 and 2 of 7, and reads "tilts down, pushes in" on 2, 6
-  and 5 buckets. The main report read it 6, 5 and 5 of 7, so the mask caused this: the
-  texture sits below centre (the boxes on the ground), so the outward flow of a push drags
-  the median down, and the median-then-radial split books that as a tilt.
+  and 5 buckets. The main report read it 6, 5 and 5 of 7, so the mask caused this: 94–97% of
+  the textured pixels sit above centre (the boxes at the horizon), so the outward flow of a
+  push drags the median up, and the median-then-radial split books a rising picture as a tilt
+  down. An earlier version of this page had the texture below centre and the median going
+  down, which the words themselves contradict; this was measured on 2026-11-01.
 - **`pull-out`** reads 2, 5 and 4 of 7 (5, 4 and 2 on the main report). rgb-tex books its
   misses as static, so the textured static floor is part of it there.
 - **`push-in-slow`** reads 2 of 7 on rgb-tex, and 7 and 6 on the depth readers (1 of 7 on
@@ -106,16 +170,14 @@ on an off-centre push. The joint fit is the reverse.
 
 ## What this changes, and what it does not
 
-- **Nothing in `depthc` changed.** Both diagnostics live in the calibration script only.
-  The PATH line in `compare` and the camera line in `describe` still do not vote.
-- **A texture-masked median is a candidate change to `motion.flow_series`, not an applied
-  one.** It would move `compare`'s PATH numbers and `describe`'s camera words for every
-  kit. It needs its own red/green tests, a fix for the off-centre push, and the owner's view
-  before it ships.
-- **The real-take reading is an inference, not a measurement.** AI takes carry texture
-  everywhere, so the shipped all-pixel reader should land nearer diagnostic 1 than the
-  clay report. Nothing here measured that. The next check is a generation with a camera
-  the prompt named, read by `describe` and checked by eye.
+- **Both diagnostics stay in the calibration script.** Only the region reader is in `depthc`.
+- **It moves words and informational lines, not verdicts.** `compare`'s PATH numbers,
+  `describe`'s camera words and every camera share line change for every kit, including a share
+  that now crosses the line where PATH is judged or a clip counts as camera-led. The PATH line
+  and the camera line still do not vote.
+- **The real-take reading is still an inference.** AI takes carry texture everywhere, and no
+  real textured take has been scored against a known camera. The next check is a generation
+  with a camera the prompt named, read by `describe` and checked by eye.
 
 ## Limitations
 

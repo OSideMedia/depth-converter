@@ -98,7 +98,7 @@ SPIKE_MULTIPLE = 6.0      # fallback for a bare delta series with no pixels to l
 SPIKE_FLOOR = 8.0
 LOW_RETENTION = 0.25      # depth energy / source energy below this = in-plane motion
 NOISE_RETENTION = 1.20    # depth energy ABOVE source energy = depth flicker, not choreography
-CAMERA_DOMINANT = 0.60    # median-flow share above this = a camera-path ref, not a body one
+CAMERA_DOMINANT = 0.60    # camera share above this = a camera-path ref, not a body one
 
 # --- structure: WHERE the motion sits and WHICH WAY the frame moves (v0.7.0) ---------------
 # The full-frame envelope is blind to placement and direction: a subject crossing left→right
@@ -108,12 +108,36 @@ REGION_ROWS = 3           # the 3x3 region grid; cells are equal splits of the a
 REGION_COLS = 3
 PATH_STILL = 0.10         # grid px per frame; a median flow below this has no direction to name
 PATH_RADIAL_STILL = 0.05  # px per frame of expansion/contraction below this is not a zoom
-# A push/pull moves EVERY side of the frame outward/inward. The radial term is recorded only
-# when all four quadrants agree in sign and each clears this share of the still floor;
-# otherwise a lone subject walking toward the lens (one quadrant, radial by accident) would
-# be booked as a camera move. Found on the first describe smoke: a box crossing frame read
-# "pulls out … pushes in" on a locked-off camera.
-PATH_RADIAL_QUADRANT = 0.5
+PATH_READER = "regions-2026-11"  # names the reader in the calibration's saved estimates
+# WHERE the path is read. Flow only shows on pixels with texture in two directions (the aperture
+# problem): a flat wall moves without showing it, and in an all-pixel median it votes zero. So the
+# path is read on pixels whose structure-tensor strength clears this share of the frame's strongest
+# corner (Shi-Tomasi's own default). The ceiling stops one hard silhouette from raising that bar
+# over a soft background: a bright box on blurred noise silenced the noise, and the box's own
+# crossing read as a pan on a locked camera.
+PATH_TEXTURE_QUALITY = 0.01
+PATH_TEXTURE_CEILING = 2e-4
+# WHO votes. Each region of an 8x8 split of the grid with this many textured pixels casts one
+# vote, its median flow. By pixel, a hard silhouette outvotes the world behind it; by region, a
+# figure has only the few regions it covers. Fewer regions than this and the gap names nothing:
+# the picture cannot tell a lone figure on a bare field from a camera moving past it. Measured on
+# clay: 3 regions or fewer for the lone figure, 13 or more for every scene with a world in it.
+PATH_REGIONS = 8
+PATH_REGION_PIXELS = 3
+PATH_MIN_REGIONS = 12
+# The zoom. A median cannot be read first and the zoom around it: when texture sits off-centre
+# (distant boxes above a bare ground), the outward flow of a push drags the median and reads as a
+# tilt. So the stretch is read from opposite sides of the frame, where a shift cancels: the median
+# flow on each side of centre, over how far apart those sides sit. A side needs this many votes,
+# reaching this share of the way to the frame's edge, or that axis is not measured.
+PATH_ZOOM_SIDE_VOTES = 2
+PATH_ZOOM_REACH = 0.33
+# And a stretch is a zoom only if the flow says so. A truck past boxes at different depths has one
+# side faster than the other, which looks like stretch. This share of the votes must move outward
+# (or inward) once the shift is out. Medians on clay: 0.78 or more on every real push and pull,
+# two moves at once included, and 0.73 or less on pans, trucks and cranes, the one exception being
+# a figure crossing in front of boxes, which the check in _read_camera catches.
+PATH_ZOOM_AGREEMENT = 0.75
 # A pace word beside the path label ("slowly pans left"). The idea is CozyClay's — its
 # camera-move classifier grades tempo from physical lens travel in m/s — but those units
 # do not exist here, so the bands are re-derived as TIME TO CROSS THE FRAME: a move at
@@ -216,11 +240,11 @@ def frame_stats_regions(frames: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.
 class FlowSeries:
     """Dense-flow summary per frame gap, on the analysis grid, in grid px per frame.
 
-    `path[:, 0:2]` is the median flow vector (dx, dy) — every pixel moving together, i.e.
-    the camera translation; `path[:, 2]` is the RADIAL component: the mean projection of
-    the flow onto the outward unit vector from the frame centre. Positive = the picture
-    expands (push-in / zoom-in), negative = it contracts (pull-out). `residual` is the mean
-    flow magnitude around the median — the subject moving inside the frame. `moving`
+    `path[:, 0:2]` is the shift (dx, dy) the textured regions vote for, i.e. the camera
+    translation; `path[:, 2]` is the RADIAL component: the zoom those votes earn, as what it
+    moves a pixel at the mean distance from centre. Positive = the picture expands (push-in /
+    zoom-in), negative = it contracts (pull-out). `residual` is the mean flow magnitude of
+    the textured pixels around the shift — the subject moving inside the frame, and a zoom. `moving`
     marks the gaps above the static floor; on the others every figure is written as 0.0
     because flow on a still frame is estimator noise with no direction (see camera_share).
     """
@@ -234,11 +258,58 @@ class FlowSeries:
         return int(self.moving.size)
 
 
+def _stretch(flow: np.ndarray, offset: np.ndarray, half: float) -> float | None:
+    """Flow per pixel of distance along one axis, read from opposite sides of centre.
+
+    A shift moves both sides alike and cancels here, whichever way the texture leans.
+    None when one side has too few votes, or they sit too near the centre, to measure.
+    """
+    plus, minus = offset > 0, offset < 0
+    if plus.sum() < PATH_ZOOM_SIDE_VOTES or minus.sum() < PATH_ZOOM_SIDE_VOTES:
+        return None
+    far, near = float(np.median(offset[plus])), float(np.median(offset[minus]))
+    if far < PATH_ZOOM_REACH * half or -near < PATH_ZOOM_REACH * half:
+        return None
+    return (float(np.median(flow[plus])) - float(np.median(flow[minus]))) / (far - near)
+
+
+def _read_camera(
+    fx: np.ndarray, fy: np.ndarray, x: np.ndarray, y: np.ndarray, half_w: float, half_h: float,
+) -> tuple[float, float, float]:
+    """(dx, dy, stretch) from the regions' votes: each one's flow and offset from centre."""
+    shift_x, shift_y = float(np.median(fx)), float(np.median(fy))
+    across, down = _stretch(fx, x, half_w), _stretch(fy, y, half_h)
+    if across is None or down is None:
+        stretch = across if down is None else down
+    else:
+        # A zoom stretches both axes. A crane stretches only the vertical, as the near ground
+        # slides faster than the far.
+        # ponytail: with texture on one side of centre only, one axis has to speak alone, so a truck
+        # whose left half slides uniformly faster than its right reads as a zoom. A second cue
+        # (depth, or a real rotation fit) is the upgrade if a clip ever needs it.
+        stretch = 0.0 if across * down <= 0 else min(across, down, key=abs)
+    if not stretch:
+        return shift_x, shift_y, 0.0
+    fit_x, fit_y = float(np.median(fx - stretch * x)), float(np.median(fy - stretch * y))
+    outward = ((fx - fit_x) * x + (fy - fit_y) * y) * np.sign(stretch)
+    if float((outward > 0).mean()) < PATH_ZOOM_AGREEMENT:
+        return shift_x, shift_y, 0.0
+    # The fit must also leave less unexplained than the plain shift. A figure filling one side of
+    # a still frame has opposite sides that disagree, and votes that agree only by accident.
+    plain = float(np.median(np.hypot(fx - shift_x, fy - shift_y)))
+    fitted = float(np.median(np.hypot(fx - fit_x - stretch * x, fy - fit_y - stretch * y)))
+    if fitted > plain:
+        return shift_x, shift_y, 0.0
+    return fit_x, fit_y, stretch
+
+
 def flow_series(frames: np.ndarray, fps: float = 24.0) -> FlowSeries:
     """One Farneback pass per moving frame gap; everything flow-derived reads from this.
 
     `fps` scales the static floor: STATIC_FLOOR is calibrated at 24 fps and raw per-gap
     deltas grow with the frame interval (see camera_share for why the floor exists at all).
+    A gap moves when its TEXTURED pixels change, and regions of them vote on the path (see
+    PATH_TEXTURE_QUALITY). Scored against a known camera in DOCS/CAMERA-PATH-CALIBRATION.md.
     """
     import cv2
 
@@ -251,53 +322,52 @@ def flow_series(frames: np.ndarray, fps: float = 24.0) -> FlowSeries:
         return FlowSeries(path=path, residual=residual, moving=moving)
 
     floor = STATIC_FLOOR * (24.0 / fps) if fps > 0 else STATIC_FLOOR
-    deltas = np.abs(np.diff(grid.astype(np.float32), axis=0)).mean(axis=(1, 2))
     height, width = grid.shape[1:]
     ys, xs = np.mgrid[0:height, 0:width].astype(np.float32)
     rx, ry = xs - (width - 1) / 2.0, ys - (height - 1) / 2.0
-    norm = np.hypot(rx, ry)
-    norm[norm == 0] = 1.0
-    rx, ry = rx / norm, ry / norm
-    half_h, half_w = height // 2, width // 2
-    quadrants = (
-        (slice(0, half_h), slice(0, half_w)), (slice(0, half_h), slice(half_w, None)),
-        (slice(half_h, None), slice(0, half_w)), (slice(half_h, None), slice(half_w, None)),
-    )
-    quadrant_floor = PATH_RADIAL_STILL * PATH_RADIAL_QUADRANT
+    mean_radius = float(np.hypot(rx, ry).mean())
+    regions = [
+        (slice(height * row // PATH_REGIONS, height * (row + 1) // PATH_REGIONS),
+         slice(width * col // PATH_REGIONS, width * (col + 1) // PATH_REGIONS))
+        for row in range(PATH_REGIONS) for col in range(PATH_REGIONS)
+    ]
 
     for index, (previous, current) in enumerate(zip(grid[:-1], grid[1:])):
-        if deltas[index] <= floor:
+        strength = cv2.cornerMinEigenVal(previous, blockSize=3, ksize=3)
+        top = float(strength.max())
+        if top <= 0:
+            continue
+        mask = strength >= min(PATH_TEXTURE_QUALITY * top, PATH_TEXTURE_CEILING)
+        voting = [region for region in regions if int(mask[region].sum()) >= PATH_REGION_PIXELS]
+        if len(voting) < PATH_MIN_REGIONS:
+            continue
+        if float(np.abs(current.astype(np.float32) - previous.astype(np.float32))[mask].mean()) <= floor:
             continue
         flow = cv2.calcOpticalFlowFarneback(
             previous, current, None,
             pyr_scale=0.5, levels=3, winsize=15, iterations=3,
             poly_n=5, poly_sigma=1.2, flags=0,
         )
-        median = np.median(flow.reshape(-1, 2), axis=0)
-        centred = flow - median
+        votes = [
+            (float(np.median(flow[region][..., 0][mask[region]])), float(np.median(flow[region][..., 1][mask[region]])),
+             float(rx[region][mask[region]].mean()), float(ry[region][mask[region]].mean()))
+            for region in voting
+        ]
+        dx, dy, stretch = _read_camera(*np.array(votes).T, (width - 1) / 2.0, (height - 1) / 2.0)
         moving[index] = True
-        path[index, 0], path[index, 1] = float(median[0]), float(median[1])
-        # Radial expansion is measured on the flow AROUND the median: a pure pan has no
-        # zoom in it, and leaving the translation in would book part of it as radial.
-        # And it is recorded only when COHERENT — all four quadrants expanding (or all
-        # contracting): see PATH_RADIAL_QUADRANT.
-        radial_field = centred[..., 0] * rx + centred[..., 1] * ry
-        radial = float(radial_field.mean())
-        per_quadrant = [float(radial_field[q].mean()) for q in quadrants]
-        coherent = all(
-            np.sign(q) == np.sign(radial) and abs(q) >= quadrant_floor for q in per_quadrant
-        )
-        path[index, 2] = radial if coherent else 0.0
-        residual[index] = float(np.hypot(*centred.transpose(2, 0, 1)).mean())
+        # A stretch per pixel, in the px/frame path_label's floors are written in: what it moves
+        # a pixel at the grid's mean distance from centre.
+        path[index] = (dx, dy, stretch * mean_radius)
+        residual[index] = float(np.hypot(flow[..., 0][mask] - dx, flow[..., 1][mask] - dy).mean())
     return FlowSeries(path=path, residual=residual, moving=moving)
 
 
 def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     """How much of the movement is the camera rather than the subject, 0.0-1.0.
 
-    Farneback dense flow, then split each frame pair's field into the median vector (every
-    pixel moving together — a pan, a dolly, a tracking move) and the residual around it (a
-    subject moving inside the frame). The share is |median| / (|median| + mean residual).
+    Farneback dense flow, then split each frame pair's field into the shift the textured
+    regions vote for (a pan, a dolly, a tracking move) and the residual around it (a subject
+    moving inside the frame). The share is |shift| / (|shift| + mean residual).
 
     ONLY MOVING FRAMES COUNT. Frame gaps below the static floor are measured but excluded from
     the average, because flow on a still frame is estimator noise with no direction, and
@@ -305,9 +375,9 @@ def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     measured 3% "whole-frame" across the whole clip and reads correctly once the frozen half
     stops voting.
 
-    HONEST LIMIT: a median *translation* is the only camera motion this separates cleanly. A
-    zoom, orbit or roll moves pixels in opposing directions, so its median is near zero and it
-    books as subject motion. Treat a high number as "definitely camera", a low one as "not a
+    HONEST LIMIT: a *translation* is the only camera motion this separates cleanly. A zoom,
+    orbit or roll moves pixels in opposing directions, so its shift is near zero and it books
+    as subject motion. Treat a high number as "definitely camera", a low one as "not a
     simple camera translation" rather than "definitely subject". (The radial term in
     `flow_series` names a zoom/push separately, but does not fold it into this share — the
     share's thresholds were calibrated without it.)

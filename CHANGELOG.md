@@ -5,6 +5,14 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **The camera path is read where the picture can show it.** It missed slow and lens-compressed moves
+  because flat ground voted zero, and a texture mask alone turned pushes into tilts. Textured regions
+  now cast one vote each and the zoom is read first, from opposite sides of the frame. On 9 clips held
+  back until the thresholds were frozen, exact buckets go from 32 / 25 / 25 of 63 to 50 / 58 / 55 (rgb,
+  blender, vda) with no false motion, all on clay. This moves `compare`'s PATH numbers, `describe`'s
+  camera words and every camera share line for every kit, not any verdict. See
+  `DOCS/CAMERA-PATH-CALIBRATION.md`, which also corrects where the texture sits.
+
 ## v0.15.0 — 2026-11-01
 
 The first version meant for people outside this project: ready to go public, with the audit's

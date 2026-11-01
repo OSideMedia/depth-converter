@@ -13,9 +13,10 @@ THE TRUTH, and why it is in the estimator's own units. For every analysis-grid p
 frame i, the surface it sees is put back into the world — from the render's own metric Z
 pass, so boxes and ground alike — and projected through the camera of frame i+1; the
 displacement is the camera-induced flow at that pixel. Per gap: the median displacement is the path's (dx, dy), and the radial
-term is the mean projection of the flow around the median onto the outward unit vector —
-the same reduction `motion.flow_series` applies to the estimated field. The truth series is
-then named by the SAME `describe.path_buckets` the describe command uses, so a mismatch is
+term is the mean projection of the flow around the median onto the outward unit vector. That
+was `motion.flow_series`' own reduction when this was written; the reader now takes region votes
+and reads the zoom first, so with its world off-centre a push can carry a small tilt in this
+truth (the calibration doc names the clip). The truth series is then named by the SAME `describe.path_buckets` the describe command uses, so a mismatch is
 the estimator's, never a vocabulary difference.
 
 What the truth deliberately is NOT: a world verb. A truck left and a pan left both slide the

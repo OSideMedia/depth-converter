@@ -1,6 +1,6 @@
 """Calibrate the camera-path words against Blender clips whose camera move is known. $0.
 
-    ./.tools/uv run python scripts/calibrate_camera_path.py [--cases a,b] [--estimators rgb,vda,blender]
+    ./.tools/uv run python scripts/calibrate_camera_path.py [--cases a,b] [--holdout] [--estimators rgb,vda,blender]
 
 For each case: write an oside-blockout/v1 spec, render it with oside-blender-mcp (clay +
 exact Z pass + camera_track.json), compute the TRUE screen motion of the static world from
@@ -14,7 +14,7 @@ each against the truth bucket by bucket, in the words `depthc describe` would pr
 Each takes a `-tex` suffix (`rgb-tex`, `blender-tex`, `vda-tex`): the same Farneback pass
 with the static floor and the median read on TEXTURED pixels only (Shi-Tomasi corner
 strength). `-sim` reads the same textured pixels through a RANSAC similarity fit, shift and
-zoom together. It is a diagnostic, not a reader depthc ships: it separates "the clay has no
+zoom together. Both are diagnostics, not the reader depthc ships: they separate "the clay has no
 texture to see" from "the method misreads what it can see". `--tag` names the outputs so a
 diagnostic run never overwrites the main report.
 
@@ -132,6 +132,56 @@ CASES: dict[str, tuple[str, dict]] = {
         **_travel("static", {"start": [0, 0, CAM_Z]}),
         "walker": [{"t": 0, "pos": [-5.0, 6.0, 0]}, {"t": DURATION_S, "pos": [5.0, 6.0, 0]}],
     }),
+    # Two moves at once, and what a zoom reader must not fall for: a figure walking at a camera
+    # that never moves. Alone on the bare field, the figure is the only thing with any texture.
+    "pan-left-push-in": ("pan left 0.5°/frame while pushing in 5 cm/frame", {
+        "camera": {"rig": "push_in", "params": {"start": [0, 0, CAM_Z], "distance_m": 4.8},
+                   "aim": {"target": "marker", "height_frac": 0.5}},
+        "marker": _marker_path(-_per_frame(0.5) / 2, _per_frame(0.5) / 2, -DOWN_DEG, -DOWN_DEG),
+    }),
+    "truck-left-push-in": ("truck left and push in, 5 cm/frame each", _travel(
+        "dolly", {"start": [2.4, 0, CAM_Z], "end": [-2.4, 4.8, CAM_Z]})),
+    "static-subject-approaches": ("locked off; a figure walks at the camera past the boxes", {
+        **_travel("static", {"start": [0, 0, CAM_Z]}),
+        "walker": [{"t": 0, "pos": [0.5, 14.0, 0]}, {"t": DURATION_S, "pos": [0.5, 5.0, 0]}],
+    }),
+    "static-subject-approaches-alone": ("locked off; a figure walks at the camera on a bare field", {
+        **_travel("static", {"start": [0, 0, CAM_Z]}),
+        "bare": True,
+        "walker": [{"t": 0, "pos": [0.5, 14.0, 0]}, {"t": DURATION_S, "pos": [0.5, 5.0, 0]}],
+    }),
+}
+
+# Rendered and scored once, AFTER flow_series's thresholds were frozen, so these numbers say how
+# the reader does on moves it was not tuned on. Tune against them and they stop saying that.
+HOLDOUT: dict[str, tuple[str, dict]] = {
+    "holdout-push-in-85mm": ("push in 5 cm/frame on an 85 mm", _travel(
+        "push_in", {"start": [0, 0, CAM_Z], "distance_m": 4.8}, lens_mm=85)),
+    "holdout-push-in-horizon": ("push in 5 cm/frame, horizon mid-frame", {
+        "camera": {"rig": "push_in", "params": {"start": [0, 0, CAM_Z], "distance_m": 4.8},
+                   "aim": {"target": "marker", "height_frac": 0.5}},
+        "marker": _marker_path(0.0, 0.0, -1.0, -1.0),
+    }),
+    "holdout-pull-out-slow": ("pull out 2 cm/frame", _travel("pull_out", {"start": [0, 0, CAM_Z], "distance_m": 1.92})),
+    "holdout-pan-right-pull-out": ("pan right 0.3°/frame while pulling out 5 cm/frame", {
+        "camera": {"rig": "pull_out", "params": {"start": [0, 0, CAM_Z], "distance_m": 4.8},
+                   "aim": {"target": "marker", "height_frac": 0.5}},
+        "marker": _marker_path(_per_frame(0.3) / 2, -_per_frame(0.3) / 2, -DOWN_DEG, -DOWN_DEG),
+    }),
+    "holdout-tilt-up-24mm": ("tilt up 0.15°/frame on a 24 mm",
+                             _rotate(0, 0, -DOWN_DEG - 4, -DOWN_DEG - 4 + _per_frame(0.15), lens_mm=24)),
+    "holdout-truck-left-85mm": ("truck left 5 cm/frame on an 85 mm", _travel(
+        "dolly", {"start": [2.4, 0, CAM_Z], "end": [-2.4, 0, CAM_Z]}, lens_mm=85)),
+    "holdout-crane-up-24mm": ("crane up 2.5 cm/frame on a 24 mm", _travel(
+        "crane", {"start": [0, 0, CAM_Z], "rise_m": 2.4}, lens_mm=24)),
+    "holdout-truck-right-subject-crosses": ("truck right 5 cm/frame; a figure crosses", {
+        **_travel("dolly", {"start": [-2.4, 0, CAM_Z], "end": [2.4, 0, CAM_Z]}),
+        "walker": [{"t": 0, "pos": [-4.0, 5.0, 0]}, {"t": DURATION_S, "pos": [4.0, 5.0, 0]}],
+    }),
+    "holdout-static-subject-near": ("locked off; a figure walks close past the lens", {
+        **_travel("static", {"start": [0, 0, CAM_Z]}),
+        "walker": [{"t": 0, "pos": [-1.5, 10.0, 0]}, {"t": DURATION_S, "pos": [1.0, 2.5, 0]}],
+    }),
 }
 
 
@@ -141,7 +191,7 @@ def spec_for(name: str, words: str, case: dict) -> dict:
         "describe": "a hidden rail the box rows are laid along", "interp": "linear",
         "path": [{"t": 0, "pos": [-150.0, RAIL_Y, 0]}, {"t": DURATION_S, "pos": [150.0, RAIL_Y, 0]}],
     }]
-    for k, (y, colour, count, dims) in enumerate(ROWS):
+    for k, (y, colour, count, dims) in enumerate(() if case.get("bare") else ROWS):
         subjects.append({
             "id": f"row{k + 1}", "kind": "structure", "shape": "box_array", "count": count, "along": "rail",
             # right of travel is -Y for a rail running +X, so a NEGATIVE offset puts the row ahead
@@ -208,6 +258,7 @@ def depth_reader(kit: Path):
 
 TEX_QUALITY = 0.01   # Shi-Tomasi's own default: a pixel counts at >= 1% of the frame's strongest corner
 TEX_MIN_PIXELS = 40  # a quadrant or a frame with fewer textured pixels than this has nothing to read
+TEX_RADIAL_QUADRANT = 0.5  # the -tex diagnostic's own quadrant test, as flow_series once read a zoom
 
 
 def textured_path(frames: np.ndarray, fps: float = 24.0) -> np.ndarray:
@@ -236,7 +287,7 @@ def textured_path(frames: np.ndarray, fps: float = 24.0) -> np.ndarray:
         (slice(half_h, None), slice(0, half_w)), (slice(half_h, None), slice(half_w, None)),
     )
     floor = motion.STATIC_FLOOR * (24.0 / fps)
-    quadrant_floor = motion.PATH_RADIAL_STILL * motion.PATH_RADIAL_QUADRANT
+    quadrant_floor = motion.PATH_RADIAL_STILL * TEX_RADIAL_QUADRANT
     for index, (previous, current) in enumerate(zip(grid[:-1], grid[1:])):
         strength = cv2.cornerMinEigenVal(previous, blockSize=3, ksize=3)
         mask = strength >= TEX_QUALITY * float(strength.max()) if strength.max() > 0 else np.zeros_like(strength, bool)
@@ -329,7 +380,7 @@ def estimate(kit: Path, which: str) -> np.ndarray:
 
 
 def run_case(name: str, estimators: list[str], rebuild: bool) -> dict:
-    words, case = CASES[name]
+    words, case = {**CASES, **HOLDOUT}[name]
     case_dir = OUT / name
     kit_link = case_dir / "kit.txt"
     case_dir.mkdir(parents=True, exist_ok=True)
@@ -351,7 +402,9 @@ def run_case(name: str, estimators: list[str], rebuild: bool) -> dict:
     row = {"case": name, "move": words, "geometryShare": round(share, 3),
            "truth": _runs(truth_buckets), "estimators": {}}
     for which in estimators:
-        cached = case_dir / f"est-{which}-{kit.name}.npy"
+        # Keyed by the reader's version: a change to flow_series must not be scored on the numbers
+        # the old one left here. Earlier estimates stay on disk under their own names.
+        cached = case_dir / f"est-{which}-{kit.name}-{motion.PATH_READER}.npy"
         if cached.exists():
             path = np.load(cached)
         else:
@@ -414,13 +467,14 @@ def report(rows: list[dict], estimators: list[str]) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
-    ap.add_argument("--cases", help="comma list (default all): " + ", ".join(CASES))
+    ap.add_argument("--cases", help="comma list (default every non-holdout case): " + ", ".join(CASES))
+    ap.add_argument("--holdout", action="store_true", help="score the HOLDOUT cases instead")
     ap.add_argument("--estimators", default="rgb,blender,vda")
     ap.add_argument("--rebuild", action="store_true", help="re-render even if a case has a saved truth")
     ap.add_argument("--tag", help="name the outputs results-<tag>.json / report-<tag>.md (the main report is left alone)")
     args = ap.parse_args()
-    names = args.cases.split(",") if args.cases else list(CASES)
-    unknown = [n for n in names if n not in CASES]
+    names = list(HOLDOUT) if args.holdout else args.cases.split(",") if args.cases else list(CASES)
+    unknown = [n for n in names if n not in CASES and n not in HOLDOUT]
     if unknown:
         raise SystemExit(f"unknown cases {unknown}")
     estimators = args.estimators.split(",")

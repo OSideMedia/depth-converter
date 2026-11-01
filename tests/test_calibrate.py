@@ -64,9 +64,9 @@ def test_forward_travel_is_radial(step, expected):
     assert np.sign(path[:, 2]).tolist() == [np.sign(step)] * len(path)
 
 
-def test_the_radial_is_read_around_the_median_as_flow_series_reads_it():
+def test_the_truth_reads_its_radial_around_the_median():
     # A regression pin, not a derivation: the ground below centre gives a push's flow a
-    # downward median, and flow_series takes the radial on the flow AROUND its median.
+    # downward median, and the truth takes the radial on the flow AROUND its median.
     # Read on the raw flow, this push books 0.357 (+3%). The pixel-index centre (-0.5) is
     # NOT pinned: on this symmetric grid it moves the radial by under 0.01%.
     forward = calibrate.euler_xyz((80.0, 0.0, 0.0)) @ np.array([0.0, 0.0, -1.0])

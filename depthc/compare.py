@@ -34,10 +34,11 @@ and its mirror image draw the same sparkline and correlate at r=1.0.
     catches the specific failure the mean cannot: the beat landed on time but the subject
     went the other way. Named as a finding when the mirror wins clearly.
 
-4.  CAMERA PATH — the median-flow translation (dx, dy) plus a radial push/pull term, bucketed
+4.  CAMERA PATH — the translation (dx, dy) the textured regions vote for, plus a radial
+    push/pull term, bucketed
     and compared as a direction series (cosine similarity), with both paths named in camera
     terms ("pans left, pushes in"). Judged only when the ref is a camera-path ref: on a body
-    ref the median flow is estimator noise with no direction worth comparing.
+    ref that flow is the body's, with no camera direction worth comparing.
 
 These two are UNCALIBRATED — no measured fire has been scored on them yet — so they inform
 the human's read and never move the suggested verdict. When fires accumulate, thresholds go
