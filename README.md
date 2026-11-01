@@ -1,4 +1,4 @@
-[![version](https://img.shields.io/badge/version-0.14.0-blue)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-0.15.0-blue)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-Apple%20Silicon%20Mac-lightgrey)](#requirements)
 [![Seedance](https://img.shields.io/badge/Seedance-2.0%20%7C%202.5-e8552d)](#does-it-work-yes-measured)
