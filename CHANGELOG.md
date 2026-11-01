@@ -12,6 +12,12 @@ the code's history. Started 2026-09-06.
   blender, vda) with no false motion, all on clay. This moves `compare`'s PATH numbers, `describe`'s
   camera words and every camera share line for every kit, not any verdict. See
   `DOCS/CAMERA-PATH-CALIBRATION.md`, which also corrects where the texture sits.
+
+## v0.15.0 — 2026-11-01
+
+The first version meant for people outside this project: ready to go public, with the audit's
+Depth Converter set closed. The envelope is re-exported, with no change in what it says.
+
 - **Things in a kit or a folder name are data.** The launchers quote the project path, and the
   `depthc` paste lines quote what they echo. A `result.json` or `look-cdl.json` that is a symlink is
   replaced, not written through. `look-compare --manifest` reads only `oside-davinci/v1` packages and
