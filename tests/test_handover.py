@@ -37,16 +37,18 @@ CONTRADICTIONS = [
 # hit followed by a note about something else. The note has to carry the law as well, because the
 # file is held to every test below like any other surface. No other surface keeps history.
 AMENDED = re.compile(r"\[AMENDED \d{4}-\d{2}-\d{2}")
-ABOUT_THE_HANDOVER = re.compile(r"binding|create-frame", re.I)
+ABOUT_THE_HANDOVER = re.compile(r"binding|create-frame|depth\.mp4|handover", re.I)
+SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
 STRUCK_WITHIN = 400  # characters of flattened prose: the length of the longest such sentence
-NOTE_NAMES_IT_WITHIN = 200  # characters from the date: each real note names its subject early
 
 
 def _struck(text: str, end: int) -> bool:
-    return any(
-        ABOUT_THE_HANDOVER.search(text, note.end(), note.end() + NOTE_NAMES_IT_WITHIN)
-        for note in AMENDED.finditer(text, end, end + STRUCK_WITHIN)
-    )
+    """A note strikes a hit when its own first sentence names the handover's subject."""
+    for note in AMENDED.finditer(text, end, end + STRUCK_WITHIN):
+        stop = SENTENCE_END.search(text, note.end())
+        if ABOUT_THE_HANDOVER.search(text, note.end(), stop.start() if stop else len(text)):
+            return True
+    return False
 
 
 def live_contradictions(text: str, *, record: bool = False) -> list[str]:
@@ -268,6 +270,14 @@ def test_plans_own_phrasings_trip_the_gate_unless_a_dated_note_strikes_them():
 def test_an_amendment_about_something_else_strikes_nothing():
     stale = "Take exactly two files to OSIDE."
     assert live_contradictions(stale + " [AMENDED 2026-11-01] Corrected a spelling elsewhere.", record=True)
+    # Nor does the next paragraph's subject count as the note's.
+    spill = stale + " [AMENDED 2026-11-01] Corrected a spelling elsewhere. Use binding.txt only in Ark."
+    assert live_contradictions(spill, record=True)
+
+
+def test_a_note_naming_the_one_file_handover_strikes_the_sentence():
+    fixed = "Take exactly two files to OSIDE. [AMENDED 2026-11-01] The handover is ONE file: depth.mp4."
+    assert live_contradictions(fixed, record=True) == []
 
 
 def test_only_the_record_keeps_a_struck_sentence():

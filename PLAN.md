@@ -254,8 +254,8 @@ kit), best-in-class temporal quality, zero Electron weight.
    character/location/prop image refs (the look), upload `depth.mp4` as the video ref
    (the motion), paste the binding block from `prompt.txt`.
 
-   > **[AMENDED 2026-09-16] Two sentences of that step are superseded — CLAUDE.md and
-   > README.md carry the current law.** (a) *The create-frame rule is per model*: it is
+   > **[AMENDED 2026-09-16] Two sentences of that step, on create-frame and the binding
+   > phrase, are superseded — CLAUDE.md and README.md carry the current law.** (a) *The create-frame rule is per model*: it is
    > `refsWithStartFrame:false` on **seedance-2.0** only, so "skip create-frame" is a 2.0
    > instruction; on **seedance-2.5** (`refsWithStartFrame:true`, the default dialect since
    > 2026-09-06) a start frame demotes to a reference image and the depth ref still rides.
