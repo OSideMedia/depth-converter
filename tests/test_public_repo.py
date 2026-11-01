@@ -177,7 +177,8 @@ def test_the_ui_listens_on_loopback_only(monkeypatch):
 
 
 def test_the_cli_offers_no_public_share():
-    help_text = CliRunner().invoke(cli.app, ["ui", "--help"]).output
+    # A CI runner forces colour, and a colour code can sit between the two dashes of an option.
+    help_text = re.sub(r"\x1b\[[0-9;]*m", "", CliRunner().invoke(cli.app, ["ui", "--help"]).output)
     assert "--port" in help_text, "the help did not render: this gate has no subject"
     assert "share" not in help_text.lower()
 
