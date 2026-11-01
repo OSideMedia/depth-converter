@@ -5,6 +5,8 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+## v0.16.0 — 2026-11-01
+
 - **The camera path is read where the picture can show it.** It missed slow and lens-compressed moves
   because flat ground voted zero, and a texture mask alone turned pushes into tilts. Textured regions
   now cast one vote each and the zoom is read first, from opposite sides of the frame. On 9 clips held
