@@ -136,9 +136,9 @@ line — for surfaces that HAVE a per-reference binding field: a hand upload in 
 not, but the **Import kit** door does and fills it from this file, hash-checked
 against `kit.json.binding.sha256`, which every kit records since 2026-09-15),
 and `sheet.png` (depth contact sheet with timestamps). **Exactly one file goes to OSIDE:
-`depth.mp4`, uploaded as the video reference. That is the whole handover.** The four
-surfaces that say so — this file, `README.md`, `Outbox/README.txt` and every kit's
-`README.txt` — are held to the same words by `tests/test_handover.py`; until 2026-09-06
+`depth.mp4`, uploaded as the video reference. That is the whole handover.** The
+surfaces that say so — this file, `README.md`, `PLAN.md`, `Outbox/README.txt`, `INDEX.txt` and
+every kit's `README.txt` — are held to the same words by `tests/test_handover.py`; until 2026-09-06
 two of them said "take two files and paste binding.txt" (audit DC-2). `--variants` adds four refs of the same
 beat under `variants/` — contrast-stretched, inverted, **midgrey** (luma capped at 190 so
 figures never blow to near-white, the shape of the one refused kit on record; never fired), and **edges** (Canny of

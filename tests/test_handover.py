@@ -5,25 +5,57 @@ uploaded video reference and writes its own line, so the handover is ONE file, d
 `binding.txt` exists for surfaces that DO have a per-reference binding field (the Ark
 console is Variant B in prompt.txt). Until 2026-09-06 `Outbox/README.txt` said "take
 exactly two files … paste binding.txt" and README.md's workflow step said the same, while
-CLAUDE.md and the kit README said the opposite. Four surfaces, one sentence, held here.
+CLAUDE.md and the kit README said the opposite. Every surface, one sentence, held here.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from depthc import kit as kitlib
 from depthc.checks import check
 
 ROOT = Path(__file__).resolve().parent.parent
+PRE_AMENDMENT = "3f31315~1"  # the commit before PLAN.md's attach step was amended
 
 # The contradiction, as an INSTRUCTION: paste binding.txt's line, or take two files.
 CONTRADICTIONS = [
     re.compile(r"paste (its|the) (one )?line (from|into) [^\n]*binding", re.I),
     re.compile(r"paste the line from `?binding\.txt`?", re.I),
     re.compile(r"exactly two files", re.I),
+    # PLAN.md's own phrasings, which the two greps above could not see (found 2026-09-16).
+    re.compile(r"paste (its|the|the kit's)\b[^\n.]{0,40}binding (block|phrase|line)", re.I),
+    re.compile(r"Variant A\W+FOR OSIDE COMPOSER", re.I),
+    re.compile(r"skip the create-frame step", re.I),
 ]
+# PLAN.md is a record: it keeps a superseded sentence and follows it with a dated note, so a hit
+# struck that way is history, not an instruction. Anything further off is still live, and so is a
+# hit followed by a note about something else. The note has to carry the law as well, because the
+# file is held to every test below like any other surface. No other surface keeps history.
+AMENDED = re.compile(r"\[AMENDED \d{4}-\d{2}-\d{2}")
+ABOUT_THE_HANDOVER = re.compile(r"binding|create-frame|depth\.mp4|handover", re.I)
+SENTENCE_END = re.compile(r"[.!?](?:\*|\s|$)")  # a bold sentence ends ".**"
+STRUCK_WITHIN = 400  # characters of flattened prose: the length of the longest such sentence
+
+
+def _struck(text: str, end: int) -> bool:
+    """A note strikes a hit when its own first sentence names the handover's subject."""
+    for note in AMENDED.finditer(text, end, end + STRUCK_WITHIN):
+        stop = SENTENCE_END.search(text, note.end())
+        if ABOUT_THE_HANDOVER.search(text, note.end(), stop.start() if stop else len(text)):
+            return True
+    return False
+
+
+def live_contradictions(text: str, *, record: bool = False) -> list[str]:
+    hits = (m for pattern in CONTRADICTIONS for m in pattern.finditer(text))
+    return [m.group(0) for m in hits if not (record and _struck(text, m.end()))]
+
+
 # The truth, in the words every surface must carry.
 ONE_FILE = "That is the whole handover"
 NOT_OSIDE = re.compile(r"binding\.txt[^.]{0,60}surfaces that HAVE a per-reference binding field", re.I)
@@ -57,6 +89,7 @@ def surfaces(tmp_path: Path) -> dict[str, str]:
     raw = {
         "CLAUDE.md": (ROOT / "CLAUDE.md").read_text(encoding="utf-8"),
         "README.md": (ROOT / "README.md").read_text(encoding="utf-8"),
+        "PLAN.md": (ROOT / "PLAN.md").read_text(encoding="utf-8"),
         "Outbox/README.txt": (ROOT / "Outbox" / "README.txt").read_text(encoding="utf-8"),
         "kit README.txt": _kit_readme(),
         "Outbox/INDEX.txt": _index(tmp_path),
@@ -66,9 +99,7 @@ def surfaces(tmp_path: Path) -> dict[str, str]:
 
 def test_no_surface_tells_the_operator_to_paste_binding_txt_into_oside(tmp_path):
     for name, text in surfaces(tmp_path).items():
-        for pattern in CONTRADICTIONS:
-            hit = pattern.search(text)
-            assert hit is None, f"{name}: {hit.group(0)!r}"
+        assert live_contradictions(text, record=name == "PLAN.md") == [], name
 
 
 def test_every_surface_says_depth_mp4_is_the_whole_handover(tmp_path):
@@ -217,3 +248,51 @@ def test_the_contradiction_patterns_can_fire():
     assert any(p.search(old_outbox) for p in CONTRADICTIONS)
     assert any(p.search(old_readme) for p in CONTRADICTIONS)
     assert any(p.search("From every kit you take exactly two files to OSIDE") for p in CONTRADICTIONS)
+
+
+def test_plans_own_phrasings_trip_the_gate_unless_a_dated_note_strikes_them():
+    """The file as it stood before the 2026-09-16 amendment, sentence for sentence."""
+    old_plan = [
+        "upload `depth.mp4` as the video ref (the motion), paste the binding block from `prompt.txt`.",
+        "**go straight to \"make video\" — SKIP the create-frame step.** A depth-motion shot",
+        "**Variant A — FOR OSIDE COMPOSER (binding phrase only).** A bare noun phrase",
+        "paste the kit's **Variant A binding phrase** into the ref's binding field",
+    ]
+    note = " > **[AMENDED 2026-09-16] Superseded: paste no binding phrase in OSIDE.**"
+    for sentence in old_plan:
+        assert live_contradictions(sentence, record=True), sentence
+        assert live_contradictions(sentence + note, record=True) == [], sentence
+        # too far away to be striking this sentence, and an undated note strikes nothing
+        assert live_contradictions(sentence + " x" * STRUCK_WITHIN + note, record=True), sentence
+        assert live_contradictions(sentence + " > **[AMENDED] Paste no binding phrase.**", record=True), sentence
+
+
+def test_an_amendment_about_something_else_strikes_nothing():
+    stale = "Take exactly two files to OSIDE."
+    assert live_contradictions(stale + " [AMENDED 2026-11-01] Corrected a spelling elsewhere.", record=True)
+    # Nor does the next paragraph's subject count as the note's.
+    spill = stale + " [AMENDED 2026-11-01] Corrected a spelling elsewhere. Use binding.txt only in Ark."
+    assert live_contradictions(spill, record=True)
+    bold = stale + " **[AMENDED 2026-11-01] TWO-VARIANT LAW.** Paste no binding phrase."
+    assert live_contradictions(bold, record=True)
+
+
+def test_a_note_naming_the_one_file_handover_strikes_the_sentence():
+    fixed = "Take exactly two files to OSIDE. [AMENDED 2026-11-01] The handover is ONE file: depth.mp4."
+    assert live_contradictions(fixed, record=True) == []
+
+
+def test_only_the_record_keeps_a_struck_sentence():
+    # A note on a README sentence is not history. That file has to say the current thing.
+    assert live_contradictions("Take exactly two files to OSIDE. [AMENDED 2026-11-01] No binding phrase.")
+
+
+def test_plan_md_before_its_amendment_is_what_the_gate_was_missing():
+    """The real file, not a paraphrase of it. Needs the commit in history, which CI's shallow
+    checkout does not have, so it says so rather than passing by not looking."""
+    shown = subprocess.run(["git", "show", f"{PRE_AMENDMENT}:PLAN.md"], cwd=ROOT, capture_output=True, text=True)
+    if shown.returncode != 0:
+        pytest.skip(f"{PRE_AMENDMENT} is not in this clone's history (a shallow checkout)")
+    hits = live_contradictions(_flat(shown.stdout), record=True)
+    assert any("binding block" in hit for hit in hits), hits
+    assert any("create-frame" in hit for hit in hits), hits
