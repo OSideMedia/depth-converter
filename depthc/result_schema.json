@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://oside.media/schemas/depthc-result-1.json",
+  "$id": "https://raw.githubusercontent.com/OSideMedia/depth-converter/main/depthc/result_schema.json",
   "title": "Depth Converter kit fire log (result.json)",
   "$comment": "Written by kit.record_result, one entry per fire, appended never overwritten. kit.read_results tolerates any file with a `fires` list and treats a malformed one as empty (never fatal) — this schema is the documented shape, held by tests, not a runtime gate. schemaVersion stays 1 across ADDITIVE changes (audit DC-6 ruling): 2026-09-06 fires[].generationId (optional) — the OSIDE generation a fire became; every fire recorded before that day is unkeyed (PLAN-SHARED-GENERATION-ID step d).",
   "type": "object",

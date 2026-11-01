@@ -110,7 +110,7 @@ on an off-centre push. The joint fit is the reverse.
   The PATH line in `compare` and the camera line in `describe` still do not vote.
 - **A texture-masked median is a candidate change to `motion.flow_series`, not an applied
   one.** It would move `compare`'s PATH numbers and `describe`'s camera words for every
-  kit. It needs its own red/green tests, a fix for the off-centre push, and Peter's view
+  kit. It needs its own red/green tests, a fix for the off-centre push, and the owner's view
   before it ships.
 - **The real-take reading is an inference, not a measurement.** AI takes carry texture
   everywhere, so the shipped all-pixel reader should land nearer diagnostic 1 than the

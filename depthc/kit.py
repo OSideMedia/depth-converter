@@ -15,7 +15,9 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -282,20 +284,27 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
 
     lines += [
         "",
-        "TAKE THIS ONE FILE TO OSIDE",
-        "---------------------------",
+        "TAKE THIS ONE FILE TO SEEDANCE",
+        "------------------------------",
         "  depth.mp4    upload as the VIDEO reference. That is the whole handover.",
         "",
-        "IN THE COMPOSER",
-        "---------------",
-        *_start_frame_lines(manifest),
+        "ON ANY SURFACE",
+        "--------------",
         "  Add one identity per body in the ref - the ref sets the head-count and the",
         "  prompt cannot argue it down. Add your location / prop images for the look.",
+        f"  Ask for about {manifest['suggestedOutputSeconds']:g}s of output.",
+        *_resolution_lines(manifest),
+        "",
+        "ON THE ARK CONSOLE OR ANOTHER SURFACE",
+        "-------------------------------------",
+        "  Paste Variant B from prompt.txt: the whole block, and nothing else.",
+        "",
+        "IN OSIDE",
+        "--------",
+        *_start_frame_lines(manifest),
         "  WRITE NOTHING ABOUT THE MOTION. The Composer already binds an uploaded video",
         "  ref ('take movement, action and pacing from it'); describing the action again",
         "  makes two instructions for one reference. Describe the LOOK only.",
-        f"  Ask for about {manifest['suggestedOutputSeconds']:g}s of output.",
-        *_resolution_lines(manifest),
         "  The binding field: nothing for you to type, on either path. Uploading",
         "  depth.mp4 by hand, there is no such field and the Composer writes its own",
         "  line. Coming in through OSIDE's 'Import kit' door - merged 2026-09-15, the",
@@ -326,8 +335,8 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
         "-----------------",
         "  Record what happened, so the next kit is chosen on evidence:",
         f"    depthc result {manifest['kitName']} --verdict adhered|partial|ignored|late|rejected \\",
-        '        --surface oside --cost 0.30 --notes "what actually came back" \\',
-        "        --generation <id>   # the OSIDE generation it became: the id on its row/URL",
+        '        --surface oside|ark|other --cost 0.30 --notes "what actually came back"',
+        "  Fired in OSIDE? Add --generation <id>, the id on the generation's row/URL.",
         "  That writes result.json here and shows up in Outbox/INDEX.txt.",
     ]
 
@@ -568,9 +577,9 @@ def _resolution_lines(manifest: dict) -> list[str]:
     return [
         f"  Tiers here: {' / '.join(tiers) or 'unknown'}. No 4K on this model as of 2026-08-24.",
         "  Iterate at 720p — that is the safe default and it is measured on 2.0.",
-        "  1080p is UNMEASURED for depth motion on this model: the 0/3 result in",
-        "  DOCS/LIVE-FIRE.md is about 2.0's native 1080p lane, not this one. If you fire",
-        "  1080p here, run `depthc compare` and record it — one fire closes the question.",
+        "  1080p has one good result here: a gentle walk adhered on 2026-08-24, and a hard",
+        "  reference is unfired. The 0/3 in DOCS/LIVE-FIRE.md is 2.0's native 1080p lane, not",
+        "  this one. If you fire 1080p here, run `depthc compare` and record it.",
     ]
 
 
@@ -706,6 +715,35 @@ def validate_generation_id(value: str) -> str:
     return candidate
 
 
+def write_replacing(path: Path, text: str) -> None:
+    """Write `path` by swapping a finished temp file into place.
+
+    A kit can come from someone else, and a `result.json` in it can be a symlink to one of your
+    own files. A plain write would follow it and overwrite that file; the swap replaces the link
+    itself. It also means a crash mid-write cannot leave paid evidence half written.
+    """
+    path = Path(path)
+    # A file that was private stays private, from the moment its copy exists. Not the mode of a
+    # link's target: that is someone else's file. A new file gets what the umask allows, which
+    # os.open applies to 0o666.
+    try:
+        before = os.lstat(path)
+        keep = stat.S_IMODE(before.st_mode) if stat.S_ISREG(before.st_mode) else None
+    except FileNotFoundError:
+        keep = None
+    temp = path.with_name(f".{path.name}.{secrets.token_hex(8)}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666 if keep is None else keep)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            if keep is not None:
+                os.fchmod(out.fileno(), keep)
+            out.write(text)
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
+
+
 def read_results(kit_dir: Path) -> dict:
     """The kit's fire log, or an empty one. A malformed file is never fatal."""
     path = Path(kit_dir) / "result.json"
@@ -766,7 +804,7 @@ def record_result(
     if generation is not None:
         entry["generationId"] = generation
     log["fires"].append(entry)
-    (Path(kit_dir) / "result.json").write_text(json.dumps(log, indent=2) + "\n")
+    write_replacing(Path(kit_dir) / "result.json", json.dumps(log, indent=2) + "\n")
     return log
 
 
@@ -792,7 +830,7 @@ def write_outbox_index(root: Path | None = None) -> Path:
     A kit folder can OUTLIVE ITS MEDIA, and the index says so. `kit.json` and `result.json`
     are tracked (audit DC-4); `depth.mp4` and the rest never are, so restoring a deleted kit
     from git returns the record and not the clip — which is what happened to Sha256Proof_001
-    on 2026-09-15 (ow-4ccd14). Such a folder is listed as `MEDIA GONE — record only`, because
+    on 2026-09-15. Such a folder is listed as `MEDIA GONE — record only`, because
     every other line of this file tells the reader to open a README.txt and upload a
     depth.mp4, and for a husk both of those files are gone.
 
@@ -829,7 +867,7 @@ def write_outbox_index(root: Path | None = None) -> Path:
     if not entries:
         lines.append("(nothing here yet — drop clips in Inbox/ and run: depthc inbox)")
         text = "\n".join(lines) + "\n"
-        (root / "INDEX.txt").write_text(text)
+        write_replacing(root / "INDEX.txt", text)
         return root / "INDEX.txt"
 
     lines.append(f"{len(entries)} kit{'s' if len(entries) != 1 else ''}:")
@@ -866,7 +904,7 @@ def write_outbox_index(root: Path | None = None) -> Path:
         lines.append("")
 
     text = "\n".join(lines)
-    (root / "INDEX.txt").write_text(text)
+    write_replacing(root / "INDEX.txt", text)
     return root / "INDEX.txt"
 
 
@@ -922,6 +960,8 @@ def library_list(root: Path | None = None, tag: str | None = None) -> list[Libra
         try:
             manifest = json.loads(manifest_path.read_text())
         except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(manifest, dict):  # valid JSON and still not a manifest: skipped the same way
             continue
         entry = LibraryEntry(path=manifest_path.parent, manifest=manifest)
         if tag and tag.lower() not in [t.lower() for t in entry.tags]:

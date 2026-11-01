@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -461,7 +462,7 @@ def kit(
     variants: bool = typer.Option(
         False,
         "--variants",
-        help="Also write contrast-stretched, inverted, moderation-capped (midgrey) and "
+        help="Also write contrast-stretched, inverted, luma-capped (midgrey) and "
         "edge-map versions of the same beat into variants/, to compare across live-fires. "
         "Upload exactly one per generation.",
     ),
@@ -723,7 +724,7 @@ def _print_scout(clip: Path, result, indent: str = "    ") -> None:
         f"check sheet.png for a second figure walking into the window."
     )
     typer.echo(
-        f"{indent}{DIM}./.tools/uv run depthc kit \"{clip}\" "
+        f"{indent}{DIM}./.tools/uv run depthc kit {shlex.quote(str(clip))} "
         f"--trim {best.start:g} {best.end:g} --dialect {checks.DEFAULT_DIALECT} "
         f"--tags \"...\" --desc \"...\" --preview --archive{OFF}"
     )
@@ -852,7 +853,7 @@ def result(
     notes: str = typer.Option("", "--notes", help="What actually happened, in your words"),
     generation: Optional[str] = typer.Option(
         None, "--generation",
-        help="The OSIDE generation this fire became — its id (UUID v4) from the generation's row/URL",
+        help="OSIDE only: the generation this fire became — its id (UUID v4) from its row/URL",
     ),
     library: Optional[Path] = typer.Option(None, "--library", help="Kit root (default Outbox/)"),
 ) -> None:
@@ -1014,7 +1015,7 @@ def compare(
     ),
     generation: Optional[str] = typer.Option(
         None, "--generation",
-        help="The OSIDE generation this download IS — its id (UUID v4) from the generation's "
+        help="OSIDE only: the generation this download IS — its id (UUID v4) from the generation's "
              "row/URL; carried into the `depthc result` line that records the fire",
     ),
 ) -> None:
@@ -1155,10 +1156,11 @@ def _record_hint(kit_name: str, comparison, generation_id: str | None) -> str:
     """
     ratio = comparison.ratio if comparison.ratio is not None else "n/a"
     r0 = comparison.r0 if comparison.r0 is not None else "n/a"
-    generation = f" --generation {generation_id}" if generation_id else ""
+    # An OSIDE id is the only evidence of the surface here; without one, nothing is assumed.
+    generation = f" --surface oside --generation {generation_id}" if generation_id else ""
     return (
-        f'{DIM}  ./.tools/uv run depthc result "{kit_name}" --verdict {comparison.suggestion} '
-        f'--surface oside --seconds {comparison.overlap_seconds:g}{generation} \\\n'
+        f'{DIM}  ./.tools/uv run depthc result {shlex.quote(str(kit_name))} --verdict {comparison.suggestion} '
+        f'--seconds {comparison.overlap_seconds:g}{generation} \\\n'
         f'      --notes "ratio {ratio} r0={r0} — <what you saw>"{OFF}'
     )
 
@@ -1268,7 +1270,7 @@ def look_compare(
 
     import cv2
 
-    from depthc import look as looklib
+    from depthc import kit as kitlib, look as looklib
     from depthc.video_io import VideoIOError, probe as probe_file, read_frames, target_size
 
     if manifest is not None:
@@ -1281,6 +1283,8 @@ def look_compare(
             mani = json.loads(manifest.read_text())
         except (OSError, ValueError) as e:
             _die(f"cannot read manifest: {e}")
+        if not isinstance(mani, dict) or mani.get("format") != "oside-davinci/v1":
+            _die(f"{manifest.name} is not an oside-davinci/v1 package")
         base = manifest.parent
         try:
             if look_json is not None:
@@ -1295,10 +1299,24 @@ def look_compare(
         if not videos:
             _die("manifest lists no videos")
         scores = []
-        for v in videos:
-            rel = v.get("file", "")
+        for v in videos if isinstance(videos, list) else [None]:
+            # One bad entry costs one clip, whatever shape it comes in.
+            rel = v.get("file") if isinstance(v, dict) else None
+            if not isinstance(rel, str) or not rel:
+                scores.append(looklib.ClipScore(str(rel), "?", 0, 0, 0, 0, 0, 0, "", error="no file named"))
+                continue
             label = f"{v.get('sceneIndex', '?')}/{v.get('shotNumber', '?')} {Path(rel).name}"
             path = base / rel
+            # The manifest may have come from someone else, so it names files in its own package
+            # and nowhere else: not an absolute path, a ../ or a link pointing out of it.
+            try:
+                inside = path.resolve().is_relative_to(base.resolve())
+            except (OSError, RuntimeError, ValueError) as e:  # a looping link, a NUL in the name
+                scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error=str(e).splitlines()[0][:80]))
+                continue
+            if not inside:
+                scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error="outside the package"))
+                continue
             try:
                 info = probe_file(path)
                 frames = read_frames(info, fps=fps, size=target_size(info, "480p"))
@@ -1310,7 +1328,7 @@ def look_compare(
         cdl_path = None
         if emit_cdl:
             cdl_path = base / "look-cdl.json"
-            cdl_path.write_text(json.dumps(looklib.cdl_manifest(ref, scores, str(manifest)), indent=2) + "\n")
+            kitlib.write_replacing(cdl_path, json.dumps(looklib.cdl_manifest(ref, scores, str(manifest)), indent=2) + "\n")
         if as_json:
             typer.echo(json.dumps({"look": ref.source, "manifest": str(manifest), "clips": [s.as_dict() for s in scores],
                                    **({"cdl": str(cdl_path)} if cdl_path else {})}, indent=2))
@@ -1475,7 +1493,7 @@ def stability(
 
 @app.command()
 def ui(
-    port: int = typer.Option(7861, "--port", help="Chosen to avoid OSIDE's dev server on 3000"),
+    port: int = typer.Option(7861, "--port", help="Port on 127.0.0.1"),
     no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a tab"),
 ) -> None:
     """Launch the local web UI."""

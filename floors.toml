@@ -1,5 +1,5 @@
 # floors.toml — Depth Converter as a building, read by ~/.claude/building.py (/building).
-# Floor list approved by Peter 2026-10-27 ("i trust that you can build it"); he owns it.
+# Floor list approved by the owner 2026-10-27 ("i trust that you can build it"); the list is theirs.
 # A floor may name a `check` command; none does yet, so this file lets nothing run.
 # Paths are relative to the repo root; `*` stays in one folder, `**` crosses folders,
 # and when two patterns match a file the LAST one wins.

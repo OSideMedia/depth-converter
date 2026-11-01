@@ -38,7 +38,7 @@ The folder loop is the main path. The Gradio UI (`depthc ui`) still works, but i
 secondary surface — it converts one clip at a time and adds a server, a port, and app
 bundles for no real gain over doing it here.
 
-1. Peter drops clips into `Inbox/`.
+1. The owner drops clips into `Inbox/`.
 2. `./.tools/uv run depthc inbox` — triage plus a scout pass: what each clip is, whether it
    carries a matte, where its motion actually sits, and which window to cut. ~4s per clip.
 3. **Look at `sheet.png` / the source before accepting the proposed window.** The scorer ranks
@@ -52,7 +52,7 @@ bundles for no real gain over doing it here.
    was caught by looking at a picture, not by any test. Every kit now ships `sheet.png` for
    exactly this.
 6. Report the tier, the motion energy, and the kit path.
-7. After Peter fires it: `depthc compare <kit> <downloaded.mp4>` measures adherence the
+7. After the owner fires it: `depthc compare <kit> <downloaded.mp4>` measures adherence the
    Gate-4 way (energy ratio FIRST, zero-lag correlation second, suggested verdict at the
    end) — never re-derive that math by hand. The REGIONS (3×3 placement + mirrored
    control) and PATH (camera direction) lines under it are uncalibrated structure signals:
@@ -73,7 +73,7 @@ bundles for no real gain over doing it here.
    of its depth.mp4 as written, and OSIDE's upload door hashes the uploaded bytes onto the
    reference. The OSIDE half is MERGED on OSIDE's main (`f094e558`, the upload door records
    the clip's sha256 on the reference; `lib/fal/types.ts` carries the field) — it lives
-   there, not here. Ask Peter for the id with the download.
+   there, not here. Ask the owner for the id with the download.
 
 8. A generation with **no kit** (fired from text alone) gets `depthc describe <clip>` —
    the same depth pass, described in prompt words (camera over time with a tempo word,
@@ -141,7 +141,7 @@ surfaces that say so — this file, `README.md`, `Outbox/README.txt` and every k
 `README.txt` — are held to the same words by `tests/test_handover.py`; until 2026-09-06
 two of them said "take two files and paste binding.txt" (audit DC-2). `--variants` adds four refs of the same
 beat under `variants/` — contrast-stretched, inverted, **midgrey** (luma capped at 190 so
-figures never blow to near-white — the moderation-rejection shape), and **edges** (Canny of
+figures never blow to near-white, the shape of the one refused kit on record; never fired), and **edges** (Canny of
 the depth video, experimental) — **exactly one is uploaded per generation**.
 
 ## Firing a kit — the rules the live run produced
@@ -169,8 +169,11 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
 ## Laws — do not violate
 
 - **VDA-Small only.** Across DA-V2, VDA and DA3 only the Small checkpoints are Apache-2.0;
-  every Base/Large/Giant is CC-BY-NC-4.0. Peter makes commercial films. There is no
+  every Base/Large/Giant is CC-BY-NC-4.0. The owner makes commercial films. There is no
   model-size selector by design, and adding one is a licensing violation, not an upgrade.
+- **Written for a public repo.** No personal names, machine paths, credentials or provider
+  ids in any tracked file, commit message or PR text. Say "the owner". A vendor's rule is
+  described, never worked around: a refusal is the provider's call.
 - **Nothing fires against a paid API automatically.** Live-fire is human-run and
   budget-approved. See `DOCS/LIVE-FIRE.md`.
 - **Never commit media.** `Inbox/`, `Processed/` and `Outbox/` media are gitignored and
@@ -182,8 +185,7 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
   `prompt.txt`, `binding.txt`, `README.txt`, `variants/` never are
   (`tests/test_gitignore.py` proves each with `git check-ignore`). The wholesale
   `Outbox/*` rule had already swallowed every 2026-07-25 kit's `result.json` — paid
-  evidence, gone (`DOCS/LIVE-FIRE.md`). (Repo went private under OSideMedia on 2026-07-25
-  once Gate 4 passed, with the per-repo noreply email
+  evidence, gone (`DOCS/LIVE-FIRE.md`). (Commits use the per-repo noreply email
   `261988918+OSideMedia@users.noreply.github.com`.)
 - **Never edit `vendor/`.** Upstream is pinned and imported; device and precision handling
   lives in `engine.py`. The per-window hook works by rebinding `tqdm` in their module

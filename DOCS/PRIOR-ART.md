@@ -131,7 +131,7 @@ re-derived in our own units; no code was copied.
   (it previously lived only in CLAUDE.md, invisible at fire time).
 
 - **Framing vocabulary from the depth silhouette** (taken 2026-08-23, same day, after
-  Peter's call to close the loose end). `read_framing` sizes the nearest iso-depth
+  the owner's call to close the loose end). `read_framing` sizes the nearest iso-depth
   figure and names it on a five-rung ladder; everything tighter than "medium" collapses
   into one honest "tight" rung because an in-frame silhouette saturates at 1.0.
   Validated on six CC clips from Wikimedia Commons — the first pass failed 3/6 and the
@@ -149,7 +149,7 @@ re-derived in our own units; no code was copied.
   are unnameable (`path_label` says so by construction). We hold the one signal that
   could split them from pixels: the parallax gradient across depth bands. Uncalibrated
   research with no current consumer; recorded so the seam is not lost. (Closed
-  2026-08-23 as won't-do by Peter's call — no consumer; this note is the preserved
+  2026-08-23 as won't-do by the owner's call — no consumer; this note is the preserved
   idea.)
 
 ### Deliberately not taken

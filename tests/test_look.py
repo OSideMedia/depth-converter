@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 
 import numpy as np
 import pytest
@@ -169,3 +170,98 @@ def test_cdl_manifest_shape():
     assert m["schema"] == L.CDL_SCHEMA and "HEURISTIC" in m["derivation"]
     assert m["clips"][0]["cdl"]["saturation"] and m["clips"][0]["identity"] is False
     assert m["clips"][1] == {"file": "videos/b.mp4", "error": "unreadable"}
+
+
+# ------------------------------------------------------------------ a manifest from someone else
+
+def _package(tmp_path, clip_tiny, videos: list[dict], format_="oside-davinci/v1") -> tuple:
+    """A package holding one real clip, and a measured look to score against."""
+    package = tmp_path / "package"
+    (package / "videos").mkdir(parents=True)
+    shutil.copy(clip_tiny, package / "videos" / "shot.mp4")
+    look_json = tmp_path / "look.json"
+    look_json.write_text(json.dumps(L.build_look(solid((128, 128, 128))[None], [0.0], "still", 0.0).as_dict()))
+    manifest = package / "manifest.json"
+    manifest.write_text(json.dumps({"format": format_, "videos": videos}))
+    return look_json, manifest
+
+
+def _look_compare(look_json, manifest, *extra):
+    from typer.testing import CliRunner
+
+    from depthc.cli import app
+
+    return CliRunner().invoke(app, ["look-compare", str(look_json), "--manifest", str(manifest), "--json", *extra])
+
+
+def test_a_manifest_reads_the_clips_in_its_own_package(tmp_path, clip_tiny):
+    look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}])
+    done = _look_compare(look_json, manifest)
+    assert done.exit_code == 0, done.output
+    clip = json.loads(done.output)["clips"][0]
+    assert not clip.get("error")
+
+
+@pytest.mark.parametrize("escape", ["../private.mp4", "ABSOLUTE", "videos/link.mp4"])
+def test_a_manifest_cannot_read_a_file_outside_its_package(tmp_path, clip_tiny, escape):
+    private = tmp_path / "private.mp4"
+    shutil.copy(clip_tiny, private)
+    target = str(private) if escape == "ABSOLUTE" else escape
+    look_json, manifest = _package(tmp_path, clip_tiny, [{"file": target}])
+    if escape == "videos/link.mp4":
+        (manifest.parent / "videos" / "link.mp4").symlink_to(private)
+    done = _look_compare(look_json, manifest)
+    assert done.exit_code == 0, done.output
+    assert json.loads(done.output)["clips"][0]["error"] == "outside the package"
+
+
+def test_a_file_that_is_not_a_package_is_refused(tmp_path, clip_tiny):
+    look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}], format_="something/else")
+    done = _look_compare(look_json, manifest)
+    assert done.exit_code == 1
+    assert "not an oside-davinci/v1 package" in done.output
+
+
+def test_a_link_that_loops_costs_one_clip_and_not_the_whole_comparison(tmp_path, clip_tiny):
+    look_json, manifest = _package(
+        tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}, {"file": "videos/loop.mp4"}],
+    )
+    loop = manifest.parent / "videos" / "loop.mp4"
+    loop.symlink_to(loop)
+    done = _look_compare(look_json, manifest, "--json")
+    assert done.exit_code == 0, done.output
+    clips = {c["file"]: c for c in json.loads(done.output)["clips"]}
+    assert clips["videos/loop.mp4"]["error"]
+    assert not clips["videos/shot.mp4"].get("error")
+
+
+@pytest.mark.parametrize("bad", [None, 7, {"file": None}, {"file": ""}, {"file": 3}, {"file": "videos/nul\u0000.mp4"}])
+def test_a_malformed_entry_costs_one_clip_and_not_the_whole_comparison(tmp_path, clip_tiny, bad):
+    look_json, manifest = _package(tmp_path, clip_tiny, [bad, {"file": "videos/shot.mp4"}])
+    done = _look_compare(look_json, manifest, "--json")
+    assert done.exit_code == 0, done.output
+    clips = json.loads(done.output)["clips"]
+    assert len(clips) == 2
+    assert clips[0]["error"]
+    assert not clips[1].get("error")
+
+
+def test_a_videos_block_that_is_not_a_list_is_reported_and_does_not_fail(tmp_path, clip_tiny):
+    look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}])
+    package = json.loads(manifest.read_text())
+    package["videos"] = 5
+    manifest.write_text(json.dumps(package))
+    done = _look_compare(look_json, manifest, "--json")
+    assert done.exit_code == 0, done.output
+    assert json.loads(done.output)["clips"][0]["error"]
+
+
+def test_the_cdl_goes_in_place_of_a_symlink_and_not_through_it(tmp_path, clip_tiny):
+    look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}])
+    precious = tmp_path / "my-document.txt"
+    precious.write_text("mine")
+    (manifest.parent / "look-cdl.json").symlink_to(precious)
+    done = _look_compare(look_json, manifest, "--emit-cdl")
+    assert done.exit_code == 0, done.output
+    assert precious.read_text() == "mine"
+    assert not (manifest.parent / "look-cdl.json").is_symlink()

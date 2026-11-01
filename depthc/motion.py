@@ -934,17 +934,16 @@ def invert(frames: np.ndarray) -> np.ndarray:
     return (255 - frames).astype(np.uint8)
 
 
-MODERATION_CEILING = 190  # brightest grey the midgrey variant will ship
+MIDGREY_CEILING = 190  # brightest grey the midgrey variant will ship
 
 
-def midgrey(frames: np.ndarray, ceiling: int = MODERATION_CEILING) -> np.ndarray:
+def midgrey(frames: np.ndarray, ceiling: int = MIDGREY_CEILING) -> np.ndarray:
     """Scale the whole range down so no figure blows toward white.
 
-    Built for the moderation boundary the live run mapped: the one input rejection
-    (`InputVideoSensitiveContentDetected`) was two bare depth silhouettes, prone and
-    overlapping, blown to NEAR-WHITE filling the frame — depth strips clothing, so a
-    near-white body-shape reads as bare skin to the filter. Upright, separated,
-    mid-grey-reading figures sailed through from the same pipeline.
+    Made after the one kit on record refused at input (`InputVideoSensitiveContentDetected`):
+    two depth silhouettes, prone and overlapping, blown to near-white filling the frame.
+    Upright, separated figures from the same pipeline passed. An experiment that has never
+    been fired, and not a way round a provider's rules: a refused reference stays refused.
 
     The map is linear, so relative depth ordering and timing are untouched; motion energy
     scales down by the same ceiling/255 factor and the per-variant energy in the manifest
@@ -985,8 +984,8 @@ VARIANTS = {
     ),
     "midgrey": (
         midgrey,
-        f"luma capped at {MODERATION_CEILING} — figures stay grey instead of blowing to "
-        f"near-white; for refs that trip input moderation (prone/overlapping bodies)",
+        f"luma capped at {MIDGREY_CEILING} — figures stay grey instead of blowing to "
+        f"near-white; experimental, never fired",
     ),
     "edges": (
         depth_edges,

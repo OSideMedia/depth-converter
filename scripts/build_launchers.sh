@@ -15,6 +15,13 @@ APPS="${1:-/Applications}"
 PORT="${DEPTHC_PORT:-7861}"
 PIDFILE="$HOME/.depthc-ui.pid"
 
+case "$PORT" in
+  ''|*[!0-9]*) echo "FATAL: DEPTHC_PORT must be a port number (got: $PORT)" >&2; exit 1 ;;
+esac
+# Quoted for the scripts they land in: a folder name is data, and those scripts read it as shell.
+QROOT="$(printf %q "$ROOT")"
+QPIDFILE="$(printf %q "$PIDFILE")"
+
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 make_app() {
@@ -38,7 +45,7 @@ make_app() {
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>run</string>
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>
@@ -51,19 +58,36 @@ PLIST
 
 say "Building launchers in $APPS (port $PORT)"
 
+# Both apps need the same answer to "is this our server?". Its name in the command line is not
+# proof: any program can carry those words in an argument. It must also run in this project's
+# folder, which is where the Start app puts it. A folder name with a newline in it reads as
+# not ours, so the apps leave the server alone rather than kill something else.
+IS_OURS="is_ours() {
+  ps -o command= -p \"\$1\" 2>/dev/null | grep -q 'depthc ui' || return 1
+  [ \"\$(lsof -a -p \"\$1\" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')\" = \"\$(cd \"\$ROOT\" 2>/dev/null && pwd -P)\" ]
+}"
+
 # ------------------------------------------------------------------------ start
 make_app "Depth Converter" "#!/bin/bash
 # Launch the Depth Converter UI, wait for the port, then open a browser tab.
-ROOT=\"$ROOT\"
+ROOT=$QROOT
 PORT=$PORT
-PIDFILE=\"$PIDFILE\"
+PIDFILE=$QPIDFILE
 LOG=\"\$HOME/Library/Logs/depthc-ui.log\"
 mkdir -p \"\$(dirname \"\$LOG\")\"
 
-# Already running? Just focus the tab rather than starting a second server.
-if lsof -ti :\$PORT >/dev/null 2>&1; then
-  open \"http://127.0.0.1:\$PORT\"
-  exit 0
+$IS_OURS
+
+# Already running? Just focus the tab rather than starting a second server. Another program
+# on this port is not us, and opening it would show the wrong app.
+HOLDER=\$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null | head -1)
+if [ -n \"\$HOLDER\" ]; then
+  if is_ours \"\$HOLDER\"; then
+    open \"http://127.0.0.1:\$PORT\"
+    exit 0
+  fi
+  osascript -e \"display alert \\\"Depth Converter\\\" message \\\"Port \$PORT is in use by another program.\\\"\"
+  exit 1
 fi
 
 cd \"\$ROOT\" || {
@@ -90,26 +114,31 @@ exit 1
 
 # ------------------------------------------------------------------------- stop
 make_app "Depth Stop" "#!/bin/bash
-# Stop the Depth Converter UI: pidfile first, then anything still holding the port.
+# Stop the Depth Converter UI: pidfile first, then our own server if it still holds the port.
+# Only ever ours: a stale pidfile can name a process the system has since reused, a browser
+# tab counts as using the port, and another program can be listening on it.
+ROOT=$QROOT
 PORT=$PORT
-PIDFILE=\"$PIDFILE\"
+PIDFILE=$QPIDFILE
+
+$IS_OURS
 
 if [ -f \"\$PIDFILE\" ]; then
   PID=\$(cat \"\$PIDFILE\")
-  kill \"\$PID\" 2>/dev/null || true
+  is_ours \"\$PID\" && kill \"\$PID\" 2>/dev/null
   rm -f \"\$PIDFILE\"
 fi
 
-# The pidfile tracks the launcher's child; uv may have spawned its own. Sweep the port so
-# a stale listener can never block the next start.
+# The pidfile tracks the launcher's child; uv may have spawned its own. Sweep the listeners so
+# one of ours left behind can never block the next start.
 sleep 1
-LEFT=\$(lsof -ti :\$PORT 2>/dev/null || true)
-if [ -n \"\$LEFT\" ]; then
-  echo \"\$LEFT\" | xargs kill 2>/dev/null || true
-  sleep 1
-  LEFT=\$(lsof -ti :\$PORT 2>/dev/null || true)
-  [ -n \"\$LEFT\" ] && echo \"\$LEFT\" | xargs kill -9 2>/dev/null || true
-fi
+for PID in \$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null); do
+  is_ours \"\$PID\" && kill \"\$PID\" 2>/dev/null
+done
+sleep 1
+for PID in \$(lsof -ti tcp:\$PORT -sTCP:LISTEN 2>/dev/null); do
+  is_ours \"\$PID\" && kill -9 \"\$PID\" 2>/dev/null
+done
 exit 0
 "
 

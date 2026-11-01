@@ -27,8 +27,9 @@ and timing from it. Feeding the **depth version** of a real clip instead of the 
 - strips appearance/identity/style so nothing bleeds from the source into the output;
 - preserves what pose skeletons throw away: **camera path, props, scene geometry** (a sword,
   a market stall, a crane move all survive in depth);
-- avoids Seedance's strict real-human-face input filter that frequently rejects raw footage
-  (this face-filter benefit is community-inferred, not documented — treat as likely, not law).
+- carries no face: Seedance rejects photographic faces in references, so raw footage of people
+  often cannot be used as a reference at all (that it is often refused is community-reported,
+  not documented).
 
 The reliable envelope (from hands-on community testing, not marketing): **3–8 s single-signal
 clips** follow best; refs over ~10 s lose adherence; mixed-signal refs (camera move + action +
@@ -46,7 +47,7 @@ Use **Video Depth Anything — Small (VDA-Small)**, not per-frame Depth Anything
   **per-video global normalization** — flicker-free by construction. Per-frame DA-V2 +
   smoothing fixes brightness flicker but not depth-scale drift; VDA fixes both.
 - **LICENSE LAW:** across DA-V2, VDA, and DA3, **only the Small models are Apache-2.0.
-  Every Base/Large/Giant checkpoint is CC-BY-NC-4.0 (non-commercial).** Peter makes
+  Every Base/Large/Giant checkpoint is CC-BY-NC-4.0 (non-commercial).** The owner makes
   commercial films. Ship VDA-Small only. Do not add a model-size dropdown that downloads
   NC-licensed weights. Include the Apache license/attribution notice in the repo.
 
@@ -88,7 +89,7 @@ the picture. Gate 0 cannot pass without fixing this.
 > `torch>=2.5` and MPS availability.
 
 **Phase 0 therefore MUST:**
-1. **[AMENDED 2026-07-24, Peter's call] Install the arm64 `uv` PROJECT-LOCALLY into
+1. **[AMENDED 2026-07-24, the owner's call] Install the arm64 `uv` PROJECT-LOCALLY into
    `Depth Converter/.tools/`, not into `~/.local/bin`.** The plan's original global-shadow
    approach would have switched uv's architecture for the whole machine, and two unrelated
    projects already depend on the x86_64 one (`last30days-skill`, which has a committed
@@ -160,7 +161,7 @@ is noted in Phase 4)
 | Output duration | 4–15 s (15 s hard ceiling on 2.0) |
 | Ref addressing | `@Video 1` ordinal mention in prompt, semantic role stated in text |
 | First-frame + refs | API supports coexistence, but **OSIDE's adapter deliberately never sends refs alongside a start frame** — the kit therefore treats the extracted still as an `@Image` look ref, not a `first_frame` param |
-| Faces | photographic human faces in any reference image are rejected — identity refs must be AI-generated/stylized (or go through Peter's Ark asset-library likeness path) |
+| Faces | photographic human faces in any reference image are rejected — identity refs must be AI-generated/stylized (or go through the owner's Ark asset-library likeness path) |
 
 Community adherence heuristic worth echoing in the kit's prompt guidance: ~**70% identity
 refs / 30% motion ref** weighting; over-weighting the motion ref causes identity drift.
@@ -176,7 +177,7 @@ refs / 30% motion ref** weighting; over-weighting the motion ref causes identity
   explicit Phase 4 observation item.
 
 ### How this aligns with OSIDE AI FILMMAKER (scouted 2026-07-23, app v0.66.2)
-Peter's main app already has **all the plumbing** to consume this tool's output:
+The owner's main app already has **all the plumbing** to consume this tool's output:
 - Ark adapter `lib/fal/adapters/arkSeedance.ts` sends `video_url` refs with
   `role:'reference_video'` (URL or `asset://`, no base64); ref caps `{image:9, video:3,
   audio:3, total:15}`; video-ref presence flips billing to the cheaper with-video rate.
@@ -187,7 +188,7 @@ Peter's main app already has **all the plumbing** to consume this tool's output:
   plumbing is **proven**; what Phase 4 tests is the *depth-as-motion technique*, not the
   wiring — a Phase 4 failure points at the technique, never the adapter. The one-line
   comment correction in `arkSeedance.ts` goes into the **Phase 5 ticket** (zero OSIDE
-  files touched until the technique is proven — Peter's call 2026-07-24).
+  files touched until the technique is proven — the owner's call 2026-07-24).
 - Composer dialect (`lib/prompter/compile.ts`) numbers refs `@Video N` and uses
   Define-binding sentences (`lib/prompter/refManifest.ts`, e.g. `characterBinding` line 47,
   `chainTailBinding` line 256). A depth video needs only a new binding sentence.
@@ -214,7 +215,7 @@ kit), best-in-class temporal quality, zero Electron weight.
 
 ### v1 deliverables
 1. **CLI** — `depthc convert <input> [options]` — the core, fully scriptable/testable.
-2. **Gradio web UI** — local, dark-themed, drag-and-drop, for Peter's daily use.
+2. **Gradio web UI** — local, dark-themed, drag-and-drop, for the owner's daily use.
 3. **Seedance Kit** per conversion (a folder + zip):
    - `depth.mp4` — grayscale depth video, near=bright (invertible), encode spec below
    - `still.png` — a clean frame from the *original* clip. Default `--still auto`: pick
@@ -269,7 +270,7 @@ it is a motion guide, not picture, and Seedance's ref-input window caps it anywa
 Output resolution is a separate choice: test at 480p, confirm at 720p, master at
 720p/1080p. 4K output is supported by the standard model per OSIDE's adapter but is
 untested with video refs and costs several× more — treat it as a Phase 4 experiment;
-upscaling a 720p/1080p master (already in Peter's stack) is usually the cheaper 4K path.
+upscaling a 720p/1080p master (already in the owner's stack) is usually the cheaper 4K path.
 Note the cloud boundary: the **source clip never leaves the Mac**. Only the
 appearance-stripped `depth.mp4` (zero original pixels, ~2–6 MB) is uploaded — and only
 at fire time, into the existing `references` bucket, because the Ark API takes video
@@ -362,10 +363,10 @@ file ≤ 50 MB (re-encode at crf 20 with WARN if exceeded).
   | CLIP D.mp4 | 8.9 s | 23.976 | 1.3 MB | near-24 conform |
   Synthetic ffmpeg clips remain the *pytest* fixtures (deterministic); these real clips
   are the manual gate checks.
-- **Approved identity characters: WILLIAM and ANNA** — both already registered and
+- **Approved identity characters: Character A and Character B** (names removed for the public repo) — both already registered and
   approved in the Ark asset-library likeness system. Phase 4's identity `@Image` refs use
   these two (via their `asset://` refs / crowned stills in OSIDE), NOT ad-hoc AI images —
-  they're pre-cleared for the face filter and give the live-fire a known-good identity
+  they're approved for use on Ark and give the live-fire a known-good identity
   baseline, so any drift observed is attributable to the depth ref weighting.
 
 ### Repo law [AMENDED 2026-07-24]
@@ -516,7 +517,7 @@ Key engineering decisions:
   channel, and brighter than the subject it is supposed to be following. Not anticipated
   anywhere in this plan; found only because Gate 1 insists on real footage.
 
-  **RESOLVED — `--crop auto` is now the default** (Peter's call 2026-07-24), with
+  **RESOLVED — `--crop auto` is now the default** (the owner's call 2026-07-24), with
   `--crop none` and explicit `--crop W:H:X:Y` as overrides. Three of the four test clips
   (A, C, D) turn out to be matted; only B is full-frame.
 
@@ -566,7 +567,7 @@ Key engineering decisions:
     files; a malformed manifest is skipped, never fatal. No database, per §1.
 
 ### Phase 3 — Gradio UI (~medium)
-`depthc ui` → localhost app, dark theme (near-black surfaces, minimal chrome — Peter's
+`depthc ui` → localhost app, dark theme (near-black surfaces, minimal chrome — the owner's
 taste runs to the OSIDE studio look; no rainbow Gradio defaults). Layout: left column =
 source (upload/drop, probe readout, trim slider with duration+constraint feedback,
 settings accordion matching CLI flags, **Tags + Description fields** for the Motion
@@ -578,7 +579,7 @@ fed from the engine's per-window callback. Long-clip UX: >15 s uploads get an in
 warning and auto-trim suggestion, never a silent failure. Session UX: back-to-back
 conversions in one session must not grow memory (engine memory hygiene, §2).
 
-**macOS launcher pair (in scope — Peter asked for it):** build `Depth Converter.app` and
+**macOS launcher pair (in scope — the owner asked for it):** build `Depth Converter.app` and
 `Depth Stop.app` in `/Applications`, mirroring the existing OSIDE Studio.app /
 OSIDE Stop.app pattern (AppleScript/Automator wrappers; note the `arch -arm64` fix that
 pair needed). Start app: launch the Gradio server (uv env), wait for the port, open the
@@ -641,14 +642,14 @@ does not collide with OSIDE dev (3000) — e.g. 7861 — and record it in README
 
 ### Phase 4 — Live-fire verification (HUMAN-GATED — do not execute autonomously)
 **LAW (mirrors OSIDE): nothing fires against a paid API automatically.** This phase is a
-written protocol Peter runs (or supervises), budget-approved, low-res first.
+written protocol the owner runs (or supervises), budget-approved, low-res first.
 **[AMENDED 2026-07-24]** the `reference_video` wiring is already proven (v0.39.1 chaining
 sweep) — this phase tests the *depth-as-motion technique only*; any failure points at the
 technique/weighting, never the adapter:
 1. Pick a 5–8 s single-action reference clip (CLIP A/B/D qualify); `depthc kit` it.
 2. Upload `depth.mp4` through OSIDE's upload route (references bucket) or attach in
-   Composer; identity `@Image` refs = **WILLIAM and/or ANNA** (Ark-approved likeness
-   characters, §1a) — pre-cleared for the face filter, known-good identity baseline;
+   Composer; identity `@Image` refs = **Character A and/or Character B** (Ark-approved likeness
+   characters, §1a), a known-good identity baseline;
    paste the kit's **Variant A binding phrase** into the ref's binding field (never the
    standalone block — the Composer compiles its own ACTIVE REFERENCES).
 3. Generate at 480p first (with-video billing is the cheaper token rate; expect roughly
@@ -691,7 +692,7 @@ against whatever the Phase 4 console check establishes.
 2. Batch/queue mode for converting a shot-list of refs.
 3. Optional pose-skeleton export layer (motion-previs-studio-style) for Kling Motion
    Control cross-compatibility.
-4. yt-dlp intake (rights-sensitive — Peter decides).
+4. yt-dlp intake (rights-sensitive — the owner decides).
 5. In-app OSIDE integration (Phase 5 ticket).
 6. Blockout interop (accept its synthetic depth.mp4 into the same kit/checker pipeline).
 
@@ -699,8 +700,8 @@ against whatever the Phase 4 console check establishes.
 - **Adherence is probabilistic.** Seedance follows video refs well but not deterministically;
   >10 s and multi-signal clips degrade; fast motion can flicker. The kit's guidance text
   is the mitigation.
-- **Moderation drift.** The technique is partly popular *because* Seedance blocks real-face
-  inputs; ByteDance filter changes could affect the workflow in either direction.
+- **Provider rules can change.** Seedance refuses photographic faces in references, and
+  ByteDance could change that handling in either direction.
 - **Seedance 2.5** (out July 2026) officially supports green-screen/white-model motion
   references and 50 refs/30 s — it may eventually consume this tool's output even better,
   but nothing native replaces "I have real footage, give me a clean motion carrier" yet.
@@ -713,5 +714,5 @@ against whatever the Phase 4 console check establishes.
 ## 6. Definition of done
 `bash scripts/setup.sh` → `uv run depthc kit myclip.mov` → a kit folder that passes its
 own checker, plus `uv run depthc ui` for daily use; all gates 0–3 green; Phase 4 protocol
-written and awaiting Peter's budget-approved live-fire; README explains install, the
+written and awaiting the owner's budget-approved live-fire; README explains install, the
 technique, the envelope (3–8 s, one signal), and the rights note.

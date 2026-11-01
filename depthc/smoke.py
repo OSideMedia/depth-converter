@@ -105,7 +105,7 @@ def main() -> int:
 
     t0 = time.perf_counter()
     model = VideoDepthAnything(**MODEL_CONFIG)
-    model.load_state_dict(torch.load(ckpt, map_location="cpu"), strict=True)
+    model.load_state_dict(torch.load(ckpt, map_location="cpu", weights_only=True), strict=True)
     model = model.to(device).eval()
     ok(f"VDA-Small loaded on {device} in {time.perf_counter() - t0:.1f}s")
 

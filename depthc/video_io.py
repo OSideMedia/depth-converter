@@ -126,7 +126,9 @@ def _rotation_of(stream: dict) -> int:
 
 def probe(path: str | Path) -> VideoInfo:
     """ffprobe a file. Raises VideoIOError if it has no decodable video stream."""
-    path = Path(path)
+    # Absolute, so ffmpeg and ffprobe cannot read `-clip.mp4` as an option or `file:clip.mp4` as a
+    # protocol. Every later decode reuses this path through `info.path`.
+    path = Path(path).absolute()
     if not path.is_file():
         raise VideoIOError(f"No such file: {path}")
 

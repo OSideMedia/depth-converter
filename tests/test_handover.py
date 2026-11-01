@@ -82,6 +82,13 @@ def test_every_surface_scopes_binding_txt_to_surfaces_with_a_binding_field(tmp_p
         assert NOT_OSIDE.search(text), f"{name} does not scope binding.txt"
 
 
+def test_the_kit_readme_gives_a_path_that_does_not_need_oside():
+    text = _flat(_kit_readme())
+    assert "TAKE THIS ONE FILE TO SEEDANCE" in text
+    assert "Paste Variant B from prompt.txt" in text
+    assert text.index("Variant B") < text.index("IN OSIDE")
+
+
 # --------------------------------------------- the door that makes the rule conditional
 #
 # "Paste no binding phrase in OSIDE" was stated flat, and it is only true of a HAND UPLOAD:

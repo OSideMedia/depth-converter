@@ -298,10 +298,10 @@ def test_every_variant_is_a_named_transform_with_a_description():
 
 
 def test_midgrey_caps_the_brightest_level():
-    """Nothing may approach white: near-white body-shapes are the moderation trigger."""
+    """Nothing may approach white: that is the whole of what this variant does."""
     hot = np.full((3, 90, 160), 255, dtype=np.uint8)
     capped = m.midgrey(hot)
-    assert capped.max() == m.MODERATION_CEILING
+    assert capped.max() == m.MIDGREY_CEILING
     assert capped.dtype == np.uint8
 
 

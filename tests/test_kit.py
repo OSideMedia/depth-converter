@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -310,7 +311,8 @@ def test_the_2_5_template_does_not_present_the_0_of_3_as_its_own_result():
     """
     text = _render(dialect="seedance-2.5")
     assert "DOES NOT TRANSFER" in text
-    assert "UNMEASURED, not condemned" in text
+    assert "a hard reference is unfired" in text
+    assert "UNMEASURED" not in text  # the 2026-08-24 fire measured it, once
 
 
 def test_prompt_carries_the_suggested_output_length():
@@ -523,14 +525,14 @@ def test_kit_readme_names_the_one_file_to_upload():
 
     It was two until the 2026-07-25 live run: an uploaded video reference has no binding
     field in OSIDE, and the compiler writes its own @Video line, so pasting binding.txt on
-    top was two instructions for one reference. The README must not send Peter looking for
+    top was two instructions for one reference. The README must not send the operator looking for
     a field that isn't there.
     """
     report = check(duration=5.0, width=1280, height=536, fps=24.0,
                    size_bytes=800_000, still_has_real_faces=True)
     text = kitlib.render_kit_readme(_manifest(), report, has_preview=True)
 
-    assert "TAKE THIS ONE FILE TO OSIDE" in text
+    assert "TAKE THIS ONE FILE TO SEEDANCE" in text
     assert "depth.mp4    upload as the VIDEO reference" in text
     assert "WRITE NOTHING ABOUT THE MOTION" in text
     assert text.index("TAKE THIS ONE FILE") < text.index("EVERYTHING ELSE")
@@ -627,8 +629,8 @@ def test_index_creates_the_outbox_if_missing(tmp_path):
 
 def test_index_marks_a_kit_whose_media_is_gone(tmp_path):
     """A kit folder can outlive its media: kit.json and result.json are tracked, depth.mp4
-    never is, so a restore brings back the record alone (Sha256Proof_001, 2026-09-15,
-    ow-4ccd14). Every other line of INDEX.txt says "open its README.txt" and "upload
+    never is, so a restore brings back the record alone (Sha256Proof_001,
+    2026-09-15). Every other line of INDEX.txt says "open its README.txt" and "upload
     depth.mp4" — for a husk both files are gone, so the entry has to say so."""
     _write_kit(tmp_path, "Alive_001", ["x"])
     _write_kit(tmp_path, "Husk_001", ["y"], with_media=False)
@@ -1112,3 +1114,85 @@ def test_every_tracked_result_json_validates():
     schema = json.loads(RESULT_SCHEMA_PATH.read_text())
     for rel in tracked:
         jsonschema.validate(json.loads((root / rel).read_text()), schema)
+
+
+# ------------------------------------------------------------------ a kit from someone else
+
+def test_a_symlinked_result_json_is_replaced_and_its_target_left_alone(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    precious = tmp_path / "my-document.txt"
+    precious.write_text("mine")
+    (kit_dir / "result.json").symlink_to(precious)
+    kitlib.record_result(kit_dir, verdict="adhered")
+    assert precious.read_text() == "mine"
+    assert not (kit_dir / "result.json").is_symlink()
+    assert json.loads((kit_dir / "result.json").read_text())["fires"][0]["verdict"] == "adhered"
+
+
+@pytest.fixture
+def umask_022():
+    before = os.umask(0o022)
+    yield
+    os.umask(before)
+
+
+def test_a_replaced_file_is_readable_and_leaves_no_temp_file(tmp_path, umask_022):
+    target = tmp_path / "result.json"
+    kitlib.write_replacing(target, "{}\n")
+    assert target.read_text() == "{}\n"
+    assert target.stat().st_mode & 0o777 == 0o644
+    assert [p.name for p in tmp_path.iterdir()] == ["result.json"]
+
+
+def test_a_replaced_file_keeps_the_mode_it_had(tmp_path, umask_022):
+    target = tmp_path / "result.json"
+    target.write_text("old")
+    target.chmod(0o600)
+    kitlib.write_replacing(target, "new")
+    assert target.read_text() == "new"
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_a_private_file_is_never_readable_while_its_copy_is_written(tmp_path, umask_022, monkeypatch):
+    target = tmp_path / "result.json"
+    target.write_text("old")
+    target.chmod(0o600)
+    real_open, modes = os.open, []
+
+    def recording_open(path, flags, mode=0o777, **kwargs):
+        modes.append(mode)
+        return real_open(path, flags, mode, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    kitlib.write_replacing(target, "new")
+    assert modes == [0o600]
+
+
+def test_a_new_file_follows_the_umask(tmp_path):
+    before = os.umask(0o077)
+    try:
+        kitlib.write_replacing(tmp_path / "result.json", "{}\n")
+    finally:
+        os.umask(before)
+    assert (tmp_path / "result.json").stat().st_mode & 0o777 == 0o600
+
+
+def test_a_file_in_place_of_a_link_does_not_take_the_mode_of_what_it_pointed_at(tmp_path, umask_022):
+    open_to_all = tmp_path / "open.txt"
+    open_to_all.write_text("mine")
+    open_to_all.chmod(0o666)
+    target = tmp_path / "result.json"
+    target.symlink_to(open_to_all)
+    kitlib.write_replacing(target, "{}\n")
+    assert not target.is_symlink()
+    assert target.stat().st_mode & 0o777 == 0o644
+    assert open_to_all.read_text() == "mine"
+
+
+def test_a_manifest_that_is_not_an_object_is_skipped_everywhere(tmp_path):
+    good = _kit_on_disk(tmp_path, "Good_001")
+    bad = tmp_path / "Bad_001"
+    bad.mkdir()
+    (bad / kitlib.KIT_MANIFEST).write_text("[]")
+    assert [e.path for e in kitlib.library_list(tmp_path)] == [good]
+    assert kitlib.write_outbox_index(tmp_path).is_file()

@@ -7,6 +7,10 @@ that dies on a bad file is worse than one that says "that isn't a video".
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from depthc import checks, ui
@@ -155,10 +159,11 @@ def test_convert_clamps_an_out_point_past_the_end(clip_3s, tmp_path):
     explicit library path — an empty one resolves to the user's real Motion Library, which
     is how this suite silently wrote kits into it.
     """
-    *_, status = ui._convert(
+    depth, *_, status = ui._convert(
         str(clip_3s), "", "", checks.DEFAULT_DIALECT, "720p", "auto", "conform-24", 0, 20,
         False, True, "auto", 518, "fp32", False, False, str(tmp_path / "lib"),
     )
+    assert depth and Path(depth).is_file(), status  # the run itself, not just the absence of a word
     assert "ceiling" not in status
 
 
@@ -179,7 +184,7 @@ def test_convert_on_an_empty_range_returns_a_message(clip_3s):
     assert "Empty trim range" in status
 
 
-def test_the_model_picker_changes_which_clips_are_refused(clip_long):
+def test_the_model_picker_changes_which_clips_are_refused(clip_long, monkeypatch):
     """The picker must move the LIMITS, not just the prompt template.
 
     A 20s reference is over 2.0's 15s ceiling and inside 2.5's 30s one. Before the picker
@@ -194,11 +199,21 @@ def test_the_model_picker_changes_which_clips_are_refused(clip_long):
     # ...and it points at the model that would accept it rather than just refusing.
     assert "seedance-2.5 accepts up to 30s" in on_20
 
+    # Stops at the model rather than running it. Without the marker, any failure on the way
+    # there, a missing checkout included, would also have read as "accepted".
+    class ReachedTheModel(Exception):
+        pass
+
+    def stop_at_the_model(*_args, **_kwargs):
+        raise ReachedTheModel
+
+    monkeypatch.setattr(ui.engine, "infer", stop_at_the_model)
     *_, on_25 = ui._convert(
         str(clip_long), "", "", "seedance-2.5", "720p", "auto", "conform-24", 0, 20,
         False, True, "auto", 518, "fp32", False, False, "",
     )
     assert "ceiling" not in on_25
+    assert "ReachedTheModel" in on_25
 
 
 def test_reveal_on_a_missing_path_does_not_raise(tmp_path):
@@ -240,3 +255,46 @@ def test_library_row_shape_matches_the_table_headers(tmp_path):
     assert len(row) == 6  # kit, duration, tier, tags, created, path
     assert row[2] == "WARN"
     assert row[5].endswith("A_001")
+
+
+# ------------------------------------------------------------------ a library kept elsewhere
+
+def _outside_every_folder_gradio_allows(tmp_path, monkeypatch) -> Path:
+    """A file outside both the working folder and the temp folder, with both moved aside."""
+    (tmp_path / "cwd").mkdir()
+    (tmp_path / "temp").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "temp"))
+    clip = tmp_path / "elsewhere" / "depth.mp4"
+    clip.write_bytes(b"depth clip")
+    return clip
+
+
+def test_a_clip_outside_the_allowed_folders_is_copied_where_gradio_can_serve_it(tmp_path, monkeypatch):
+    clip = _outside_every_folder_gradio_allows(tmp_path, monkeypatch)
+    served = Path(ui._servable(clip))
+    assert served.is_relative_to(tmp_path / "temp")
+    assert served.read_bytes() == b"depth clip"
+    assert clip.is_file()
+
+
+def test_a_clip_gradio_can_already_serve_is_not_copied(tmp_path, monkeypatch):
+    _outside_every_folder_gradio_allows(tmp_path, monkeypatch)
+    for folder in ("cwd", "temp"):
+        clip = tmp_path / folder / "depth.mp4"
+        clip.write_bytes(b"x")
+        assert ui._servable(clip) == str(clip)
+
+
+def test_picking_a_kit_from_a_library_kept_elsewhere_serves_a_copy(tmp_path, monkeypatch):
+    clip = _outside_every_folder_gradio_allows(tmp_path, monkeypatch)
+    rows = [["name", "1s", "pass", "", "", str(clip.parent)]]
+    depth, _prompt, path = ui._library_pick(rows, SimpleNamespace(index=[0, 0]))
+    assert Path(depth).is_relative_to(tmp_path / "temp")
+    assert path == str(clip.parent)  # the kit is still where the library says it is
+
+
+def test_the_finished_conversion_goes_through_the_same_door():
+    source = Path(ui.__file__).read_text(encoding="utf-8")
+    assert "_servable(paths.depth)" in source and "_servable(paths.preview)" in source

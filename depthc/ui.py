@@ -10,6 +10,8 @@ are collecting settings, surfacing the constraint report, and never failing sile
 from __future__ import annotations
 
 import subprocess
+import shutil
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -402,8 +404,8 @@ def _convert(
             status += " · " + " · ".join(warnings)
 
         return (
-            str(paths.depth),
-            str(paths.preview) if make_preview and paths.preview.exists() else None,
+            _servable(paths.depth),
+            _servable(paths.preview) if make_preview and paths.preview.exists() else None,
             _report_html(report),
             prompt_text,
             str(kit_dir),
@@ -435,6 +437,22 @@ def _abandon_kit(kit_dir) -> None:
 
 # ------------------------------------------------------------------------------ library
 
+def _servable(path: Path) -> str:
+    """A path Gradio will agree to serve for a video player.
+
+    It refuses anything outside the working folder and the temp folder, so a library kept
+    elsewhere built the kit and then failed while showing it. A copy goes in the temp folder and
+    the kit stays where it is.
+    """
+    # ponytail: copies wait for the OS to clear the temp folder; Gradio's own cache keeps one anyway.
+    resolved = Path(path).resolve()
+    if any(resolved.is_relative_to(Path(root).resolve()) for root in (Path.cwd(), tempfile.gettempdir())):
+        return str(path)
+    copy = Path(tempfile.mkdtemp(prefix="depthc-ui-")) / resolved.name
+    shutil.copy2(resolved, copy)
+    return str(copy)
+
+
 def _library_rows(tag: str, library_path: str) -> list[list]:
     entries = kitlib.library_list(kitlib.library_root(library_path or None), tag=tag or None)
     return [
@@ -454,7 +472,7 @@ def _library_pick(rows, evt: gr.SelectData) -> tuple:
 
     depth, prompt = path / "depth.mp4", path / "prompt.txt"
     return (
-        str(depth) if depth.exists() else None,
+        _servable(depth) if depth.exists() else None,
         prompt.read_text() if prompt.exists() else "",
         str(path),
     )
@@ -550,9 +568,9 @@ def build() -> gr.Blocks:
                             reveal_btn = gr.Button("Reveal in Finder")
                             zip_note = gr.Markdown(
                                 '<span class="depthc-note">Kits land in <b>Outbox/</b>. '
-                                "OSIDE upload uses <b>depth.mp4</b> only — no binding "
-                                "phrase (binding.txt is for other surfaces); the kit's "
-                                "README.txt has the steps.</span>"
+                                "Upload <b>depth.mp4</b> only, as the video reference; "
+                                "the kit's README.txt has the steps for your "
+                                "surface.</span>"
                             )
 
                 video.change(_probe_readout, video, [readout, start, end])
