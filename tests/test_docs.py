@@ -49,3 +49,28 @@ def test_scripts_do_not_claim_the_toolchain_is_x86():
     for path in SCRIPTS:
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             assert not re.search(r"\b(is|are) x86_64\b", line), f"{path.name}:{n}: {line}"
+
+
+SHALLOW_JOIN = re.compile(r"request_payload\.refs")
+
+
+def test_the_join_path_names_the_level_the_row_stores_refs_at():
+    """Audit DC-3. OSIDE stores `requestPayload: { request: req, ... }`, so refs sit under `request`.
+
+    Measured 2026-11-01 on OSIDE's database: the one generation row with refs has them under
+    `request`, and none has them at the top. Whoever writes the SQL half of this join reads these
+    lines, and the shorter path returns nothing without raising anything.
+    """
+    assert SHALLOW_JOIN.search("request_payload.refs[].sha256")  # the old wording trips it
+    assert not SHALLOW_JOIN.search("request_payload.request.refs[].sha256")
+
+    this_file = Path(__file__).resolve()
+    readers = [ROOT / name for name in ("CHANGELOG.md", "CLAUDE.md", "PLAN.md", "README.md")]
+    for folder, pattern in (("DOCS", "*.md"), ("depthc", "*.py"), ("depthc", "*.json"), ("tests", "*.py")):
+        readers += sorted((ROOT / folder).glob(pattern))
+    readers = [path for path in readers if path != this_file]
+    assert len(readers) > 30  # a glob that stopped matching must not read as clean
+
+    hits = [path.name for path in readers if SHALLOW_JOIN.search(path.read_text(encoding="utf-8"))]
+    assert hits == []
+    assert "request_payload.request.refs[].sha256" in CLAUDE

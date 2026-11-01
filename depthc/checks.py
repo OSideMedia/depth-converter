@@ -315,7 +315,18 @@ def load_envelope(
     return merged
 
 
-DIALECTS: dict[str, Dialect] = load_envelope()
+# [CHANGED 2026-11-01, audit DC-6] Read on first use, not at import. `depthc result` records paid
+# evidence and grades nothing, and a broken envelope used to kill it at `import` along with every
+# other command. The refusal itself is unchanged: the first read of the table raises EnvelopeError.
+def _dialects() -> dict[str, Dialect]:
+    if "DIALECTS" not in globals():
+        globals()["DIALECTS"] = load_envelope()
+    return globals()["DIALECTS"]
+
+
+# load_envelope never adds a name the hand table lacks, so these are safe to read at import: the
+# `--dialect` help text does, and `depthc --help` has to work with a broken envelope.
+DIALECT_NAMES = tuple(sorted(HAND_DIALECTS))
 
 # [CHANGED 2026-09-06, audit DC-5] 2.5 is OSIDE's live line and the only kit on disk is a
 # 2.5 kit; defaulting to 2.0 meant the inbox hint — which named no dialect — built a kit
@@ -329,23 +340,37 @@ def dialect_for(name: str | Dialect | None = None) -> Dialect:
     if isinstance(name, Dialect):
         return name
     key = name or DEFAULT_DIALECT
+    dialects = _dialects()
     try:
-        return DIALECTS[key]
+        return dialects[key]
     except KeyError:
         raise ValueError(
-            f"Unknown dialect {key!r}. Available: {sorted(DIALECTS)}"
+            f"Unknown dialect {key!r}. Available: {sorted(dialects)}"
         ) from None
 
 
 # Module-level names kept for the call sites that grade a lone ref before a dialect is known.
 # They are DERIVED from the default record so there is exactly one source for each number.
-_DEFAULT = DIALECTS[DEFAULT_DIALECT]
-MIN_REF_SECONDS = _DEFAULT.ref_seconds[0]
-MAX_REF_SECONDS = _DEFAULT.ref_seconds[1]
-SWEET_SPOT = _DEFAULT.sweet_spot
-MAX_FILE_MB = _DEFAULT.max_file_mb
-MIN_PIXELS, MAX_PIXELS = _DEFAULT.pixels
-OUTPUT_SECONDS = _DEFAULT.output_seconds
+_DERIVED: dict[str, Callable[[Dialect], object]] = {
+    "MIN_REF_SECONDS": lambda d: d.ref_seconds[0],
+    "MAX_REF_SECONDS": lambda d: d.ref_seconds[1],
+    "SWEET_SPOT": lambda d: d.sweet_spot,
+    "MAX_FILE_MB": lambda d: d.max_file_mb,
+    "MIN_PIXELS": lambda d: d.pixels[0],
+    "MAX_PIXELS": lambda d: d.pixels[1],
+    "OUTPUT_SECONDS": lambda d: d.output_seconds,
+}
+
+
+def __getattr__(name: str):
+    """`DIALECTS` and the numbers derived from its default record, read on first use (PEP 562)."""
+    if name == "DIALECTS":
+        return _dialects()
+    if name in _DERIVED:
+        return _DERIVED[name](_dialects()[DEFAULT_DIALECT])
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 MIN_FPS = 24
 MAX_FPS = 60
 

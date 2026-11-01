@@ -18,6 +18,17 @@ the code's history. Started 2026-09-06.
 - **A `kit.json` that is valid JSON but not an object is skipped** rather than crashing the listing.
 - **The kit's 2.5 advice catches up with the recorded fire:** 1080p has one good result on a gentle
   reference, and a hard one is unfired.
+- **CI asserts its skips.** The expected count was only a step name, so one more skip could not fail
+  the job. `scripts/check_ci_skips.py` reads pytest's report and fails on any other count or reason.
+- **One render is one fire.** `depthc result` refuses a generation id already recorded on this kit or
+  a sibling, instead of counting one paid render twice.
+- **A broken envelope no longer stops `depthc result`.** The table is read on first use, so `result`
+  and `library` run without it and every other command refuses by name before doing any work.
+- **`depthc stability` handles very small inputs.** A clip too short for the 2 fps grain sample still
+  measures, and a frame under 3 px on a side has no grain reading rather than crashing the command.
+- **The join path is `request_payload.request.refs[].sha256`,** one level deeper than these docs said.
+  `CLAUDE.md` now says what the content half can prove, and `DOCS/LIVE-FIRE.md` what the one keyed
+  fire cannot.
 - **The handover gate now reads `PLAN.md`,** in the phrasings that file actually uses. It keeps a
   superseded sentence with a dated `[AMENDED]` note after it, so a hit struck that way is history and
   any other hit is live. That found two more stale instructions, now amended.
@@ -109,7 +120,7 @@ otherwise see.
   flag a fire is unkeyed, as every fire before this day is.
 - **`kit.json` `depth.sha256`** — the SHA-256 of `depth.mp4` as written, required on new
   kits. OSIDE's upload door records the uploaded clip's SHA-256 on the reference
-  (`request_payload.refs[].sha256`, lands in OSIDE), so `kit.json.depth.sha256 ==
+  (`request_payload.request.refs[].sha256`, lands in OSIDE), so `kit.json.depth.sha256 ==
   refs[].sha256` names the kit a generation rode. The plan's `kitId` was replaced by
   content: a browser upload cannot read a sibling file and `kit.json` has no `id`. Older
   kits load without it; `compare` says so once.

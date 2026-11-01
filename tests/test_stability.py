@@ -265,3 +265,36 @@ def test_a_join_that_cannot_be_tracked_is_not_printed_as_a_zero(tmp_path, monkey
     assert repaint == {"from": "still.png", "tracked": 0.1, "scored": False}
     printed = CliRunner().invoke(app, ["stability", str(clip), "--still", str(still)]).output
     assert "not scored, only 10% of pixels tracked" in printed and "boil 0.00" not in printed, printed
+
+
+# ------------------------------------------------------------------ clips at the edge of the grain reading
+
+@pytest.mark.parametrize("count", [2, 4])
+def test_a_clip_too_short_for_the_grain_sampler_still_measures(tmp_path, count):
+    # 2 samples a second lands on no frame of a clip this short, and that used to end the whole
+    # command with "Decoded no complete frames" though every frame had already been read.
+    clip = _write(tmp_path / "short.mp4", np.stack([_picture(1)] * count), 24)
+    reading = _stability_json(clip)
+    assert reading["gaps"] == count - 1
+    assert "grainMedian" in reading
+
+
+def test_a_frame_with_no_interior_has_no_grain_reading():
+    # the estimator reads inside a one-pixel border, so under 3 px on a side there is nothing to read
+    assert np.isnan(stability.grain(np.zeros((2, 2, 3), dtype=np.uint8)))
+    assert np.isnan(stability.grain(np.zeros((2, 40, 3), dtype=np.uint8)))
+    assert np.isnan(stability.grain(np.zeros((40, 2, 3), dtype=np.uint8)))
+    assert stability.grain(np.zeros((3, 3, 3), dtype=np.uint8)) == 0.0  # one interior pixel is a reading
+
+
+def test_a_missing_grain_reading_is_left_out_and_never_printed_as_nan():
+    frames = np.zeros((2, 40, 40, 3), dtype=np.uint8)
+    summary = stability.measure(frames, 24.0, grain_frames=np.zeros((2, 2, 2, 3), dtype=np.uint8)).summary()
+    assert "grainMedian" not in summary
+
+
+def test_a_two_by_two_clip_reads_out_with_no_grain(tmp_path):
+    clip = _write(tmp_path / "tiny.mp4", np.full((4, 2, 2, 3), 128, dtype=np.uint8), 24)
+    reading = _stability_json(clip)
+    assert reading["gaps"] == 3
+    assert "grainMedian" not in reading

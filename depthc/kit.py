@@ -486,7 +486,7 @@ def build_manifest(
         "depth": {
             "filename": "depth.mp4",
             # The content half of the fire -> generation join. OSIDE's upload door records
-            # the uploaded clip's SHA-256 on the reference (request_payload.refs[].sha256);
+            # the uploaded clip's SHA-256 on the reference (request_payload.request.refs[].sha256);
             # a browser upload cannot read this file beside the clip, so the hash of the
             # BYTES is the only key both sides can hold. Hashed after the size gate and any
             # audio mux — the file as it is uploaded, never an intermediate.
@@ -757,6 +757,20 @@ def read_results(kit_dir: Path) -> dict:
     return {"schemaVersion": RESULT_SCHEMA_VERSION, "kitName": Path(kit_dir).name, "fires": []}
 
 
+def _refuse_a_recorded_generation(kit_dir: Path, generation: str) -> None:
+    """Raise if a kit in this library already holds this generation. A broken log holds nothing."""
+    kit_dir = Path(kit_dir)
+    siblings = sorted(p.parent for p in kit_dir.parent.glob("*/result.json") if p.parent != kit_dir)
+    for holder in (kit_dir, *siblings):
+        for fire in read_results(holder)["fires"]:
+            if isinstance(fire, dict) and str(fire.get("generationId", "")).lower() == generation:
+                raise ValueError(
+                    f"Generation {generation} is already recorded on {holder.name} "
+                    f"({fire.get('firedAt', 'no date')}, {fire.get('verdict', 'no verdict')}); nothing "
+                    f"was written. To change what that fire says, edit {holder / 'result.json'}."
+                )
+
+
 def record_result(
     kit_dir: Path,
     *,
@@ -777,11 +791,17 @@ def record_result(
     prone-crawl diagnosis had to be re-derived from scratch a day later. Fires accumulate
     rather than overwrite: firing the same ref twice with different prompts is a data point
     about prompts, and throwing the first one away would hide it.
+
+    One render is still one fire. A generation id already on this kit or a sibling is refused
+    before anything is written (audit DC-2): that was one paid render counted twice, and
+    INDEX.txt then read FIRED 2x. Unkeyed fires cannot be told apart, so they still accumulate.
     """
     if verdict not in VERDICTS:
         raise ValueError(f"verdict must be one of {sorted(VERDICTS)} (got {verdict!r})")
     # Refused before anything is read or written: a fire keyed to a typo joins nothing.
     generation = validate_generation_id(generation_id) if generation_id is not None else None
+    if generation is not None:
+        _refuse_a_recorded_generation(kit_dir, generation)
 
     log = read_results(kit_dir)
     log["kitName"] = Path(kit_dir).name

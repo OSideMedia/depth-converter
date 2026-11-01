@@ -10,12 +10,9 @@
 #     pytest_collection_modifyitems); `-rs` prints every skip so the count is visible in
 #     the log rather than folded into a green tick. Everything else — checks, kit, cli,
 #     ui helpers, motion, compare, look, describe, video_io, envelope, docs, gitignore —
-#     runs for real against ffmpeg-generated clips. Fourteen is the expected skip count: ten
-#     slow (seven, plus 2026-09-15's two binding tests: the kit records its binding.txt's
-#     hash, and compare prints its measurement before failing on a tampered one; plus the
-#     pinned checkpoint hash), three vendor, and the envelope's age, which only someone with
-#     an OSIDE checkout can act on. A fifteenth means a new test reached the model unmarked
-#     and should be looked at.
+#     runs for real against ffmpeg-generated clips. scripts/check_ci_skips.py holds the
+#     expected skips by reason (ten slow, three vendor, the envelope's age, which only someone
+#     with an OSIDE checkout can act on) and fails the job on any other count or reason.
 #   * torch comes from the committed uv.lock. On linux that is the PyPI manylinux wheel,
 #     which drags the nvidia-* CUDA runtime packages along; they install fine without a
 #     GPU and torch runs on CPU. It is large (several GB), which is why there is no
@@ -42,10 +39,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && ffmpeg -version | head -1
       - name: Install from the committed lock (torch → CPU on this runner)
         run: uv sync --frozen
-      - name: Tests that need setup.sh's assets (the set that self-skips here — expect 13)
-        run: uv run pytest --collect-only -q -m "slow or vendor" tests | tail -1
       - name: pytest (skips printed with their reason)
-        run: uv run pytest -q -rs tests
+        run: uv run pytest -q -rs --junitxml=pytest-report.xml tests
+      - name: The run skipped what it was meant to, and nothing else
+        run: uv run python scripts/check_ci_skips.py pytest-report.xml
       - name: No invisible code points in tracked text
         # Zero-width, bidi-override, tag and variation-selector characters are the defect
         # class a human reviewer cannot see (ordinary emoji sequences are allowed).

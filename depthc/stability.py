@@ -134,10 +134,14 @@ def grain(frame: np.ndarray, *, flat_share: float = GRAIN_FLAT_SHARE) -> float:
 
     Pass the frame at its own resolution: this is the reading the 480 px grid throws away.
     `flat_share=1.0` is the plain whole-frame estimate, which books sharp edges as grain.
+    NaN when a side is under 3 px: the reading is taken inside a one-pixel border, and with no
+    interior there is nothing to read, which is not the same as no grain.
     """
     import cv2
 
     luma = (cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) if frame.ndim == 3 else frame).astype(np.float32)
+    if min(luma.shape) < 3:
+        return float("nan")
     response = np.abs(cv2.filter2D(luma, -1, _IMMERKAER, borderType=cv2.BORDER_REFLECT))[1:-1, 1:-1]
     edge = np.hypot(cv2.Sobel(luma, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(luma, cv2.CV_32F, 0, 1, ksize=3))[1:-1, 1:-1]
     flat = edge <= np.quantile(edge, flat_share)
@@ -210,11 +214,12 @@ def measure(frames: np.ndarray, fps: float, *, grain_frames: np.ndarray | None =
     guessed from the 480 px frames.
     """
     gaps = [gap(frames[i], frames[i + 1]) for i in range(max(0, len(frames) - 1))]
+    readings = None if grain_frames is None else [grain(f) for f in grain_frames]
     return Stability(
         fps=float(fps),
         flicker=np.array([g.flicker for g in gaps], dtype=np.float32),
         boil=np.array([g.boil for g in gaps], dtype=np.float32),
         warp=np.array([g.warp for g in gaps], dtype=np.float32),
         valid=np.array([g.valid for g in gaps], dtype=np.float32),
-        grain=None if grain_frames is None else np.array([grain(f) for f in grain_frames], dtype=np.float32),
+        grain=None if readings is None else np.array([r for r in readings if np.isfinite(r)], dtype=np.float32),
     )

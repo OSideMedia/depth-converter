@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -816,7 +819,7 @@ def test_index_says_nothing_about_fires_for_an_untested_kit(tmp_path):
 # --------------------------------------------- depth.sha256 — the content half of the join
 #
 # OSIDE's upload door records the uploaded clip's SHA-256 on the reference
-# (request_payload.refs[].sha256). kit.json carries the same hash of depth.mp4, so
+# (request_payload.request.refs[].sha256). kit.json carries the same hash of depth.mp4, so
 # kit.json.depth.sha256 == refs[].sha256 names the kit a generation rode
 # (PLAN-SHARED-GENERATION-ID step d, 2026-09-06).
 
@@ -1196,3 +1199,147 @@ def test_a_manifest_that_is_not_an_object_is_skipped_everywhere(tmp_path):
     (bad / kitlib.KIT_MANIFEST).write_text("[]")
     assert [e.path for e in kitlib.library_list(tmp_path)] == [good]
     assert kitlib.write_outbox_index(tmp_path).is_file()
+# ------------------------------------------------------------------ one render, one fire (audit DC-2)
+
+def test_one_render_cannot_be_recorded_twice_on_one_kit(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    kitlib.record_result(kit_dir, verdict="adhered", generation_id=GEN)
+    with pytest.raises(ValueError, match=kit_dir.name):
+        kitlib.record_result(kit_dir, verdict="partial", generation_id=GEN.upper())
+    fires = json.loads((kit_dir / "result.json").read_text())["fires"]
+    assert [f["verdict"] for f in fires] == ["adhered"]  # the first record stands, untouched
+
+
+def test_one_render_cannot_be_recorded_on_two_kits(tmp_path):
+    first = _kit_on_disk(tmp_path, "Sword-duel_001")
+    second = _kit_on_disk(tmp_path, "Sword-duel_002")
+    kitlib.record_result(first, verdict="adhered", generation_id=GEN)
+    with pytest.raises(ValueError, match="Sword-duel_001"):
+        kitlib.record_result(second, verdict="adhered", generation_id=GEN)
+    assert not (second / "result.json").exists()
+
+
+def test_different_renders_and_unkeyed_fires_still_accumulate(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    other = "9c858901-8a57-4791-81fe-4c455b099bc9"
+    kitlib.record_result(kit_dir, verdict="adhered", generation_id=GEN)
+    kitlib.record_result(kit_dir, verdict="partial", generation_id=other)
+    kitlib.record_result(kit_dir, verdict="ignored")
+    log = kitlib.record_result(kit_dir, verdict="late")
+    assert len(log["fires"]) == 4
+
+
+def test_a_broken_log_on_a_sibling_kit_never_stops_a_fire_being_recorded(tmp_path):
+    sibling = _kit_on_disk(tmp_path, "Sword-duel_002")
+    (sibling / "result.json").write_text("{not json")
+    odd = _kit_on_disk(tmp_path, "Sword-duel_003")
+    (odd / "result.json").write_text(json.dumps({"fires": ["not a fire", {"generationId": 7}]}))
+    log = kitlib.record_result(_kit_on_disk(tmp_path), verdict="adhered", generation_id=GEN)
+    assert log["fires"][0]["generationId"] == GEN
+
+
+def test_the_refusal_reaches_the_command_line_and_writes_nothing(tmp_path):
+    from typer.testing import CliRunner
+
+    from depthc.cli import app
+
+    kit_dir = _kit_on_disk(tmp_path)
+    args = ["result", str(kit_dir), "--verdict", "adhered", "--generation", GEN, "--model", "m"]
+    assert CliRunner().invoke(app, args).exit_code == 0
+    again = CliRunner().invoke(app, args)
+    assert again.exit_code == 1
+    assert "already recorded" in again.output
+    assert len(json.loads((kit_dir / "result.json").read_text())["fires"]) == 1
+
+
+# ------------------------------------------------------------------ a keyed fire names its model (audit DC-5)
+
+def test_a_keyed_fire_with_no_model_is_recorded_and_says_what_is_missing(tmp_path):
+    from typer.testing import CliRunner
+
+    from depthc.cli import app
+
+    kit_dir = _kit_on_disk(tmp_path)
+    bare = CliRunner().invoke(app, ["result", str(kit_dir), "--verdict", "partial", "--generation", GEN])
+    assert bare.exit_code == 0, bare.output
+    assert "--model" in bare.output
+    assert json.loads((kit_dir / "result.json").read_text())["fires"][0]["generationId"] == GEN
+
+    named = _kit_on_disk(tmp_path, "Sword-duel_002")
+    other = "9c858901-8a57-4791-81fe-4c455b099bc9"
+    done = CliRunner().invoke(
+        app, ["result", str(named), "--verdict", "partial", "--generation", other, "--model", "m"])
+    assert done.exit_code == 0, done.output
+    assert "--model" not in done.output
+
+
+# ------------------------------------------------------------------ a broken envelope (audit DC-6)
+#
+# The envelope's path is fixed beside the module, so these run a COPY of the package. Each one
+# goes through a real process: the defect was at import, which an in-process test cannot reach.
+
+def _copy_with_a_broken_envelope(tmp_path) -> Path:
+    root = tmp_path / "copy"
+    shutil.copytree(Path(kitlib.__file__).parent, root / "depthc",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    (root / "depthc" / checks.ENVELOPE_PATH.name).write_text("{not json", encoding="utf-8")
+    return root
+
+
+def _python(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, *args], cwd=root, capture_output=True, text=True, timeout=180,
+        env={**os.environ, "PYTHONPATH": str(root)},
+    )
+
+
+def _depthc(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return _python(root, "-m", "depthc.cli", *args)
+
+
+def test_the_first_read_of_a_broken_table_still_refuses(tmp_path):
+    """The control: this is the copy that is broken, and importing it is all that got easier."""
+    root = _copy_with_a_broken_envelope(tmp_path)
+    imported = _python(root, "-c", "from depthc import checks, cli, kit; print(checks.__file__)")
+    assert imported.returncode == 0, imported.stderr
+    assert imported.stdout.strip().startswith(str(root))
+    for read in ("checks.DIALECTS", "checks.dialect_for()", "checks.MAX_FILE_MB"):
+        refused = _python(root, "-c", f"from depthc import checks; {read}")
+        assert refused.returncode != 0, read
+        assert "EnvelopeError" in refused.stderr, read
+
+
+def test_a_broken_envelope_does_not_stop_a_paid_fire_being_recorded(tmp_path):
+    root = _copy_with_a_broken_envelope(tmp_path)
+    library = tmp_path / "lib"
+    library.mkdir()
+    kit_dir = _kit_on_disk(library)
+    done = _depthc(root, "result", str(kit_dir), "--verdict", "partial", "--notes", "paid evidence")
+    assert done.returncode == 0, done.stderr
+    assert json.loads((kit_dir / "result.json").read_text())["fires"][0]["notes"] == "paid evidence"
+    name = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())["kitName"]
+    assert name in (library / "INDEX.txt").read_text()
+
+
+def test_a_broken_envelope_still_lists_the_library(tmp_path):
+    root = _copy_with_a_broken_envelope(tmp_path)
+    library = tmp_path / "lib"
+    library.mkdir()
+    kit_dir = _kit_on_disk(library)
+    listed = _depthc(root, "library", "list", "--library", str(library))
+    assert listed.returncode == 0, listed.stderr
+    assert json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text())["kitName"] in listed.stdout
+
+
+def test_a_grading_command_refuses_a_broken_envelope_before_doing_any_work(tmp_path):
+    root = _copy_with_a_broken_envelope(tmp_path)
+    refused = _depthc(root, "kit", str(tmp_path / "no-such-clip.mp4"))
+    assert refused.returncode == 1
+    assert "not readable JSON" in refused.stderr  # the envelope's fault, not the missing clip's
+    assert "depthc result" in refused.stderr
+    assert "Traceback" not in refused.stderr
+
+
+def test_help_still_names_the_dialects_with_a_broken_envelope(tmp_path):
+    root = _copy_with_a_broken_envelope(tmp_path)
+    assert _depthc(root, "--help").returncode == 0
