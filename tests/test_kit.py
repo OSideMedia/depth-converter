@@ -1153,6 +1153,21 @@ def test_a_replaced_file_keeps_the_mode_it_had(tmp_path, umask_022):
     assert target.stat().st_mode & 0o777 == 0o600
 
 
+def test_a_private_file_is_never_readable_while_its_copy_is_written(tmp_path, umask_022, monkeypatch):
+    target = tmp_path / "result.json"
+    target.write_text("old")
+    target.chmod(0o600)
+    real_open, modes = os.open, []
+
+    def recording_open(path, flags, mode=0o777, **kwargs):
+        modes.append(mode)
+        return real_open(path, flags, mode, **kwargs)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    kitlib.write_replacing(target, "new")
+    assert modes == [0o600]
+
+
 def test_a_new_file_follows_the_umask(tmp_path):
     before = os.umask(0o077)
     try:

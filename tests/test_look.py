@@ -235,6 +235,27 @@ def test_a_link_that_loops_costs_one_clip_and_not_the_whole_comparison(tmp_path,
     assert not clips["videos/shot.mp4"].get("error")
 
 
+@pytest.mark.parametrize("bad", [None, 7, {"file": None}, {"file": ""}, {"file": 3}, {"file": "videos/nul\u0000.mp4"}])
+def test_a_malformed_entry_costs_one_clip_and_not_the_whole_comparison(tmp_path, clip_tiny, bad):
+    look_json, manifest = _package(tmp_path, clip_tiny, [bad, {"file": "videos/shot.mp4"}])
+    done = _look_compare(look_json, manifest, "--json")
+    assert done.exit_code == 0, done.output
+    clips = json.loads(done.output)["clips"]
+    assert len(clips) == 2
+    assert clips[0]["error"]
+    assert not clips[1].get("error")
+
+
+def test_a_videos_block_that_is_not_a_list_is_reported_and_does_not_fail(tmp_path, clip_tiny):
+    look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}])
+    package = json.loads(manifest.read_text())
+    package["videos"] = 5
+    manifest.write_text(json.dumps(package))
+    done = _look_compare(look_json, manifest, "--json")
+    assert done.exit_code == 0, done.output
+    assert json.loads(done.output)["clips"][0]["error"]
+
+
 def test_the_cdl_goes_in_place_of_a_symlink_and_not_through_it(tmp_path, clip_tiny):
     look_json, manifest = _package(tmp_path, clip_tiny, [{"file": "videos/shot.mp4"}])
     precious = tmp_path / "my-document.txt"

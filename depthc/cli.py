@@ -1299,15 +1299,19 @@ def look_compare(
         if not videos:
             _die("manifest lists no videos")
         scores = []
-        for v in videos:
-            rel = v.get("file", "")
+        for v in videos if isinstance(videos, list) else [None]:
+            # One bad entry costs one clip, whatever shape it comes in.
+            rel = v.get("file") if isinstance(v, dict) else None
+            if not isinstance(rel, str) or not rel:
+                scores.append(looklib.ClipScore(str(rel), "?", 0, 0, 0, 0, 0, 0, "", error="no file named"))
+                continue
             label = f"{v.get('sceneIndex', '?')}/{v.get('shotNumber', '?')} {Path(rel).name}"
             path = base / rel
             # The manifest may have come from someone else, so it names files in its own package
             # and nowhere else: not an absolute path, a ../ or a link pointing out of it.
             try:
                 inside = path.resolve().is_relative_to(base.resolve())
-            except (OSError, RuntimeError) as e:  # a link that loops raises RuntimeError on Python 3.12
+            except (OSError, RuntimeError, ValueError) as e:  # a looping link, a NUL in the name
                 scores.append(looklib.ClipScore(rel, label, 0, 0, 0, 0, 0, 0, "", error=str(e).splitlines()[0][:80]))
                 continue
             if not inside:
