@@ -472,8 +472,8 @@ def _library_pick(rows, evt: gr.SelectData) -> tuple:
 
     depth, prompt = path / "depth.mp4", path / "prompt.txt"
     return (
-        _servable(depth) if depth.exists() else None,
-        prompt.read_text(errors="replace") if prompt.exists() else "",  # a kit can come from anywhere
+        _servable(depth) if depth.is_file() else None,
+        prompt.read_text(errors="replace") if prompt.is_file() else "",  # a kit can come from anywhere
         str(path),
     )
 
