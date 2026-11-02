@@ -50,7 +50,10 @@ _PATCH = 14  # --input-size must be a multiple of this (DINOv2 patches)
 
 OVERRIDE_ENV = "DEPTHC_MEMORY_GB"
 _MAC = sys.platform == "darwin"
-_SMALL_READ = GB  # a read this size cannot stall a machine, and the matte scan on any clip stays under it
+# ponytail: a read under this goes unchecked, even with less than that free. It is a moment of pressure
+# and not a stall, a depth pass's own check still runs after it, and a listing should survive a tight
+# machine. Check these reads too if one is ever seen to stall a machine.
+_SMALL_READ = GB
 
 
 @dataclass(frozen=True)

@@ -330,3 +330,12 @@ def test_picking_a_kit_whose_files_are_folders_still_loads_it(tmp_path, monkeypa
 def test_the_finished_conversion_goes_through_the_same_door():
     source = Path(ui.__file__).read_text(encoding="utf-8")
     assert "_servable(paths.depth)" in source and "_servable(paths.preview)" in source
+
+
+def test_a_clip_too_big_to_read_reads_as_plain_words_in_the_upload_readout(clip_tiny, monkeypatch):
+    from depthc import memory
+
+    monkeypatch.setattr(memory, "_SMALL_READ", 0)
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
+    readout, *_ = ui._probe_readout(str(clip_tiny))
+    assert "to read this clip" in readout

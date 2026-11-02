@@ -317,12 +317,27 @@ def test_compare_lets_go_of_the_reference_before_the_generated_clips_pass(clip_t
     assert seen.get("alive during the pass") is False, _text(result)
 
 
-def test_a_clip_too_big_to_read_reads_as_plain_words(clip_tiny, tmp_path, monkeypatch):
-    monkeypatch.setattr(memory, "_SMALL_READ", 0)
-    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
-    result = runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "out.mp4")])
-    assert result.exit_code == 1 and isinstance(result.exception, SystemExit), repr(result.exception)
-    assert "to read this clip" in _text(result)
+class TestAClipTooBigToRead:
+    """Every read goes through this, including the matte scan before anything else runs."""
+
+    @pytest.fixture(autouse=True)
+    def _reads_refused(self, monkeypatch):
+        monkeypatch.setattr(memory, "_SMALL_READ", 0)
+        monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
+
+    def test_convert_reads_as_plain_words(self, clip_tiny, tmp_path):
+        result = runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "out.mp4")])
+        assert result.exit_code == 1 and isinstance(result.exception, SystemExit), repr(result.exception)
+        assert "to read this clip" in _text(result)
+
+    def test_inbox_says_so_for_each_clip_and_carries_on(self, clip_3s, tmp_path):
+        import shutil
+
+        shutil.copy(clip_3s, tmp_path / "one.mp4")
+        shutil.copy(clip_3s, tmp_path / "two.mp4")
+        result = runner.invoke(cli.app, ["inbox", "--inbox", str(tmp_path), "--no-scout"])
+        assert result.exit_code == 0, repr(result.exception)
+        assert _text(result).count("to read this clip") == 2
 
 
 class TestGenerationFlag:

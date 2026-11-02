@@ -361,7 +361,8 @@ def read_frames(
 
     # ponytail: only a conformed read has a frame count to check. fps=None keeps every decoded frame,
     # and a VFR source's reported rate can be a 1000 fps timebase artifact, so it would refuse small
-    # reads. Its one caller, `stability --after`, reads at the small stability size.
+    # reads. Its callers are `stability`'s read of a clip's first and last frames, at the small
+    # stability size, and `scripts/calibrate_camera_path.py`, a maintainer's tool reading a kit's depth.
     if fps:
         refusal = memory.decode_refusal(int(duration * fps) * width * height * 3)
         if refusal:

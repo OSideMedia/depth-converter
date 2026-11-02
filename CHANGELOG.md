@@ -19,8 +19,9 @@ the code's history. Started 2026-09-06.
     by hand. Every command that runs a depth pass, the UI and the smoke test get this. One Mac was
     measured, at eight picture sizes; for other machines and clip shapes the figures are an estimate.
     Long clips need more, about 14 GB by calculation for 30 seconds of 720p, because the clip's own
-    frames and depth add up. A clip too big even to read is refused before it is read. The check
-    runs once per pass, so another app filling memory during a pass can still slow the machine.
+    frames and depth add up. A read of over 1 GB that won't fit is refused before it starts; a smaller
+    one goes unchecked. The check runs once per pass, so another app filling memory during a pass can
+    still slow the machine.
 
 ## v0.16.0 — 2026-11-01
 

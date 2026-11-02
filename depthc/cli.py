@@ -827,7 +827,11 @@ def inbox(
         typer.echo(f"{BOLD}{clip.name}{OFF}")
         typer.echo(f"    {info.summary()}")
 
-        matte = detect_crop(info)
+        try:
+            matte = detect_crop(info)
+        except VideoIOError as e:
+            typer.echo(f"    {RED}{e}{OFF}")
+            continue
         if matte:
             typer.echo(
                 f"    {DIM}matte {matte} → {matte.width}×{matte.height} "
