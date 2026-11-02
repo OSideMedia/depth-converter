@@ -32,8 +32,9 @@ output bytes do not change. `memory.py` then sets a limit from what the machine 
 from __future__ import annotations
 
 import gc
+import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -129,7 +130,8 @@ def load_model(device: str | None = None) -> tuple[torch.nn.Module, str]:
 
     ensure_vendor_on_path()
     checkpoint = ensure_checkpoint()
-    from video_depth_anything.video_depth import VideoDepthAnything
+    with redirect_stdout(sys.stderr):  # upstream prints on import, and stdout may be carrying --json
+        from video_depth_anything.video_depth import VideoDepthAnything
 
     model = VideoDepthAnything(**MODEL_CONFIG)
     model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True), strict=True)

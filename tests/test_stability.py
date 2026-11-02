@@ -198,7 +198,7 @@ def _stability_json(*args):
 
     result = CliRunner().invoke(app, ["stability", *map(str, args), "--json"])
     assert result.exit_code == 0, result.output
-    return json.loads(result.output[result.output.index("{"):])
+    return json.loads(result.stdout)
 
 
 def test_the_seam_reads_the_prior_take_s_real_last_frame(tmp_path):

@@ -21,13 +21,8 @@ runner = CliRunner()
 
 
 def _text(result) -> str:
-    """stdout plus stderr regardless of how this click version splits them."""
-    out = result.output
-    try:
-        out += result.stderr
-    except (ValueError, AttributeError):
-        pass  # stderr not captured separately on this click version
-    return out
+    """What a terminal would show. On the click this project pins, `output` holds stdout and stderr."""
+    return result.output
 
 
 class TestTrimValidation:

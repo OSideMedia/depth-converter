@@ -40,7 +40,7 @@ def _die(message: str) -> None:
 
 
 def _warn(message: str) -> None:
-    typer.echo(f"{YELLOW}warning:{OFF} {message}")
+    typer.echo(f"{YELLOW}warning:{OFF} {message}", err=True)
 
 
 # These two grade nothing: `result` records paid evidence and `library` reads what is already
@@ -940,7 +940,7 @@ def _depth_profile(info, resolution: str, input_size: int, precision: str,
 
     rect = detect_crop(info)
     if rect:
-        typer.echo(f"{DIM}matte detected: cropping to {rect.width}×{rect.height}{OFF}")
+        typer.echo(f"{DIM}matte detected: cropping to {rect.width}×{rect.height}{OFF}", err=True)
     trim = (0.0, trim_seconds) if trim_seconds is not None else None
     size = target_size(info, resolution, crop=rect)
     frames = read_frames(info, trim=trim, fps=24.0, size=size, crop=rect)
@@ -949,7 +949,7 @@ def _depth_profile(info, resolution: str, input_size: int, precision: str,
     if device == "cpu":
         _warn("MPS unavailable — running on CPU. This will be slow.")
     total = engine.expected_windows(frames.shape[0])
-    with typer.progressbar(length=total, label="depth") as bar:
+    with typer.progressbar(length=total, label="depth", file=sys.stderr) as bar:
         seen = {"n": 0}
 
         def on_window(done: int, _total: int) -> None:
@@ -959,7 +959,7 @@ def _depth_profile(info, resolution: str, input_size: int, precision: str,
         result = engine.infer(
             frames, 24.0, input_size=input_size, precision=precision,
             device=device, on_window=on_window,
-            on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}"),
+            on_warn=lambda m: typer.echo(f"\n{YELLOW}warning:{OFF} {m}", err=True),
         )
     # The analysis-grid depth frames ride along for framing (describe); compare ignores
     # them — its questions are all answered by the profile.

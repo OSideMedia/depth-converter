@@ -149,6 +149,30 @@ def test_cli_describe_rgb_runs_without_the_model(clip_3s):
 
     result = CliRunner().invoke(app, ["describe", str(clip_3s), "--rgb", "--json"])
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output[result.output.index("{"):])
+    payload = json.loads(result.stdout)
     assert payload["space"] == "rgb"
     assert "sentences" in payload and len(payload["sentences"]) >= 2
+
+
+def test_cli_describe_json_keeps_everything_else_off_stdout(clip_letterboxed, monkeypatch):
+    """A script reads this with json.loads, so the matte line, the bar and warnings go to stderr."""
+    from typer.testing import CliRunner
+
+    from depthc import engine
+    from depthc.cli import app
+
+    def fake_pass(frames, fps, *, on_window, on_warn, **_):
+        on_window(1, 1)
+        on_warn("a warning from the pass")
+        return engine.DepthResult(
+            frames=frames[..., 0], fps=fps, device="cpu", dtype="fp32", elapsed=0.0,
+            raw_min=0.0, raw_max=1.0, inverted=False,
+        )
+
+    monkeypatch.setattr(engine, "pick_device", lambda: "cpu")
+    monkeypatch.setattr(engine, "infer", fake_pass)
+    result = CliRunner().invoke(app, ["describe", str(clip_letterboxed), "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["space"] == "depth"
+    for said in ("matte detected", "depth", "MPS unavailable", "a warning from the pass"):
+        assert said in result.stderr
