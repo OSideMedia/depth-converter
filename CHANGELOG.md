@@ -5,6 +5,10 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- The Seedance limits snapshot now counts as old after 180 days instead of 30. The
+  re-exports the 30-day window forced changed only the date. `depthc` still warns past
+  the window and keeps using the numbers.
+
 ## v0.16.0 — 2026-11-01
 
 - **The camera path is read where the picture can show it.** It missed slow and lens-compressed moves
