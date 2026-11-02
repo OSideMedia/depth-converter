@@ -359,9 +359,13 @@ def read_frames(
         # -ss before -i is both fast and frame-accurate in modern ffmpeg.
         cmd += ["-ss", f"{start:.6f}"]
 
-    refusal = memory.decode_refusal(int(duration * (fps or info.fps)) * width * height * 3)
-    if refusal:
-        raise VideoIOError(refusal)
+    # ponytail: only a conformed read has a frame count to check. fps=None keeps every decoded frame,
+    # and a VFR source's reported rate can be a 1000 fps timebase artifact, so it would refuse small
+    # reads. Its one caller, `stability --after`, reads at the small stability size.
+    if fps:
+        refusal = memory.decode_refusal(int(duration * fps) * width * height * 3)
+        if refusal:
+            raise VideoIOError(refusal)
 
     cmd += ["-i", str(info.path)]
     if trim:

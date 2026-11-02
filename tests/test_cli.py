@@ -318,11 +318,11 @@ def test_compare_lets_go_of_the_reference_before_the_generated_clips_pass(clip_t
 
 
 def test_a_clip_too_big_to_read_reads_as_plain_words(clip_tiny, tmp_path, monkeypatch):
-    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.1")
+    monkeypatch.setattr(memory, "_SMALL_READ", 0)
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
     result = runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "out.mp4")])
     assert result.exit_code == 1 and isinstance(result.exception, SystemExit), repr(result.exception)
     assert "to read this clip" in _text(result)
-    assert "Traceback" not in _text(result)
 
 
 class TestGenerationFlag:

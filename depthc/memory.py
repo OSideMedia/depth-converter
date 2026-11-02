@@ -50,6 +50,7 @@ _PATCH = 14  # --input-size must be a multiple of this (DINOv2 patches)
 
 OVERRIDE_ENV = "DEPTHC_MEMORY_GB"
 _MAC = sys.platform == "darwin"
+_SMALL_READ = GB  # a read this size cannot stall a machine, and the matte scan on any clip stays under it
 
 
 @dataclass(frozen=True)
@@ -132,7 +133,7 @@ def need_bytes(shape: tuple[int, ...], input_size: int) -> int:
     return _PROCESS + max(while_windows_run, at_the_end)
 
 
-def _allowed_bytes() -> tuple[int, str]:
+def _allowed_bytes(credit_own: bool = True) -> tuple[int, str]:
     """What this pass may use, and how that was decided, in words for the refusal.
 
     The estimate is for the whole process at its peak, and `vm_stat` has already taken out what
@@ -156,7 +157,8 @@ def _allowed_bytes() -> tuple[int, str]:
     if available is None:
         # A Mac that cannot answer may be too busy to answer, which is no time to start a pass.
         return 0 if _MAC else total // 2, f"This machine has {_gb(total)} and would not report what is free"
-    available += own_bytes()
+    if credit_own:
+        available += own_bytes()
     return (
         available - _KEEP_FREE,
         f"This machine has about {_gb(available)} free out of {_gb(total)}, "
@@ -181,15 +183,21 @@ def largest_input_size_that_fits(shape: tuple[int, ...], input_size: int, allowe
 
 
 def decode_refusal(frame_bytes: int) -> str | None:
-    """Reading a clip holds its frames twice for a moment, and the pass check can only run after it."""
-    need = _PROCESS + 2 * frame_bytes
-    allowed, why = _allowed_bytes()
+    """Reading a clip holds its frames twice for a moment, and the pass check can only run after it.
+
+    All of that has to come out of what is free now. An array this process already holds may still be
+    alive while the read runs, as `look-compare --manifest` holds the last clip's, so none of it counts.
+    """
+    if frame_bytes < _SMALL_READ:
+        return None
+    need = 2 * frame_bytes
+    allowed, why = _allowed_bytes(credit_own=False)
     if need <= allowed:
         return None
     return (
         f"Not enough free memory to read this clip: it needs about {_gb(need)}. {why}.\n"
         f"  Nothing ran. Use a shorter clip or a lower resolution, or close other apps and run it again.\n"
-        f"  To run it anyway, set {OVERRIDE_ENV} to the GB this pass may use."
+        f"  To run it anyway, set {OVERRIDE_ENV} to the GB this read may use."
     )
 
 

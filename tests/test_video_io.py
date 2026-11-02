@@ -334,3 +334,18 @@ def test_a_file_named_like_a_protocol_is_read_as_itself(clip_tiny, clip_3s, tmp_
     info = probe("file:clip.mp4")
     assert (info.width, info.height) == (140, 140)
     assert read_frames(info).shape[1:3] == (140, 140)
+
+
+def test_a_read_that_keeps_every_frame_is_not_judged_by_a_reported_rate(clip_tiny, monkeypatch):
+    """A VFR source's reported rate can be a 1000 fps timebase artifact, which would refuse a read
+    of a few real frames. Only a conformed read has a frame count to check."""
+    from dataclasses import replace
+
+    from depthc import memory
+
+    monkeypatch.setattr(memory, "_SMALL_READ", 0)
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
+    info = probe(clip_tiny)
+    assert len(read_frames(replace(info, fps=1000.0))) > 0
+    with pytest.raises(VideoIOError, match="to read this clip"):
+        read_frames(info, fps=24.0)

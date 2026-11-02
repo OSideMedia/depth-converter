@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from depthc import memory
+from depthc.video_io import MATTE_SAMPLE_FRAMES
 
 GB = memory.GB
 CLIP_720P_8S = (192, 720, 1280, 3)
@@ -200,14 +201,29 @@ def test_a_clip_too_big_to_read_is_refused_before_it_is_read(monkeypatch):
     refusal = memory.decode_refusal(frames)
     assert refusal is not None and "to read this clip" in refusal and "Nothing ran" in refusal
     assert memory.OVERRIDE_ENV in refusal
-    _machine(monkeypatch, 24, 20)
-    assert memory.decode_refusal(192 * 720 * 1280 * 3) is None
-    # The same frames fit only where twice their size and the process do.
-    edge = memory._PROCESS + 2 * frames + memory._KEEP_FREE
+    # Twice the frames, and the margin, out of what is free. Not one copy, and not without the margin.
+    edge = 2 * frames + memory._KEEP_FREE
     _machine(monkeypatch, 64, edge / GB + 0.01)
     assert memory.decode_refusal(frames) is None
     _machine(monkeypatch, 64, edge / GB - 0.01)
     assert memory.decode_refusal(frames) is not None
+
+
+def test_a_read_does_not_count_what_this_process_holds_as_room(monkeypatch):
+    """`look-compare --manifest` still holds the last clip's frames while it reads the next, so a
+    credit would approve a read that runs the machine out."""
+    frames = 4 * GB
+    _machine(monkeypatch, 24, 6, own_gb=4.5)
+    assert memory.decode_refusal(frames) is not None
+
+
+def test_a_small_read_is_never_refused(monkeypatch):
+    """The matte scan runs on every clip, on surfaces with no handler for this, and `inbox --no-scout`
+    and the UI's readout should survive a tight machine. Nine frames of 8K stay under the line."""
+    _machine(monkeypatch, 24, 0.5)
+    assert memory.decode_refusal(MATTE_SAMPLE_FRAMES * 7680 * 4320 * 3) is None
+    assert memory.decode_refusal(memory._SMALL_READ - 1) is None
+    assert memory.decode_refusal(memory._SMALL_READ) is not None
 
 
 def test_a_hand_set_limit_is_for_the_whole_pass_so_it_gets_no_credit(monkeypatch):
