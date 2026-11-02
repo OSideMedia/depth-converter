@@ -52,7 +52,7 @@ A few extras speak OSIDE, and you can ignore them all:
 | `--generation <id>` on `compare` and `result` | leave it off; `--output` and `--notes` record the same fire |
 | `visualDna` and `styleConstant` blocks in `look.json` | the measured palette and key sit beside them |
 | `look-compare --manifest` | it reads an [`oside-davinci/v1`](https://github.com/OSideMedia/oside-resolve-mcp) package, a plain folder and JSON file |
-| `depthc/seedance-envelope.json` | a JSON snapshot of Seedance's limits, exported from OSIDE and committed here. When it is over 30 days old `depthc` warns and keeps using it, so check the limits against the vendor's docs |
+| `depthc/seedance-envelope.json` | a JSON snapshot of Seedance's limits, exported from OSIDE and committed here. When it is over 180 days old `depthc` warns and keeps using it, so check the limits against the vendor's docs |
 | `scripts/calibrate_camera_path.py` | a developer check that needs `oside-blender-mcp` and Blender; `depthc` never calls it |
 
 **One limit on the evidence.** Every generation recorded in
