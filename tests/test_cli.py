@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from depthc import cli
+from depthc import cli, memory
 
 runner = CliRunner()
 
@@ -336,3 +336,52 @@ class TestGenerationFlag:
         hint = cli._record_hint("Kit_001", c, self.GEN)
         assert "depthc result" in hint and f"--generation {self.GEN}" in hint
         assert "--generation" not in cli._record_hint("Kit_001", c, None)
+
+
+class TestNotEnoughMemory:
+    """Every command that runs a depth pass gives the same plain refusal, before the model
+    loads. A traceback here is what a person on a smaller machine would otherwise read."""
+
+    @pytest.fixture(autouse=True)
+    def _machine_with_nothing_to_spare(self, monkeypatch):
+        monkeypatch.setenv(memory.OVERRIDE_ENV, "0.01")
+
+    @staticmethod
+    def _refused(result) -> None:
+        text = _text(result)
+        assert result.exit_code == 1, text
+        assert isinstance(result.exception, SystemExit), repr(result.exception)
+        assert "Not enough free memory" in text and "Close other apps" in text
+        assert "Traceback" not in text
+
+    def test_convert(self, clip_tiny, tmp_path):
+        self._refused(runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "d.mp4")]))
+        assert not (tmp_path / "d.mp4").exists()
+
+    def test_kit_leaves_no_half_built_folder(self, clip_tiny, tmp_path):
+        lib = tmp_path / "lib"
+        self._refused(runner.invoke(cli.app, ["kit", str(clip_tiny), "--library", str(lib), "--tags", "x"]))
+        assert not lib.exists() or not [p for p in lib.iterdir() if p.is_dir()]
+
+    def test_describe(self, clip_tiny):
+        self._refused(runner.invoke(cli.app, ["describe", str(clip_tiny)]))
+
+    def test_scout(self, clip_tiny):
+        self._refused(runner.invoke(cli.app, ["scout", str(clip_tiny)]))
+
+    def test_compare(self, clip_tiny, tmp_path):
+        import shutil
+
+        kit_dir = _fake_kit(tmp_path)
+        shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+        self._refused(runner.invoke(cli.app, ["compare", str(kit_dir), str(clip_tiny)]))
+
+    def test_inbox_says_so_for_that_clip_and_carries_on(self, clip_3s, tmp_path):
+        """The triage list is still worth reading when its scout pass cannot run."""
+        import shutil
+
+        shutil.copy(clip_3s, tmp_path / "one.mp4")  # under 2 s never reaches the scout
+        result = runner.invoke(cli.app, ["inbox", "--inbox", str(tmp_path)])
+        text = _text(result)
+        assert result.exit_code == 0, text
+        assert "scout failed" in text and "Not enough free memory" in text

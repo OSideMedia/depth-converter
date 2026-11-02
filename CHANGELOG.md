@@ -8,6 +8,18 @@ the code's history. Started 2026-09-06.
 - The Seedance limits snapshot now counts as old after 180 days instead of 30. The
   re-exports the 30-day window forced changed only the date. `depthc` still warns past
   the window and keeps using the numbers.
+- **A depth pass can no longer stall the machine it runs on.** A default pass reached 18 GB and
+  all but froze a 24 GB Mac with other apps open. Two changes:
+  - It now peaks at 7.1 to 7.3 GB, at the same speed. The model's backbone sees 4 frames at a time
+    instead of 32, and its output is byte-identical on every clip compared. No vendor code changed.
+  - Before each pass the tool reads what this machine has free right now, keeps 1.5 GB back, and
+    sets a GPU limit from what is left. If the pass won't fit, it stops before loading the model
+    with the figures and what to do, including a smaller `--input-size` when one would fit. It never
+    lowers the size on its own, because that changes the output. `DEPTHC_MEMORY_GB` sets the limit
+    by hand. Every command that runs a depth pass, the UI and the smoke test get this. One Mac was
+    measured, at eight picture sizes; for other machines and clip shapes the figures are an estimate.
+    Long clips need more, about 14 GB by calculation for 30 seconds of 720p, because the clip's own
+    frames and depth add up.
 
 ## v0.16.0 — 2026-11-01
 

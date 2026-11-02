@@ -20,6 +20,13 @@ Worse, the NaN is *sticky*: an fp16 run poisons the next fp32 run on the same mo
 until `torch.mps.empty_cache()` is called, which points at a cached MPS graph rather than
 arithmetic overflow. Our per-window cache purge already clears it; the fallback path calls
 it explicitly rather than relying on that coincidence.
+
+MEMORY: upstream hands all 32 frames of a window to the DINOv2 backbone as one batch, and without
+xFormers (CUDA only) each of its 12 blocks builds a full attention matrix for that batch: frames x
+heads x tokens^2 floats, or 4.27 GiB at 518 x 924. That took a pass to 18 GB of unified memory and
+all but froze a 24 GB Mac with other apps open. Attention never crosses frames in the backbone, so
+`bound_memory` feeds it a few frames at a time, the way upstream's own decoder already does, and the
+output bytes do not change. `memory.py` then sets a limit from what the machine has free.
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from typing import Callable, Iterable
 import numpy as np
 import torch
 
+from depthc import memory
 from depthc.vendor_path import MODEL_CONFIG, ensure_checkpoint, ensure_vendor_on_path
 
 ProgressFn = Callable[[int, int], None]
@@ -47,6 +55,10 @@ PRECISIONS = ("fp32", "fp16")
 # in the same units the model actually works in. Do not "tune" these.
 INFER_LEN = 32
 OVERLAP = 10
+
+# Frames the backbone sees at once. Groups of 8 and of 4 gave identical bytes at the same speed;
+# 4 peaked lower (7.9 against 8.5 GB) and matches upstream's decoder micro-batch.
+BACKBONE_FRAMES = 4
 
 _MODEL_CACHE: dict[str, torch.nn.Module] = {}
 
@@ -63,6 +75,46 @@ def pick_device(prefer: str | None = None) -> str:
 def empty_cache(device: str) -> None:
     if device == "mps":
         torch.mps.empty_cache()
+
+
+def _settle(device: str) -> None:
+    """Finish queued GPU work and hand back what it held. Emptying alone frees nothing still queued."""
+    if device == "mps":
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
+
+
+def _in_groups(whole: Callable, device: str) -> Callable:
+    """Wrap the backbone's feature call so it sees BACKBONE_FRAMES frames at a time."""
+
+    def grouped(x, n=1, reshape=False, return_class_token=False, norm=True):
+        if not return_class_token:  # upstream never asks for this shape; leave it whole
+            return whole(x, n, reshape=reshape, return_class_token=False, norm=norm)
+        parts = []
+        for start in range(0, x.shape[0], BACKBONE_FRAMES):
+            parts.append(whole(x[start:start + BACKBONE_FRAMES], n, reshape=reshape,
+                               return_class_token=True, norm=norm))
+            _settle(device)
+        return tuple(
+            (torch.cat([part[layer][0] for part in parts]), torch.cat([part[layer][1] for part in parts]))
+            for layer in range(len(parts[0]))
+        )
+
+    return grouped
+
+
+def bound_memory(model: torch.nn.Module, device: str) -> None:
+    """Keep a window's memory down, with no vendor edit and no change to the output."""
+    model.pretrained.get_intermediate_layers = _in_groups(model.pretrained.get_intermediate_layers, device)
+    for stage in model.head.motion_modules:
+        stage.register_forward_hook(lambda *_: _settle(device))
+
+
+def limit_gpu(device: str, limit: int) -> None:
+    """A hard line behind the estimate: MPS raises at it instead of swapping the machine to a stall."""
+    if device == "mps":
+        fraction = min(1.0, limit / torch.mps.recommended_max_memory())
+        torch.mps.set_per_process_memory_fraction(fraction)
 
 
 def load_model(device: str | None = None) -> tuple[torch.nn.Module, str]:
@@ -82,6 +134,7 @@ def load_model(device: str | None = None) -> tuple[torch.nn.Module, str]:
     model = VideoDepthAnything(**MODEL_CONFIG)
     model.load_state_dict(torch.load(checkpoint, map_location="cpu", weights_only=True), strict=True)
     model = model.to(device).eval()
+    bound_memory(model, device)
     _MODEL_CACHE[device] = model
     return model, device
 
@@ -148,8 +201,16 @@ class DepthResult:
         return self.elapsed / max(1, self.count) * 1000
 
 
-class NonFiniteDepth(RuntimeError):
+class DepthFailure(RuntimeError):
+    """A depth pass could not give a usable result. The message is written for the person running it."""
+
+
+class NonFiniteDepth(DepthFailure):
     """Inference produced NaN/Inf — see the precision note at the top of this module."""
+
+
+class NotEnoughMemory(DepthFailure):
+    """This machine cannot spare what the pass needs — see `memory.py`."""
 
 
 def normalize(depth: np.ndarray, invert: bool = False) -> tuple[np.ndarray, float, float]:
@@ -195,6 +256,14 @@ def _run_windows(
             return model.infer_video_depth(
                 frames, fps, input_size=input_size, device=device, fp32=use_fp32
             )
+    except RuntimeError as e:
+        if "out of memory" not in str(e).lower():
+            raise
+        raise NotEnoughMemory(
+            f"The depth pass stopped at its memory limit before it finished. Close other apps and "
+            f"run it again, or use a smaller --input-size. To allow more, set "
+            f"{memory.OVERRIDE_ENV} to the GB this pass may use."
+        ) from e
     finally:
         empty_cache(device)
 
@@ -217,7 +286,13 @@ def infer(
     if precision not in PRECISIONS:
         raise ValueError(f"precision must be one of {PRECISIONS}, got {precision!r}")
 
+    # Before the model loads, so a pass that cannot fit touches nothing.
+    plan = memory.plan(frames.shape, input_size)
+    if plan.refusal:
+        raise NotEnoughMemory(plan.refusal)
+
     model, device = load_model(device)
+    limit_gpu(device, plan.gpu_limit)
     # CPU autocast would be pointless; fp32 is also the default everywhere (see module docs).
     use_fp32 = precision == "fp32" or device == "cpu"
 

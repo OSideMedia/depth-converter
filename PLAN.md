@@ -449,6 +449,12 @@ Key engineering decisions:
   in 24 GB unified memory at fp16. If MPS OOMs at `--resolution source` on 1080p inputs,
   inference resolution is `--input-size` anyway (output upsampled to target res), so this
   should not occur; don't build tiling.
+  **[AMENDED 2026-11-01] This was wrong, and it took a real stall to show it.** Without xFormers
+  the backbone builds one attention matrix for all 32 frames in each of its 12 blocks, 4.27 GiB
+  apiece at 518 × 924, so a pass reached 18 GB and all but froze a 24 GB Mac with other apps open.
+  `ps` hid it: GPU memory is not in RSS, so read `top -l 1 -pid <pid> -stats mem`. The fix is still
+  not tiling. `engine.bound_memory` feeds the backbone 4 frames at a time (7.1 to 7.3 GB, same
+  bytes, same speed), and `memory.py` sizes each pass to what the machine has free.
 
 ---
 

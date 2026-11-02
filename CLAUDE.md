@@ -190,9 +190,9 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
   `Outbox/*` rule had already swallowed every 2026-07-25 kit's `result.json` — paid
   evidence, gone (`DOCS/LIVE-FIRE.md`). (Commits use the per-repo noreply email
   `261988918+OSideMedia@users.noreply.github.com`.)
-- **Never edit `vendor/`.** Upstream is pinned and imported; device and precision handling
-  lives in `engine.py`. The per-window hook works by rebinding `tqdm` in their module
-  namespace at runtime.
+- **Never edit `vendor/`.** Upstream is pinned and imported; device, precision and memory
+  handling live in `engine.py`. The per-window hook works by rebinding `tqdm` in their module
+  namespace at runtime, and the backbone's grouping by rebinding one method on the loaded model.
 - **fp32 is the default.** fp16/bf16 autocast returns all-NaN on MPS *and* is slower. The
   NaN is sticky until `mps.empty_cache()` and casts silently to an all-black video.
 
@@ -234,4 +234,11 @@ Phase 5 (automating the attach) is still deferred, but Phase 4 has now passed.
 - Real footage is often matted. `--crop auto` handles it; detection deliberately avoids
   ffmpeg's `cropdetect`, which ate 20px of real picture on a dark edge.
 - Conversions run ~20–35s for an 8s clip at 720p on MPS.
+- A depth pass peaks near 7.3 GB, and `ps` will not show it: GPU memory is not in RSS. Read
+  `top -l 1 -pid <pid> -stats mem`. The backbone's grouping (`engine.bound_memory`) is what holds
+  it there, and `memory.py` refuses a pass the machine cannot spare. Anything that builds the
+  model outside `load_model` needs the same two calls, as `smoke.py` has them. On a long clip or at
+  a small `--input-size` the peak is at the end of the pass and on the CPU side, where upstream holds
+  several copies of the depth, so a smaller `--input-size` stops helping. A memory test runs one clip
+  at a time, under a kill switch below what is free.
 - `pytest` is scoped to `tests/`; upstream ships a CUDA-only test file that errors on import.

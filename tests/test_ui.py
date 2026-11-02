@@ -216,6 +216,20 @@ def test_the_model_picker_changes_which_clips_are_refused(clip_long, monkeypatch
     assert "ReachedTheModel" in on_25
 
 
+def test_a_pass_that_does_not_fit_reads_as_plain_words_in_the_ui(clip_long, monkeypatch, tmp_path):
+    """The UI's catch-all would print a traceback here if this failure were not its own case."""
+    from depthc import memory
+
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.01")
+    *_, status = ui._convert(
+        str(clip_long), "memtest", "", "seedance-2.5", "720p", "auto", "conform-24", 0, 5,
+        False, True, "auto", 518, "fp32", False, False, str(tmp_path),
+    )
+    assert "Not enough free memory" in status and "Close other apps" in status
+    assert "Traceback" not in status and "Unexpected error" not in status
+    assert not [p for p in tmp_path.iterdir() if p.is_dir()], "a refused pass left a kit folder behind"
+
+
 def test_reveal_on_a_missing_path_does_not_raise(tmp_path):
     assert "Not found" in ui._reveal(tmp_path / "ghost")
 

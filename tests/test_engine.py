@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+
 import numpy as np
 import torch
 import pytest
 
-from depthc import engine
+from depthc import engine, memory
 from depthc.video_io import probe, read_frames
 
 
@@ -129,7 +131,272 @@ def test_window_hook_reports_progress():
     assert order == ["body", "hook", "body", "hook", "body", "hook"]
 
 
+# ------------------------------------------------------------------ memory (fast)
+
+class _FakeBackbone:
+    """Answers like DINOv2: per layer, (patch tokens, class token), one row per frame."""
+
+    def __init__(self):
+        self.batches: list[int] = []
+
+    def __call__(self, x, n=1, reshape=False, return_class_token=False, norm=True):
+        self.batches.append(x.shape[0])
+        flat = x.flatten(1)
+        if not return_class_token:
+            return tuple(flat * (layer + 1) for layer in n)
+        return tuple((flat * (layer + 1), flat[:, :1] * (layer + 1)) for layer in n)
+
+
+def test_backbone_never_sees_more_than_a_group_and_the_answer_does_not_change():
+    frames = torch.arange(32 * 3 * 2 * 2, dtype=torch.float32).reshape(32, 3, 2, 2)
+    layers = [2, 5, 8, 11]
+    whole = _FakeBackbone()(frames, layers, return_class_token=True)
+
+    backbone = _FakeBackbone()
+    grouped = engine._in_groups(backbone, "cpu")(frames, layers, return_class_token=True)
+
+    assert max(backbone.batches) == engine.BACKBONE_FRAMES
+    assert sum(backbone.batches) == 32
+    assert len(grouped) == len(whole)
+    for (patches, token), (whole_patches, whole_token) in zip(grouped, whole):
+        assert torch.equal(patches, whole_patches)  # same values, same frame order
+        assert torch.equal(token, whole_token)
+
+
+def test_group_size_is_small_enough_to_matter():
+    """Attention memory is per batch, so this figure IS the fix. 8 was measured no better than 4."""
+    assert engine.BACKBONE_FRAMES <= 4
+
+
+def test_a_batch_that_does_not_fill_the_last_group_still_comes_back_whole():
+    frames = torch.zeros(5, 3, 2, 2)
+    backbone = _FakeBackbone()
+    out = engine._in_groups(backbone, "cpu")(frames, [0], return_class_token=True)
+    assert backbone.batches == [4, 1]
+    assert out[0][0].shape[0] == 5 and out[0][1].shape[0] == 5
+
+
+def test_a_call_upstream_never_makes_passes_through_untouched():
+    frames = torch.zeros(32, 3, 2, 2)
+    backbone = _FakeBackbone()
+    out = engine._in_groups(backbone, "cpu")(frames, [0])
+    assert backbone.batches == [32]
+    assert out[0].shape[0] == 32
+
+
+class _FakeModelBackbone(torch.nn.Module):
+    def get_intermediate_layers(self, x, n=1, reshape=False, return_class_token=False, norm=True):
+        return ((x, x),)
+
+
+class _FakeModelHead(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.motion_modules = torch.nn.ModuleList(torch.nn.Identity() for _ in range(4))
+
+
+def _fake_vendor(monkeypatch) -> list:
+    """Stand in for the vendored model, so the wiring is testable where the assets are absent."""
+    import sys
+    import types
+
+    built: list = []
+
+    class Fake(torch.nn.Module):
+        def __init__(self, **_):
+            super().__init__()
+            self.pretrained, self.head = _FakeModelBackbone(), _FakeModelHead()
+            built.append(self)
+
+        def forward(self, x):
+            return x[:, :, 0] + torch.rand_like(x[:, :, 0])
+
+    fake = types.ModuleType("video_depth_anything.video_depth")
+    fake.VideoDepthAnything = Fake
+    monkeypatch.setitem(sys.modules, "video_depth_anything", types.ModuleType("video_depth_anything"))
+    monkeypatch.setitem(sys.modules, "video_depth_anything.video_depth", fake)
+    monkeypatch.setattr(engine.torch, "load", lambda *_a, **_k: {})
+    return built
+
+
+def test_load_model_installs_both_memory_measures_once(monkeypatch):
+    """The unit tests above prove grouping works; this proves the real door actually uses it."""
+    _fake_vendor(monkeypatch)
+    monkeypatch.setattr(engine, "ensure_vendor_on_path", lambda: None)
+    monkeypatch.setattr(engine, "ensure_checkpoint", lambda: "unused")
+    monkeypatch.setitem(engine._MODEL_CACHE, "cpu", None)
+    del engine._MODEL_CACHE["cpu"]
+
+    settled: list[str] = []
+    monkeypatch.setattr(engine, "_settle", settled.append)
+
+    model, device = engine.load_model("cpu")
+    assert device == "cpu"
+    assert engine.load_model("cpu")[0] is model  # the cache must not wrap it a second time
+
+    model.pretrained.get_intermediate_layers(torch.zeros(10, 1), [0], return_class_token=True)
+    assert len(settled) == 3, "10 frames in groups of 4 is 3 groups, each settled once"
+
+    settled.clear()
+    for stage in model.head.motion_modules:
+        stage(torch.zeros(1))
+    assert len(settled) == 4, "one settle per temporal stage"
+
+
+def _smoke_on_a_cpu_machine(monkeypatch, tmp_path):
+    from depthc import smoke
+
+    checkpoint = tmp_path / "checkpoint.pth"
+    checkpoint.write_bytes(b"x")
+    monkeypatch.setattr(smoke, "ensure_vendor_on_path", lambda: None)
+    monkeypatch.setattr(smoke, "ensure_checkpoint", lambda: checkpoint)
+    monkeypatch.setattr(smoke, "vendor_commit", lambda: smoke.VDA_COMMIT)
+    monkeypatch.setattr(smoke.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(engine.torch.backends.mps, "is_available", lambda: False)
+    return smoke, _fake_vendor(monkeypatch)
+
+
+def test_smoke_refuses_on_a_machine_that_cannot_fit_it_before_building_the_model(monkeypatch, tmp_path, capsys):
+    """Every new user runs this straight after install, so it cannot be the door the stall comes through."""
+    smoke, built = _smoke_on_a_cpu_machine(monkeypatch, tmp_path)
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.1")
+
+    assert smoke.main() == 1
+    assert "Not enough free memory" in capsys.readouterr().out
+    assert built == [], "the model was built for a run that was refused"
+
+
+def test_smoke_runs_under_the_same_two_measures_as_a_real_pass(monkeypatch, tmp_path):
+    smoke, built = _smoke_on_a_cpu_machine(monkeypatch, tmp_path)
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "20")
+    limits: list[tuple[str, int]] = []
+    monkeypatch.setattr(engine, "limit_gpu", lambda device, limit: limits.append((device, limit)))
+
+    assert smoke.main() == 0
+    assert "get_intermediate_layers" in built[0].pretrained.__dict__, "the backbone was not grouped"
+    assert limits == [("cpu", memory.plan((32, 518, 518, 3), 518).gpu_limit)]
+
+
+def test_limit_gpu_turns_bytes_into_a_capped_fraction(monkeypatch):
+    calls: list[float] = []
+    monkeypatch.setattr(engine.torch.mps, "recommended_max_memory", lambda: 16 * memory.GB, raising=False)
+    monkeypatch.setattr(engine.torch.mps, "set_per_process_memory_fraction", calls.append, raising=False)
+
+    engine.limit_gpu("mps", 8 * memory.GB)
+    engine.limit_gpu("mps", 64 * memory.GB)  # more than the GPU pool can ever be
+    assert calls == [0.5, 1.0]
+
+    engine.limit_gpu("cpu", 8 * memory.GB)
+    assert len(calls) == 2, "the limit is an MPS setting; a CPU pass must not touch it"
+
+
+def test_a_pass_that_does_not_fit_stops_before_the_model_loads(monkeypatch):
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.1")
+
+    def loaded(*_a, **_k):
+        pytest.fail("the model loaded for a pass that was refused")
+
+    monkeypatch.setattr(engine, "load_model", loaded)
+    with pytest.raises(engine.NotEnoughMemory, match="Close other apps"):
+        engine.infer(np.zeros((4, 720, 1280, 3), dtype=np.uint8), 24)
+
+
+def test_a_pass_that_fits_gets_the_limit_from_the_plan(monkeypatch):
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "20")
+    frames = np.zeros((4, 64, 64, 3), dtype=np.uint8)
+    limits: list[tuple[str, int]] = []
+
+    class Stop(Exception):
+        pass
+
+    def stop(*_a, **_k):
+        raise Stop
+
+    monkeypatch.setattr(engine, "load_model", lambda device=None: (object(), "mps"))
+    monkeypatch.setattr(engine, "limit_gpu", lambda device, limit: limits.append((device, limit)))
+    monkeypatch.setattr(engine, "_run_windows", stop)
+    with pytest.raises(Stop):
+        engine.infer(frames, 24)
+    assert limits == [("mps", memory.plan(frames.shape, 518).gpu_limit)]
+
+
+def test_infer_does_not_charge_twice_for_what_the_process_already_holds(monkeypatch):
+    """The decoded frames, and what an earlier pass left. Exactly enough only with that credited."""
+    monkeypatch.delenv(memory.OVERRIDE_ENV, raising=False)
+    frames = np.zeros((4, 720, 1280, 3), dtype=np.uint8)
+    own = 2 * memory.GB
+    free = memory.need_bytes(frames.shape, 518) - own + memory._KEEP_FREE
+    monkeypatch.setattr(memory, "available_bytes", lambda: free)
+
+    class Reached(Exception):
+        pass
+
+    def reached(*_a, **_k):
+        raise Reached
+
+    monkeypatch.setattr(engine, "load_model", reached)
+    monkeypatch.setattr(memory, "own_bytes", lambda: own)
+    with pytest.raises(Reached):
+        engine.infer(frames, 24)
+
+    monkeypatch.setattr(memory, "own_bytes", lambda: own - 1)
+    with pytest.raises(engine.NotEnoughMemory):
+        engine.infer(frames, 24)
+
+
+class _FailingModel:
+    def __init__(self, message: str):
+        self.message = message
+
+    def infer_video_depth(self, *_a, **_k):
+        raise RuntimeError(self.message)
+
+
+def _run_windows_with(monkeypatch, model):
+    @contextlib.contextmanager
+    def no_hook(*_a):
+        yield
+
+    monkeypatch.setattr(engine, "_window_hook", no_hook)
+    return engine._run_windows(model, np.zeros((1, 2, 2, 3), np.uint8), 24.0, 518, "cpu", True, None)
+
+
+def test_hitting_the_limit_mid_pass_reads_as_plain_words(monkeypatch):
+    with pytest.raises(engine.NotEnoughMemory, match=memory.OVERRIDE_ENV) as caught:
+        _run_windows_with(monkeypatch, _FailingModel("MPS backend out of memory (MPS allocated: 4 GiB)"))
+    assert "MPS backend" not in str(caught.value)
+
+
+def test_any_other_runtime_error_is_not_dressed_up_as_memory(monkeypatch):
+    with pytest.raises(RuntimeError, match="shape mismatch") as caught:
+        _run_windows_with(monkeypatch, _FailingModel("shape mismatch"))
+    assert not isinstance(caught.value, engine.NotEnoughMemory)
+
+
+def test_both_failures_share_the_family_the_callers_catch():
+    assert issubclass(engine.NonFiniteDepth, engine.DepthFailure)
+    assert issubclass(engine.NotEnoughMemory, engine.DepthFailure)
+
+
 # ------------------------------------------------------------------ real model (slow)
+
+@pytest.mark.slow
+def test_grouping_changes_no_byte_of_the_real_models_depth(clip_tiny):
+    """The promise behind the fix: same picture out, less memory on the way."""
+    info = probe(clip_tiny)
+    frames = read_frames(info, fps=24, size=(140, 140))
+    model, device = engine.load_model()
+
+    grouped = engine._run_windows(model, frames, 24.0, 140, device, True, None)[0]
+
+    wrapper = model.pretrained.__dict__.pop("get_intermediate_layers")
+    try:
+        whole = engine._run_windows(model, frames, 24.0, 140, device, True, None)[0]
+    finally:
+        model.pretrained.get_intermediate_layers = wrapper
+
+    assert np.array_equal(grouped, whole)
+
 
 @pytest.mark.slow
 def test_infer_real_model(clip_tiny):

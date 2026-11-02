@@ -415,7 +415,7 @@ def _convert(
     except (VideoIOError, FileNotFoundError, ValueError) as e:
         _abandon_kit(kit_dir)
         return (*blank[:5], f"{e}")
-    except engine.NonFiniteDepth as e:
+    except engine.DepthFailure as e:
         _abandon_kit(kit_dir)
         return (*blank[:5], f"{e}")
     except Exception:  # noqa: BLE001 - a UI must never die silently on an unknown fault
