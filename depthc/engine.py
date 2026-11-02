@@ -113,7 +113,7 @@ def bound_memory(model: torch.nn.Module, device: str) -> None:
 def limit_gpu(device: str, limit: int) -> None:
     """A hard line behind the estimate: MPS raises at it instead of swapping the machine to a stall."""
     if device == "mps":
-        fraction = min(1.0, limit / torch.mps.recommended_max_memory())
+        fraction = min(2.0, limit / torch.mps.recommended_max_memory())  # 2 is torch's ceiling
         torch.mps.set_per_process_memory_fraction(fraction)
 
 
@@ -213,6 +213,17 @@ class NotEnoughMemory(DepthFailure):
     """This machine cannot spare what the pass needs — see `memory.py`."""
 
 
+STOPPED_AT_LIMIT = (
+    f"The depth pass stopped at its memory limit before it finished. Close other apps and "
+    f"run it again, or use a smaller --input-size. To allow more, set "
+    f"{memory.OVERRIDE_ENV} to the GB this pass may use."
+)
+
+
+def is_out_of_memory(error: RuntimeError) -> bool:
+    return "out of memory" in str(error).lower()
+
+
 def normalize(depth: np.ndarray, invert: bool = False) -> tuple[np.ndarray, float, float]:
     """Global (whole-clip) min/max normalization to uint8.
 
@@ -257,13 +268,9 @@ def _run_windows(
                 frames, fps, input_size=input_size, device=device, fp32=use_fp32
             )
     except RuntimeError as e:
-        if "out of memory" not in str(e).lower():
+        if not is_out_of_memory(e):
             raise
-        raise NotEnoughMemory(
-            f"The depth pass stopped at its memory limit before it finished. Close other apps and "
-            f"run it again, or use a smaller --input-size. To allow more, set "
-            f"{memory.OVERRIDE_ENV} to the GB this pass may use."
-        ) from e
+        raise NotEnoughMemory(STOPPED_AT_LIMIT) from e
     finally:
         empty_cache(device)
 

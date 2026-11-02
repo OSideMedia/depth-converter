@@ -12,6 +12,7 @@ not from a fixed number. What a pass needs is the part that is fixed, and it was
 from __future__ import annotations
 
 import ctypes
+import math
 import os
 import re
 import subprocess
@@ -33,18 +34,22 @@ _POOL_FIXED = 1.5 * GB
 _POOL_AT_DEFAULT_SIZE = 4.6 * GB  # on top of the fixed part
 _DEFAULT_PIXELS = 518 * 924
 _PROCESS = int(0.5 * GB)  # Python, torch and the model, outside the GPU pool (measured)
-# Held outside the pool, per pixel of the clip. While the windows run: uint8 RGB, plus float32 depth
-# for every window's 32 frames, which overlap, so 32/22 copies. At the end, upstream's alignment
-# adds an aligned copy and a stacked copy while the fixed part of the pool is still held. That stage
-# is the peak on a long clip or at a small --input-size. The end figure is rounded up from 17 to
-# cover the worst reading, 5.1 GB for 8 s of 720 x 1280 at --input-size 140.
-_BYTES_WHILE_WINDOWS_RUN = 3 + 6
-_BYTES_AT_THE_END = 3 + 16
+# Held outside the pool: 3 bytes a pixel for the RGB frames, and 4 for depth. Upstream keeps all 32
+# frames of every window at full size, overlaps included, padded out on a short clip. At the end of
+# the pass it aligns them into a second list and stacks the result, with the fixed part of the pool
+# still held. That stage is the peak on a long clip or at a small --input-size: 5.1 GB for 8 s of
+# 720 x 1280 at --input-size 140, with the windows at 2.9.
+_RGB = 3
+_DEPTH = 4
+_WINDOW = 32  # engine.INFER_LEN
+_WINDOW_STEP = 22  # engine.INFER_LEN - engine.OVERLAP
+_MEASURED_PIXELS = 1280 * 720  # the pool was measured at this output size
 _KEEP_FREE = int(1.5 * GB)  # room for everything else on the machine to keep working
 _SMALLEST_INPUT_SIZE = 140
 _PATCH = 14  # --input-size must be a multiple of this (DINOv2 patches)
 
 OVERRIDE_ENV = "DEPTHC_MEMORY_GB"
+_MAC = sys.platform == "darwin"
 
 
 @dataclass(frozen=True)
@@ -100,18 +105,30 @@ def _pool_need(height: int, width: int, input_size: int) -> int:
     if ratio > 1.78:
         input_size = round(int(input_size * 1.777 / ratio) / _PATCH) * _PATCH
     pixels = input_size * input_size * ratio
-    return int(_POOL_FIXED + _POOL_AT_DEFAULT_SIZE * pixels / _DEFAULT_PIXELS)
+    # Each window's depth is also upsampled to the clip's size on the GPU, which the 720p measurements
+    # already hold. Source-resolution 4K adds about a GB.
+    upsampled = max(0, height * width - _MEASURED_PIXELS) * _WINDOW * _DEPTH
+    return int(_POOL_FIXED + _POOL_AT_DEFAULT_SIZE * pixels / _DEFAULT_PIXELS) + upsampled
 
 
-def _clip_pixels(shape: tuple[int, ...]) -> int:
+def _window_frames(count: int) -> int:
+    return _WINDOW * math.ceil(count / _WINDOW_STEP)
+
+
+def _cpu_while_windows_run(shape: tuple[int, ...]) -> int:
     count, height, width = shape[:3]
-    return count * height * width
+    return height * width * (_RGB * count + _DEPTH * _window_frames(count))
+
+
+def _cpu_at_the_end(shape: tuple[int, ...]) -> int:
+    count, height, width = shape[:3]
+    return height * width * (_RGB * count + _DEPTH * (2 * _window_frames(count) + count))
 
 
 def need_bytes(shape: tuple[int, ...], input_size: int) -> int:
     """What a pass over frames of `shape` [N, H, W, 3] needs at its peak, whichever stage that is."""
-    while_windows_run = _pool_need(shape[1], shape[2], input_size) + _clip_pixels(shape) * _BYTES_WHILE_WINDOWS_RUN
-    at_the_end = int(_POOL_FIXED) + _clip_pixels(shape) * _BYTES_AT_THE_END
+    while_windows_run = _pool_need(shape[1], shape[2], input_size) + _cpu_while_windows_run(shape)
+    at_the_end = int(_POOL_FIXED) + _cpu_at_the_end(shape)
     return _PROCESS + max(while_windows_run, at_the_end)
 
 
@@ -137,7 +154,8 @@ def _allowed_bytes() -> tuple[int, str]:
     total = total_bytes()
     available = available_bytes()
     if available is None:
-        return total // 2, f"This machine has {_gb(total)} and would not report what is free"
+        # A Mac that cannot answer may be too busy to answer, which is no time to start a pass.
+        return 0 if _MAC else total // 2, f"This machine has {_gb(total)} and would not report what is free"
     available += own_bytes()
     return (
         available - _KEEP_FREE,
@@ -162,15 +180,29 @@ def largest_input_size_that_fits(shape: tuple[int, ...], input_size: int, allowe
     return None
 
 
+def decode_refusal(frame_bytes: int) -> str | None:
+    """Reading a clip holds its frames twice for a moment, and the pass check can only run after it."""
+    need = _PROCESS + 2 * frame_bytes
+    allowed, why = _allowed_bytes()
+    if need <= allowed:
+        return None
+    return (
+        f"Not enough free memory to read this clip: it needs about {_gb(need)}. {why}.\n"
+        f"  Nothing ran. Use a shorter clip or a lower resolution, or close other apps and run it again.\n"
+        f"  To run it anyway, set {OVERRIDE_ENV} to the GB this pass may use."
+    )
+
+
 def plan(shape: tuple[int, ...], input_size: int) -> Plan:
     """Decide this pass against this machine, right now.
 
-    ponytail: read once per pass, not during it. A machine that fills up after the pass starts
-    can still swap; polling mid-pass would catch that if it ever matters.
+    ponytail: read once per pass, not during it. A machine that fills up after the pass starts can
+    still swap. Polling at each window would catch that, but what `vm_stat` calls free moves a lot on
+    a healthy Mac, so it needs a measured floor first or it stops good passes.
     """
     need = need_bytes(shape, input_size)
     allowed, why = _allowed_bytes()
-    gpu_limit = max(0, allowed - _PROCESS - _clip_pixels(shape) * _BYTES_WHILE_WINDOWS_RUN)
+    gpu_limit = max(0, allowed - _PROCESS - _cpu_while_windows_run(shape))
     if need <= allowed:
         return Plan(need, allowed, gpu_limit, None)
 

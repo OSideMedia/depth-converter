@@ -234,7 +234,7 @@ Phase 5 (automating the attach) is still deferred, but Phase 4 has now passed.
 - Real footage is often matted. `--crop auto` handles it; detection deliberately avoids
   ffmpeg's `cropdetect`, which ate 20px of real picture on a dark edge.
 - Conversions run ~20–35s for an 8s clip at 720p on MPS.
-- A depth pass peaks near 7.3 GB, and `ps` will not show it: GPU memory is not in RSS. Read
+- A default depth pass (8 s of 720p) peaks near 7.3 GB, and `ps` will not show it: GPU memory is not in RSS. Read
   `top -l 1 -pid <pid> -stats mem`. The backbone's grouping (`engine.bound_memory`) is what holds
   it there, and `memory.py` refuses a pass the machine cannot spare. Anything that builds the
   model outside `load_model` needs the same two calls, as `smoke.py` has them. On a long clip or at

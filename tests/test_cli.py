@@ -7,12 +7,15 @@ no test holding any of them in place (2026-07-30 council audit).
 
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from depthc import cli, memory
+from depthc import motion as motionlib
+from depthc.video_io import VideoIOError
 
 runner = CliRunner()
 
@@ -290,6 +293,38 @@ class TestEverySurfaceVerifiesTheBinding:
         assert result.exit_code == 1
 
 
+def test_compare_lets_go_of_the_reference_before_the_generated_clips_pass(clip_tiny, tmp_path, monkeypatch):
+    """The memory check credits what this process holds as room the pass will reuse, so a reference
+    still alive during the pass would be counted as room it is not."""
+    import shutil
+
+    kit_dir = _fake_kit(tmp_path)
+    shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+    seen = {}
+    real_measure = motionlib.measure
+
+    def measure(frames, fps):
+        seen["reference"] = weakref.ref(frames)
+        return real_measure(frames, fps)
+
+    def depth_pass(*_a, **_k):
+        seen["alive during the pass"] = seen["reference"]() is not None
+        raise VideoIOError("stop here")
+
+    monkeypatch.setattr(motionlib, "measure", measure)
+    monkeypatch.setattr(cli, "_depth_profile", depth_pass)
+    result = runner.invoke(cli.app, ["compare", str(kit_dir), str(clip_tiny)])
+    assert seen.get("alive during the pass") is False, _text(result)
+
+
+def test_a_clip_too_big_to_read_reads_as_plain_words(clip_tiny, tmp_path, monkeypatch):
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.1")
+    result = runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "out.mp4")])
+    assert result.exit_code == 1 and isinstance(result.exception, SystemExit), repr(result.exception)
+    assert "to read this clip" in _text(result)
+    assert "Traceback" not in _text(result)
+
+
 class TestGenerationFlag:
     """`--generation <id>` on `result` and `compare` names the OSIDE generation a fire
     became (PLAN-SHARED-GENERATION-ID step d). `compare` never writes the fire — the
@@ -344,14 +379,14 @@ class TestNotEnoughMemory:
 
     @pytest.fixture(autouse=True)
     def _machine_with_nothing_to_spare(self, monkeypatch):
-        monkeypatch.setenv(memory.OVERRIDE_ENV, "0.01")
+        monkeypatch.setenv(memory.OVERRIDE_ENV, "1")  # enough to read these small clips, not to run
 
     @staticmethod
     def _refused(result) -> None:
         text = _text(result)
         assert result.exit_code == 1, text
         assert isinstance(result.exception, SystemExit), repr(result.exception)
-        assert "Not enough free memory" in text and "Close other apps" in text
+        assert "Not enough free memory for this depth pass" in text and "Close other apps" in text
         assert "Traceback" not in text
 
     def test_convert(self, clip_tiny, tmp_path):

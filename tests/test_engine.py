@@ -195,7 +195,7 @@ class _FakeModelHead(torch.nn.Module):
         self.motion_modules = torch.nn.ModuleList(torch.nn.Identity() for _ in range(4))
 
 
-def _fake_vendor(monkeypatch) -> list:
+def _fake_vendor(monkeypatch, fails_with: str | None = None) -> list:
     """Stand in for the vendored model, so the wiring is testable where the assets are absent."""
     import sys
     import types
@@ -209,6 +209,8 @@ def _fake_vendor(monkeypatch) -> list:
             built.append(self)
 
         def forward(self, x):
+            if fails_with:
+                raise RuntimeError(fails_with)
             return x[:, :, 0] + torch.rand_like(x[:, :, 0])
 
     fake = types.ModuleType("video_depth_anything.video_depth")
@@ -243,7 +245,7 @@ def test_load_model_installs_both_memory_measures_once(monkeypatch):
     assert len(settled) == 4, "one settle per temporal stage"
 
 
-def _smoke_on_a_cpu_machine(monkeypatch, tmp_path):
+def _smoke_on_a_cpu_machine(monkeypatch, tmp_path, fails_with: str | None = None):
     from depthc import smoke
 
     checkpoint = tmp_path / "checkpoint.pth"
@@ -253,7 +255,7 @@ def _smoke_on_a_cpu_machine(monkeypatch, tmp_path):
     monkeypatch.setattr(smoke, "vendor_commit", lambda: smoke.VDA_COMMIT)
     monkeypatch.setattr(smoke.platform, "machine", lambda: "arm64")
     monkeypatch.setattr(engine.torch.backends.mps, "is_available", lambda: False)
-    return smoke, _fake_vendor(monkeypatch)
+    return smoke, _fake_vendor(monkeypatch, fails_with)
 
 
 def test_smoke_refuses_on_a_machine_that_cannot_fit_it_before_building_the_model(monkeypatch, tmp_path, capsys):
@@ -277,17 +279,38 @@ def test_smoke_runs_under_the_same_two_measures_as_a_real_pass(monkeypatch, tmp_
     assert limits == [("cpu", memory.plan((32, 518, 518, 3), 518).gpu_limit)]
 
 
-def test_limit_gpu_turns_bytes_into_a_capped_fraction(monkeypatch):
+def test_limit_gpu_turns_bytes_into_a_fraction_torch_accepts(monkeypatch):
     calls: list[float] = []
     monkeypatch.setattr(engine.torch.mps, "recommended_max_memory", lambda: 16 * memory.GB, raising=False)
     monkeypatch.setattr(engine.torch.mps, "set_per_process_memory_fraction", calls.append, raising=False)
 
     engine.limit_gpu("mps", 8 * memory.GB)
-    engine.limit_gpu("mps", 64 * memory.GB)  # more than the GPU pool can ever be
-    assert calls == [0.5, 1.0]
+    engine.limit_gpu("mps", 20 * memory.GB)  # past Apple's suggestion: the plan read what is free
+    engine.limit_gpu("mps", 64 * memory.GB)  # past what torch will take, and it raises
+    assert calls == [0.5, 1.25, 2.0]
 
     engine.limit_gpu("cpu", 8 * memory.GB)
-    assert len(calls) == 2, "the limit is an MPS setting; a CPU pass must not touch it"
+    assert len(calls) == 3, "the limit is an MPS setting; a CPU pass must not touch it"
+
+
+def test_memory_module_knows_the_engines_window_sizes():
+    """It cannot import them: the module has to work with no torch work at all."""
+    assert memory._WINDOW == engine.INFER_LEN
+    assert memory._WINDOW_STEP == engine.INFER_LEN - engine.OVERLAP
+
+
+def test_smoke_running_out_of_memory_reads_as_plain_words(monkeypatch, tmp_path, capsys):
+    smoke, _built = _smoke_on_a_cpu_machine(monkeypatch, tmp_path, "MPS backend out of memory (5 GB)")
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "20")
+    assert smoke.main() == 1
+    assert engine.STOPPED_AT_LIMIT in capsys.readouterr().out
+
+
+def test_smoke_does_not_call_every_error_memory(monkeypatch, tmp_path):
+    smoke, _built = _smoke_on_a_cpu_machine(monkeypatch, tmp_path, "a real bug")
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "20")
+    with pytest.raises(RuntimeError, match="a real bug"):
+        smoke.main()
 
 
 def test_a_pass_that_does_not_fit_stops_before_the_model_loads(monkeypatch):

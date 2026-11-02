@@ -94,8 +94,21 @@ def test_the_end_of_the_pass_is_counted():
 def test_a_long_clip_is_sized_by_its_copies_of_the_depth():
     """30 s of 720p. Counting one copy of the depth would come out more than 2 GB short."""
     long_clip = (720, 720, 1280, 3)
-    one_copy = memory._pool_need(720, 1280, 518) + memory._PROCESS + memory._clip_pixels(long_clip) * 7
+    one_copy = memory._pool_need(720, 1280, 518) + memory._PROCESS + 720 * 720 * 1280 * 7
     assert memory.need_bytes(long_clip, 518) >= one_copy + 2 * GB
+
+
+def test_a_short_clip_still_costs_whole_windows():
+    """Upstream pads to 32 frames and keeps them all. Two frames of 8K cost what 32 do, at 4 bytes
+    a pixel, twice over, which counting the clip's own two frames would miss by about 8 GB."""
+    pixels = 7680 * 4320
+    assert memory.need_bytes((2, 4320, 7680, 3), 140) >= pixels * memory._DEPTH * memory._WINDOW * 2
+
+
+def test_a_clip_larger_than_was_measured_adds_its_upsampled_depth():
+    same_shape = memory._pool_need(2160, 3840, 518) - memory._pool_need(720, 1280, 518)
+    assert same_shape == (3840 * 2160 - 1280 * 720) * memory._WINDOW * memory._DEPTH
+    assert same_shape > 0.85 * GB
 
 
 def test_a_smaller_picture_cannot_shrink_what_the_clip_itself_holds():
@@ -180,6 +193,23 @@ def test_this_process_can_read_what_it_holds():
     del ballast
 
 
+def test_a_clip_too_big_to_read_is_refused_before_it_is_read(monkeypatch):
+    """Reading holds the frames twice for a moment, so 30 s of source-resolution 4K wants 33 GB."""
+    frames = 720 * 3840 * 2160 * 3
+    _machine(monkeypatch, 24, 20)
+    refusal = memory.decode_refusal(frames)
+    assert refusal is not None and "to read this clip" in refusal and "Nothing ran" in refusal
+    assert memory.OVERRIDE_ENV in refusal
+    _machine(monkeypatch, 24, 20)
+    assert memory.decode_refusal(192 * 720 * 1280 * 3) is None
+    # The same frames fit only where twice their size and the process do.
+    edge = memory._PROCESS + 2 * frames + memory._KEEP_FREE
+    _machine(monkeypatch, 64, edge / GB + 0.01)
+    assert memory.decode_refusal(frames) is None
+    _machine(monkeypatch, 64, edge / GB - 0.01)
+    assert memory.decode_refusal(frames) is not None
+
+
 def test_a_hand_set_limit_is_for_the_whole_pass_so_it_gets_no_credit(monkeypatch):
     _machine(monkeypatch, 24, 9.1, own_gb=1)
     monkeypatch.setenv(memory.OVERRIDE_ENV, "8.5")
@@ -202,7 +232,20 @@ def test_limit_at_the_edge_of_fitting_still_covers_the_pool(monkeypatch):
     assert plan.gpu_limit >= memory._pool_need(720, 1280, 518) - 1
 
 
-def test_a_machine_that_will_not_say_gets_half_its_memory(monkeypatch):
+def test_a_mac_that_will_not_say_does_not_start_a_pass(monkeypatch):
+    """`vm_stat` timing out is what a stalled Mac looks like, the worst moment to add to it."""
+    monkeypatch.setattr(memory, "_MAC", True)
+    _machine(monkeypatch, 24, None)
+    plan = memory.plan(CLIP_720P_8S, 518)
+    assert plan.allowed == 0
+    assert plan.refusal is not None and "would not report" in plan.refusal
+    assert memory.OVERRIDE_ENV in plan.refusal
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "9")
+    assert memory.plan(CLIP_720P_8S, 518).refusal is None
+
+
+def test_other_systems_have_no_vm_stat_so_get_half_their_memory(monkeypatch):
+    monkeypatch.setattr(memory, "_MAC", False)
     _machine(monkeypatch, 24, None)
     plan = memory.plan(CLIP_720P_8S, 518)
     assert plan.allowed == 12 * GB and plan.refusal is None

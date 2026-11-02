@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+from depthc import memory
+
 # Seedance reference-input pixel window (PLAN.md §0 constraint table).
 MIN_PIXELS = 409_600
 MAX_PIXELS = 2_086_876
@@ -356,6 +358,10 @@ def read_frames(
         duration = end - start
         # -ss before -i is both fast and frame-accurate in modern ffmpeg.
         cmd += ["-ss", f"{start:.6f}"]
+
+    refusal = memory.decode_refusal(int(duration * (fps or info.fps)) * width * height * 3)
+    if refusal:
+        raise VideoIOError(refusal)
 
     cmd += ["-i", str(info.path)]
     if trim:

@@ -220,7 +220,7 @@ def test_a_pass_that_does_not_fit_reads_as_plain_words_in_the_ui(clip_long, monk
     """The UI's catch-all would print a traceback here if this failure were not its own case."""
     from depthc import memory
 
-    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.01")
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "1")
     *_, status = ui._convert(
         str(clip_long), "memtest", "", "seedance-2.5", "720p", "auto", "conform-24", 0, 5,
         False, True, "auto", 518, "fp32", False, False, str(tmp_path),

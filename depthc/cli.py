@@ -1110,6 +1110,7 @@ def compare(
         ref_size = target_size(ref_info, "480p")
         ref_frames = read_frames(ref_info, fps=24.0, size=ref_size)
         ref_profile = motionlib.measure(ref_frames, 24.0)
+        del ref_frames  # the depth pass below needs the room, and the memory check counts on it
 
         gen_info = probe_file(generated)
         typer.echo(f"{BOLD}{generated.name}{OFF}  {DIM}{gen_info.summary()}{OFF}")

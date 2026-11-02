@@ -125,10 +125,16 @@ def main() -> int:
     # fp32, matching the runtime default — fp16 autocast NaNs out on MPS (engine.py docs).
     x = torch.rand(1, 32, 3, 518, 518, device=device)
     t0 = time.perf_counter()
-    with torch.no_grad():
-        depth = model(x)
-    if device == "mps":
-        torch.mps.synchronize()
+    try:
+        with torch.no_grad():
+            depth = model(x)
+        if device == "mps":
+            torch.mps.synchronize()
+    except RuntimeError as e:
+        if not engine.is_out_of_memory(e):
+            raise
+        fail(engine.STOPPED_AT_LIMIT)
+        return 1
     elapsed = time.perf_counter() - t0
 
     expected = (1, 32, 518, 518)
