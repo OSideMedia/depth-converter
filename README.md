@@ -63,6 +63,15 @@ upload is the same anywhere, but no fire recorded in this repo used Variant B di
 
 - **An Apple Silicon Mac on macOS 14 or newer.** `setup.sh` stops on anything else. The model runs
   on the GPU through PyTorch's MPS backend.
+- **About 8 GB of free memory for a default depth pass** (8 seconds of 720p), and by calculation
+  about 14 GB for 30 seconds, because the clip's own frames add up. Before each pass the
+  tool reads what your Mac has free right now and keeps 1.5 GB back for everything else. If the
+  pass won't fit, it stops with a plain message before loading the model, and names a smaller
+  `--input-size` when one would fit. A smaller size gives a coarser depth picture, so the tool never
+  picks one for you. `DEPTHC_MEMORY_GB` sets the limit by hand. The 7.1 to 7.3 GB peak of a default
+  pass was measured on one 24 GB Mac, and the estimate was checked there at eight picture sizes. For
+  other machines and clip shapes it is an estimate, with a hard limit on GPU memory behind it. The
+  check runs once per pass, so another app filling memory during a pass can still slow your Mac.
 - **ffmpeg and ffprobe on your `PATH`.** Setup does not install them: `brew install ffmpeg`.
 - **git, curl and a network connection for setup,** which downloads about 1.1 GB. After that,
   everything runs locally.

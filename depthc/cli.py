@@ -414,6 +414,8 @@ def convert(
 
     except (VideoIOError, SetupIncomplete) as e:
         _die(str(e))
+    except engine.NotEnoughMemory as e:
+        _die(str(e))
     except engine.NonFiniteDepth as e:
         _die(f"{e}\n  --precision fp32 is the default; if that also fails, the MPS backend "
              f"itself is suspect. Report the clip and `depthc probe` output.")
@@ -682,7 +684,7 @@ def kit(
     except (VideoIOError, FileNotFoundError, ValueError, SetupIncomplete) as e:
         _abandon_kit(kit_dir)
         _die(str(e))
-    except engine.NonFiniteDepth as e:
+    except engine.DepthFailure as e:
         _abandon_kit(kit_dir)
         _die(str(e))
     except KeyboardInterrupt:
@@ -767,7 +769,7 @@ def scout(
     still aftermath instead. The scorer reports softness and refuses to prefer a frozen frame
     for it.
     """
-    from depthc import motion as motionlib
+    from depthc import engine, motion as motionlib
     from depthc.video_io import VideoIOError
 
     try:
@@ -784,7 +786,7 @@ def scout(
                 input, target, scout_fps=scout_fps, long_edge=long_edge, on_window=on_window
             )
         _print_scout(input, result, indent="  ")
-    except (VideoIOError, SetupIncomplete) as e:
+    except (VideoIOError, SetupIncomplete, engine.DepthFailure) as e:
         _die(str(e))
     except KeyboardInterrupt:
         typer.echo("\ncancelled", err=True)
@@ -805,7 +807,7 @@ def inbox(
     trim call is made from measurements rather than from a guess. Converts nothing and writes
     nothing: the scout pass is read-only and the proposed window is a proposal.
     """
-    from depthc import kit as kitlib, motion as motionlib
+    from depthc import engine, kit as kitlib, motion as motionlib
     from depthc.video_io import VideoIOError, detect_crop, probe as probe_file
 
     root = kitlib.inbox_dir(path)
@@ -825,7 +827,11 @@ def inbox(
         typer.echo(f"{BOLD}{clip.name}{OFF}")
         typer.echo(f"    {info.summary()}")
 
-        matte = detect_crop(info)
+        try:
+            matte = detect_crop(info)
+        except VideoIOError as e:
+            typer.echo(f"    {RED}{e}{OFF}")
+            continue
         if matte:
             typer.echo(
                 f"    {DIM}matte {matte} → {matte.width}×{matte.height} "
@@ -848,7 +854,7 @@ def inbox(
             try:
                 result = motionlib.scout_clip(clip, target)
                 _print_scout(clip, result)
-            except (VideoIOError, ValueError, SetupIncomplete) as e:
+            except (VideoIOError, ValueError, SetupIncomplete, engine.DepthFailure) as e:
                 typer.echo(f"    {YELLOW}scout failed:{OFF} {e}")
         typer.echo()
 
@@ -998,9 +1004,7 @@ def describe(
         else:
             _, profile, gray = _depth_profile(info, resolution, input_size, precision)
             framing = describelib.read_framing(gray, region_energy=profile.region_energy)
-    except (VideoIOError, SetupIncomplete) as e:
-        _die(str(e))
-    except engine.NonFiniteDepth as e:
+    except (VideoIOError, SetupIncomplete, engine.DepthFailure) as e:
         _die(str(e))
     except KeyboardInterrupt:
         typer.echo("\ncancelled", err=True)
@@ -1110,6 +1114,7 @@ def compare(
         ref_size = target_size(ref_info, "480p")
         ref_frames = read_frames(ref_info, fps=24.0, size=ref_size)
         ref_profile = motionlib.measure(ref_frames, 24.0)
+        del ref_frames  # the depth pass below needs the room, and the memory check counts on it
 
         gen_info = probe_file(generated)
         typer.echo(f"{BOLD}{generated.name}{OFF}  {DIM}{gen_info.summary()}{OFF}")
@@ -1136,9 +1141,7 @@ def compare(
                 f"({ref_aspect:.2f}:1) vs generation {gen_w}×{gen_h} ({gen_aspect:.2f}:1)"
             )
 
-    except (VideoIOError, SetupIncomplete) as e:
-        _die(str(e))
-    except engine.NonFiniteDepth as e:
+    except (VideoIOError, SetupIncomplete, engine.DepthFailure) as e:
         _die(str(e))
     except KeyboardInterrupt:
         typer.echo("\ncancelled", err=True)

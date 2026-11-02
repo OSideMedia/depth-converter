@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from depthc import vendor_path
+from depthc import memory, vendor_path
 
 
 def vendor_present() -> bool:
@@ -58,6 +58,16 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.skip(reason=f"real-model test, no VDA assets {tail}"))
         elif item.get_closest_marker("vendor") and not have_vendor:
             item.add_marker(pytest.mark.skip(reason=f"needs the vendored VDA checkout {tail}"))
+
+
+def pytest_runtest_setup(item):
+    """A real-model test needs real memory. On a busy machine its pass would refuse, and the test
+    would read as a code failure. That is a fact about the machine right now, so say so instead.
+    Sized for the largest clip those tests use."""
+    if item.get_closest_marker("slow"):
+        refusal = memory.plan((72, 240, 320, 3), 518).refusal
+        if refusal:
+            pytest.skip(f"too busy for a real-model test right now: {refusal.splitlines()[0]}")
 
 
 @pytest.fixture(autouse=True)

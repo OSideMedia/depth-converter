@@ -7,12 +7,15 @@ no test holding any of them in place (2026-07-30 council audit).
 
 from __future__ import annotations
 
+import weakref
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from depthc import cli
+from depthc import cli, memory
+from depthc import motion as motionlib
+from depthc.video_io import VideoIOError
 
 runner = CliRunner()
 
@@ -290,6 +293,53 @@ class TestEverySurfaceVerifiesTheBinding:
         assert result.exit_code == 1
 
 
+def test_compare_lets_go_of_the_reference_before_the_generated_clips_pass(clip_tiny, tmp_path, monkeypatch):
+    """The memory check credits what this process holds as room the pass will reuse, so a reference
+    still alive during the pass would be counted as room it is not."""
+    import shutil
+
+    kit_dir = _fake_kit(tmp_path)
+    shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+    seen = {}
+    real_measure = motionlib.measure
+
+    def measure(frames, fps):
+        seen["reference"] = weakref.ref(frames)
+        return real_measure(frames, fps)
+
+    def depth_pass(*_a, **_k):
+        seen["alive during the pass"] = seen["reference"]() is not None
+        raise VideoIOError("stop here")
+
+    monkeypatch.setattr(motionlib, "measure", measure)
+    monkeypatch.setattr(cli, "_depth_profile", depth_pass)
+    result = runner.invoke(cli.app, ["compare", str(kit_dir), str(clip_tiny)])
+    assert seen.get("alive during the pass") is False, _text(result)
+
+
+class TestAClipTooBigToRead:
+    """Every read goes through this, including the matte scan before anything else runs."""
+
+    @pytest.fixture(autouse=True)
+    def _reads_refused(self, monkeypatch):
+        monkeypatch.setattr(memory, "_SMALL_READ", 0)
+        monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
+
+    def test_convert_reads_as_plain_words(self, clip_tiny, tmp_path):
+        result = runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "out.mp4")])
+        assert result.exit_code == 1 and isinstance(result.exception, SystemExit), repr(result.exception)
+        assert "to read this clip" in _text(result)
+
+    def test_inbox_says_so_for_each_clip_and_carries_on(self, clip_3s, tmp_path):
+        import shutil
+
+        shutil.copy(clip_3s, tmp_path / "one.mp4")
+        shutil.copy(clip_3s, tmp_path / "two.mp4")
+        result = runner.invoke(cli.app, ["inbox", "--inbox", str(tmp_path), "--no-scout"])
+        assert result.exit_code == 0, repr(result.exception)
+        assert _text(result).count("to read this clip") == 2
+
+
 class TestGenerationFlag:
     """`--generation <id>` on `result` and `compare` names the OSIDE generation a fire
     became (PLAN-SHARED-GENERATION-ID step d). `compare` never writes the fire — the
@@ -336,3 +386,52 @@ class TestGenerationFlag:
         hint = cli._record_hint("Kit_001", c, self.GEN)
         assert "depthc result" in hint and f"--generation {self.GEN}" in hint
         assert "--generation" not in cli._record_hint("Kit_001", c, None)
+
+
+class TestNotEnoughMemory:
+    """Every command that runs a depth pass gives the same plain refusal, before the model
+    loads. A traceback here is what a person on a smaller machine would otherwise read."""
+
+    @pytest.fixture(autouse=True)
+    def _machine_with_nothing_to_spare(self, monkeypatch):
+        monkeypatch.setenv(memory.OVERRIDE_ENV, "1")  # enough to read these small clips, not to run
+
+    @staticmethod
+    def _refused(result) -> None:
+        text = _text(result)
+        assert result.exit_code == 1, text
+        assert isinstance(result.exception, SystemExit), repr(result.exception)
+        assert "Not enough free memory for this depth pass" in text and "Close other apps" in text
+        assert "Traceback" not in text
+
+    def test_convert(self, clip_tiny, tmp_path):
+        self._refused(runner.invoke(cli.app, ["convert", str(clip_tiny), "--out", str(tmp_path / "d.mp4")]))
+        assert not (tmp_path / "d.mp4").exists()
+
+    def test_kit_leaves_no_half_built_folder(self, clip_tiny, tmp_path):
+        lib = tmp_path / "lib"
+        self._refused(runner.invoke(cli.app, ["kit", str(clip_tiny), "--library", str(lib), "--tags", "x"]))
+        assert not lib.exists() or not [p for p in lib.iterdir() if p.is_dir()]
+
+    def test_describe(self, clip_tiny):
+        self._refused(runner.invoke(cli.app, ["describe", str(clip_tiny)]))
+
+    def test_scout(self, clip_tiny):
+        self._refused(runner.invoke(cli.app, ["scout", str(clip_tiny)]))
+
+    def test_compare(self, clip_tiny, tmp_path):
+        import shutil
+
+        kit_dir = _fake_kit(tmp_path)
+        shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+        self._refused(runner.invoke(cli.app, ["compare", str(kit_dir), str(clip_tiny)]))
+
+    def test_inbox_says_so_for_that_clip_and_carries_on(self, clip_3s, tmp_path):
+        """The triage list is still worth reading when its scout pass cannot run."""
+        import shutil
+
+        shutil.copy(clip_3s, tmp_path / "one.mp4")  # under 2 s never reaches the scout
+        result = runner.invoke(cli.app, ["inbox", "--inbox", str(tmp_path)])
+        text = _text(result)
+        assert result.exit_code == 0, text
+        assert "scout failed" in text and "Not enough free memory" in text

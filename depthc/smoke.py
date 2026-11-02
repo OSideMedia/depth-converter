@@ -103,10 +103,20 @@ def main() -> int:
 
     from video_depth_anything.video_depth import VideoDepthAnything  # noqa: E402
 
+    from depthc import engine, memory  # after the torch check above: engine imports torch
+
+    # The same check as a real pass, so the first run on a new machine cannot stall it either.
+    plan = memory.plan((32, 518, 518, 3), 518)
+    if plan.refusal:
+        fail(plan.refusal)
+        return 1
+
     t0 = time.perf_counter()
     model = VideoDepthAnything(**MODEL_CONFIG)
     model.load_state_dict(torch.load(ckpt, map_location="cpu", weights_only=True), strict=True)
     model = model.to(device).eval()
+    engine.bound_memory(model, device)
+    engine.limit_gpu(device, plan.gpu_limit)
     ok(f"VDA-Small loaded on {device} in {time.perf_counter() - t0:.1f}s")
 
     # ------------------------------------------------- one real 32-frame window
@@ -115,10 +125,16 @@ def main() -> int:
     # fp32, matching the runtime default — fp16 autocast NaNs out on MPS (engine.py docs).
     x = torch.rand(1, 32, 3, 518, 518, device=device)
     t0 = time.perf_counter()
-    with torch.no_grad():
-        depth = model(x)
-    if device == "mps":
-        torch.mps.synchronize()
+    try:
+        with torch.no_grad():
+            depth = model(x)
+        if device == "mps":
+            torch.mps.synchronize()
+    except RuntimeError as e:
+        if not engine.is_out_of_memory(e):
+            raise
+        fail(engine.STOPPED_AT_LIMIT)
+        return 1
     elapsed = time.perf_counter() - t0
 
     expected = (1, 32, 518, 518)

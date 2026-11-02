@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+from depthc import memory
+
 # Seedance reference-input pixel window (PLAN.md §0 constraint table).
 MIN_PIXELS = 409_600
 MAX_PIXELS = 2_086_876
@@ -356,6 +358,15 @@ def read_frames(
         duration = end - start
         # -ss before -i is both fast and frame-accurate in modern ffmpeg.
         cmd += ["-ss", f"{start:.6f}"]
+
+    # ponytail: only a conformed read has a frame count to check. fps=None keeps every decoded frame,
+    # and a VFR source's reported rate can be a 1000 fps timebase artifact, so it would refuse small
+    # reads. Its callers are `stability`'s read of a clip's first and last frames, at the small
+    # stability size, and `scripts/calibrate_camera_path.py`, a maintainer's tool reading a kit's depth.
+    if fps:
+        refusal = memory.decode_refusal(int(duration * fps) * width * height * 3)
+        if refusal:
+            raise VideoIOError(refusal)
 
     cmd += ["-i", str(info.path)]
     if trim:

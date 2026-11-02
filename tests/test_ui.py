@@ -216,6 +216,20 @@ def test_the_model_picker_changes_which_clips_are_refused(clip_long, monkeypatch
     assert "ReachedTheModel" in on_25
 
 
+def test_a_pass_that_does_not_fit_reads_as_plain_words_in_the_ui(clip_long, monkeypatch, tmp_path):
+    """The UI's catch-all would print a traceback here if this failure were not its own case."""
+    from depthc import memory
+
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "1")
+    *_, status = ui._convert(
+        str(clip_long), "memtest", "", "seedance-2.5", "720p", "auto", "conform-24", 0, 5,
+        False, True, "auto", 518, "fp32", False, False, str(tmp_path),
+    )
+    assert "Not enough free memory" in status and "Close other apps" in status
+    assert "Traceback" not in status and "Unexpected error" not in status
+    assert not [p for p in tmp_path.iterdir() if p.is_dir()], "a refused pass left a kit folder behind"
+
+
 def test_reveal_on_a_missing_path_does_not_raise(tmp_path):
     assert "Not found" in ui._reveal(tmp_path / "ghost")
 
@@ -316,3 +330,12 @@ def test_picking_a_kit_whose_files_are_folders_still_loads_it(tmp_path, monkeypa
 def test_the_finished_conversion_goes_through_the_same_door():
     source = Path(ui.__file__).read_text(encoding="utf-8")
     assert "_servable(paths.depth)" in source and "_servable(paths.preview)" in source
+
+
+def test_a_clip_too_big_to_read_reads_as_plain_words_in_the_upload_readout(clip_tiny, monkeypatch):
+    from depthc import memory
+
+    monkeypatch.setattr(memory, "_SMALL_READ", 0)
+    monkeypatch.setenv(memory.OVERRIDE_ENV, "0.000001")
+    readout, *_ = ui._probe_readout(str(clip_tiny))
+    assert "to read this clip" in readout

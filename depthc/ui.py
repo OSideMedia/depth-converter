@@ -168,7 +168,11 @@ def _probe_readout(path: str | None) -> tuple[str, dict, dict]:
         return f'<div class="depthc-note" style="color:#f87171">{e}</div>', \
             gr.update(), gr.update()
 
-    matte = detect_crop(info)
+    try:
+        matte = detect_crop(info)
+    except VideoIOError as e:
+        return f'<div class="depthc-note" style="color:#f87171">{e}</div>', \
+            gr.update(), gr.update()
     lines = [f"<b>{info.path.name}</b>", info.summary()]
     if matte:
         lines.append(
@@ -415,7 +419,7 @@ def _convert(
     except (VideoIOError, FileNotFoundError, ValueError) as e:
         _abandon_kit(kit_dir)
         return (*blank[:5], f"{e}")
-    except engine.NonFiniteDepth as e:
+    except engine.DepthFailure as e:
         _abandon_kit(kit_dir)
         return (*blank[:5], f"{e}")
     except Exception:  # noqa: BLE001 - a UI must never die silently on an unknown fault

@@ -21,7 +21,7 @@ from pathlib import Path
 # The start of the reason, and how many. tests/test_ci_skips.py holds the first two against the
 # markers, on machines that skip none of them.
 EXPECTED = {
-    "real-model test, no VDA assets": 10,
+    "real-model test, no VDA assets": 11,
     "needs the vendored VDA checkout": 3,
     "no OSIDE checkout beside this repo": 1,
 }
