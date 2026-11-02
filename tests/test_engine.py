@@ -221,6 +221,37 @@ def _fake_vendor(monkeypatch, fails_with: str | None = None) -> list:
     return built
 
 
+def test_a_vendor_import_that_prints_stays_off_stdout(monkeypatch, tmp_path, capsys):
+    """Upstream prints on import, and a real `describe --json` carried those lines in front of its JSON."""
+    import sys
+    import types
+
+    _fake_vendor(monkeypatch)
+    stand_in = types.ModuleType("_stand_in_model")
+    stand_in.VideoDepthAnything = sys.modules["video_depth_anything.video_depth"].VideoDepthAnything
+    monkeypatch.setitem(sys.modules, "_stand_in_model", stand_in)
+
+    # On disk, so the import really runs the module's top level and its print.
+    package = tmp_path / "video_depth_anything"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "video_depth.py").write_text(
+        'print("xFormers not available")\nfrom _stand_in_model import VideoDepthAnything\n'
+    )
+    monkeypatch.delitem(sys.modules, "video_depth_anything")
+    monkeypatch.delitem(sys.modules, "video_depth_anything.video_depth")
+    monkeypatch.syspath_prepend(tmp_path)
+    monkeypatch.setattr(engine, "ensure_vendor_on_path", lambda: None)
+    monkeypatch.setattr(engine, "ensure_checkpoint", lambda: "unused")
+    monkeypatch.setitem(engine._MODEL_CACHE, "cpu", None)
+    del engine._MODEL_CACHE["cpu"]
+
+    engine.load_model("cpu")
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert "xFormers not available" in printed.err  # moved, not lost
+
+
 def test_load_model_installs_both_memory_measures_once(monkeypatch):
     """The unit tests above prove grouping works; this proves the real door actually uses it."""
     _fake_vendor(monkeypatch)

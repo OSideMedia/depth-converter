@@ -5,6 +5,9 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- `depthc describe --json` now prints only the JSON on stdout. The matte line and the progress bar
+  landed in front of it, so a script's `json.loads` failed on a command that exited 0. Warnings from
+  every command now go to stderr too.
 - The Seedance limits snapshot now counts as old after 180 days instead of 30. The
   re-exports the 30-day window forced changed only the date. `depthc` still warns past
   the window and keeps using the numbers.
