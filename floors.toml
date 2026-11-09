@@ -5,6 +5,7 @@
 # and when two patterns match a file the LAST one wins.
 building = "Depth Converter"
 owed_repo = ["Depth Converter"]
+key = "depth-converter"  # the name other repos use for this one in /building
 
 [[floor]]
 id = "B1"
@@ -52,3 +53,24 @@ id = "F6"
 name = "Finished kits"
 paths = ["Outbox/**"]
 words = ["outbox", "motion kit"]
+
+# What this repo relies on in other repos, for /building's Connections view. Display only: no
+# milestone, state, count or digest reads it. "from" is the other repo's key in its floors.toml.
+
+# evidence: depthc/cli.py, look-compare
+[[uses]]
+from = "oside"
+what = "look-compare reads the oside-davinci/v1 package"
+kind = "runtime"
+
+# evidence: depthc/seedance-envelope.json; OSIDE's scripts/check-seedance-envelope-drift.ts checks this copy
+[[uses]]
+from = "oside"
+what = "the Seedance envelope"
+kind = "shared"
+
+# evidence: scripts/calibrate_camera_path.py:224 runs its oside-blender build, and stops at :481 when it is absent
+[[uses]]
+from = "blender-mcp"
+what = "its build command, run by the camera-path calibration"
+kind = "dev"
