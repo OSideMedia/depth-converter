@@ -18,7 +18,9 @@ the code's history. Started 2026-09-06.
   stops with a plain message, exits 1 and writes nothing. `DEPTHC_MEMORY_GB` does not turn it off,
   and it never retries at a smaller size. A stop lands between two steps, never inside one, so
   memory that runs out in a pass's last second, and the writing after the pass, are not covered. The
-  floor and the eleven real passes it was set from are beside it in `memory.py`.
+  floor and the eleven real passes it was set from are beside it in `memory.py`. A second depth pass
+  started in the same app while one is running is refused in plain words; the UI already runs its
+  conversions one at a time.
 - **The camera is now read from the picture, not from the depth.** The real-footage failure in
   v0.16.1 came from the input: a depth picture of a real scene is mostly flat, so the people
   walking through a locked-off shot were nearly all the reader could see, and it named them a pan.

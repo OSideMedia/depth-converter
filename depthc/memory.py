@@ -86,10 +86,13 @@ def parse_vm_stat(text: str) -> int | None:
     return total * int(page.group(1))
 
 
+READ_TIMEOUT = 5.0  # seconds one `vm_stat` may take before the reading counts as failed
+
+
 def available_bytes() -> int | None:
     """What this machine has free right now, or None if it will not say."""
     try:
-        done = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5, check=True)
+        done = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=READ_TIMEOUT, check=True)
     except (OSError, subprocess.SubprocessError):
         return None
     return parse_vm_stat(done.stdout)
@@ -325,10 +328,25 @@ class Watch:
         self._thread.start()
 
     def close(self) -> None:
-        """No reading after this returns, unless one `vm_stat` is still running a second later."""
+        """Stop reading, and wait for a reading still running to end, so the stop it settles can be checked.
+
+        The thread is waiting between readings nearly all the time, and then this returns at once. A
+        reading under way gets as long as `vm_stat` itself may take: a slow `vm_stat` is what a
+        struggling Mac looks like, and that reading may be the one that stops the pass.
+        """
         self._done.set()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
+        thread, self._thread = self._thread, None
+        if thread is None:
+            return
+        try:
+            thread.join(timeout=READ_TIMEOUT + 1.0)
+        except RuntimeError:  # its start was cut off before the thread said it ran; with `_done` set it
+            return  # reads once at most, into this watch, which nothing reads again
+        # ponytail: a reading that outlasts its own limit (a `vm_stat` that ignores the kill, or a `read`
+        # handed in that hangs) leaves the thread running after this returns. All it can still do is
+        # finish that reading and set a stop on this watch, which no stop point reads again: every pass
+        # makes its own watch, so it cannot stop the next pass, and it never touches the pass's memory.
+        # If one is ever seen, report it from here rather than wait longer.
 
     def _sample(self, wait: Callable[[float], bool]) -> None:
         while True:

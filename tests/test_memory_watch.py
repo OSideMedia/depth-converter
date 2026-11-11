@@ -171,6 +171,31 @@ def test_its_thread_reads_on_while_the_pass_sits_in_one_long_call(monkeypatch):
     assert not _watch_threads()
 
 
+def test_closing_waits_for_a_slow_reading_to_end(monkeypatch):
+    """A slow `vm_stat` is what a struggling Mac looks like. Closing must not hand back while that
+    reading is still running, or the stop it settles comes after anything could check it."""
+    monkeypatch.setattr(memory, "WATCH_EVERY", 0.01)
+    slow = 1.5  # past a one-second wait, inside the time a real reading is given
+    assert slow < memory.READ_TIMEOUT
+    inside, calls = threading.Event(), []
+
+    def read() -> int:
+        calls.append(1)
+        if len(calls) == 2:
+            inside.set()
+            time.sleep(slow)
+        return PLENTY
+
+    watch = memory.Watch(read=read)
+    watch.start()
+    assert inside.wait(timeout=5)
+    watch.close()
+    assert not _watch_threads(), "close came back with a reading still running"
+    taken = len(calls)
+    time.sleep(0.05)
+    assert len(calls) == taken
+
+
 # ------------------------------------------------------------------ inside a pass
 
 class _Held:
@@ -363,6 +388,131 @@ def test_a_long_call_after_the_last_window_is_read_through_and_the_pass_stops_ri
     assert settled.is_set(), "nothing was read while the pass sat in one long call"
     assert threaded.aligned == 0, "the pass went on past the first stop point after the call"
     assert not _watch_threads(), "the watch outlived its pass"
+
+
+def test_a_reading_that_ends_while_the_watch_closes_still_stops_the_pass(threaded, monkeypatch):
+    """The third reading under the floor can still be running at the pass's last stop point. It ends
+    while the watch closes, and the stop it settles must stop the pass, not come after it returned."""
+    under, inside, release = [], threading.Event(), threading.Event()
+
+    def read() -> int | None:
+        if threaded.phase != "tail":
+            return PLENTY
+        under.append(1)
+        if len(under) == memory.WATCH_READINGS:  # held here until the pass has passed every stop point
+            inside.set()
+            release.wait(timeout=5)
+        return LOW
+
+    real_close = memory.Watch.close
+
+    def close(self) -> None:
+        release.set()
+        real_close(self)
+
+    monkeypatch.setattr(memory, "available_bytes", read)
+    monkeypatch.setattr(memory.Watch, "close", close)
+    threaded.long_call = lambda: inside.wait(timeout=5)
+
+    with pytest.raises(engine.NotEnoughMemory, match="stopped partway"):
+        engine.infer(np.zeros((48, 8, 8, 3), np.uint8), 24.0)
+
+    assert inside.is_set() and threaded.phase == "stacked", "the pass did not get past its last stop point"
+    assert not _watch_threads()
+
+
+def _run_in_thread(name: str, run: Callable[[], object]) -> tuple[threading.Thread, dict]:
+    outcome: dict = {}
+
+    def body() -> None:
+        try:
+            outcome["result"] = run()
+        except BaseException as e:  # noqa: BLE001 - handed back to the test to assert on
+            outcome["error"] = e
+
+    thread = threading.Thread(target=body, name=name)
+    thread.start()
+    return thread, outcome
+
+
+def test_a_second_pass_in_the_same_process_is_refused_and_upstreams_names_come_back(stand_in):
+    """Each pass rebinds names in upstream's module and puts back what it found. Two at once put back
+    each other's, and the pre-pass check counts on one pass at a time, so a second one is refused."""
+    vda = sys.modules["video_depth_anything.video_depth"]
+    names = ("tqdm", "compute_scale_and_shift", "get_interpolate_frames", "np")
+    originals = {name: getattr(vda, name) for name in names}
+    first_in_tail, second_tried, first_done = threading.Event(), threading.Event(), threading.Event()
+
+    def long_call() -> None:
+        if threading.current_thread().name == "first":
+            first_in_tail.set()
+            second_tried.wait(timeout=5)
+        else:  # a second pass that got in: hold it until the first has ended
+            second_tried.set()
+            first_done.wait(timeout=5)
+
+    stand_in.long_call = long_call
+    frames = np.zeros((48, 8, 8, 3), np.uint8)
+
+    def first_pass():
+        try:
+            return engine.infer(frames, 24.0)
+        finally:
+            first_done.set()
+
+    def second_pass():
+        try:
+            return engine.infer(frames, 24.0)
+        finally:
+            second_tried.set()
+
+    first, first_out = _run_in_thread("first", first_pass)
+    assert first_in_tail.wait(timeout=5)
+    second, second_out = _run_in_thread("second", second_pass)
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert {name: getattr(vda, name) for name in names} == originals, "upstream's module was left rebound"
+    assert isinstance(first_out.get("result"), engine.DepthResult), first_out
+    refused = second_out.get("error")
+    assert isinstance(refused, engine.NotEnoughMemory), second_out
+    assert "already running" in str(refused) and "Wait for it to finish" in str(refused)
+    assert stand_in.windows == engine.expected_windows(frames.shape[0]), "the refused pass ran a window"
+    assert isinstance(engine.infer(frames, 24.0), engine.DepthResult), "the first pass kept the lock"
+
+
+def test_an_interrupt_while_the_watch_starts_leaves_no_watch_behind(threaded, monkeypatch):
+    """Ctrl-C can land while the watch's thread is starting. The thread, the pass's watch and the
+    one-pass lock must all be let go of, or a UI that goes on running keeps them."""
+    import contextvars
+
+    monkeypatch.setattr(memory, "available_bytes", lambda: PLENTY)
+    real_start, started = memory.Watch.start, []
+
+    def start(self) -> None:  # the thread is running by the time the interrupt lands, as it can be
+        real_start(self)
+        started.append(self)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(memory.Watch, "start", start)
+    frames = np.zeros((48, 8, 8, 3), np.uint8)
+
+    def interrupted_pass():
+        with pytest.raises(KeyboardInterrupt):
+            engine.infer(frames, 24.0)
+        return engine._WATCH.get()
+
+    try:
+        left = contextvars.copy_context().run(interrupted_pass)
+        alive = bool(_watch_threads())
+    finally:
+        for watch in started:  # so a failure here does not leave a thread reading for the rest of the run
+            watch._done.set()
+    assert left is None, "the context still holds the interrupted pass's watch"
+    assert not alive, "the watch's thread outlived the interrupted pass"
+    assert threaded.windows == 0
+    monkeypatch.setattr(memory.Watch, "start", real_start)
+    assert isinstance(engine.infer(frames, 24.0), engine.DepthResult), "the interrupted pass kept the lock"
 
 
 def test_the_override_does_not_let_a_pass_run_the_machine_out(stand_in, monkeypatch):

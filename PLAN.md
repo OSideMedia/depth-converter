@@ -463,7 +463,9 @@ Key engineering decisions:
   `np.stack` after the last window (rebound in its module for the pass, as `tqdm` is), and between the
   steps of `normalize`. A first version read only at the settle points, so the work after the last
   window (1.9 s on a 30 s clip) went unread. A stop never lands inside one numpy call. The floor, the
-  real passes it was set from and the ceiling are beside it in `memory.py`.
+  real passes it was set from and the ceiling are beside it in `memory.py`. A process runs one pass
+  at a time and refuses a second: each pass rebinds names in upstream's module and puts back what it
+  found, and the check before a pass sizes it as the only one.
 
 ---
 

@@ -34,6 +34,7 @@ from __future__ import annotations
 import contextvars
 import gc
 import sys
+import threading
 import time
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
@@ -131,12 +132,17 @@ def watching():
     """
     watch = memory.Watch()
     token = _WATCH.set(watch)
-    watch.start()
-    try:
+    try:  # the thread starts in here, so an interrupt while it starts still closes it
+        watch.start()
         yield
     finally:
         watch.close()
         _WATCH.reset(token)
+    # Reached only when the block ran to its end. A reading still running at the pass's last stop point
+    # ends while `close` waits for it, so the stop it settles is checked here, once the thread is done.
+    stop = watch.check()
+    if stop:
+        raise _Stopped(stop)
 
 
 def _stop_if_told() -> None:
@@ -312,6 +318,36 @@ class _Stopped(NotEnoughMemory):
     """The watch's stop, raised at a stop point. `infer` raises a fresh NotEnoughMemory in its place."""
 
 
+class PassAlreadyRunning(NotEnoughMemory):
+    """A second pass in a process that is running one: the memory it was sized with is already taken."""
+
+
+ALREADY_RUNNING = (
+    "Another depth pass is already running in this app, and the memory check before a pass counts on "
+    "there being only one.\n  Wait for it to finish, then run this one again."
+)
+
+# One depth pass at a time in a process, from the check before it to its end. The check sizes a pass
+# against what is free with no other pass of ours running, `limit_gpu` sets one limit for the whole
+# process, and the hooks rebind names in upstream's module for the length of a pass and put back what
+# they found, so two passes at once would size each other wrong and could leave each other's hooks in
+# place. A second pass is refused rather than made to wait: the UI already queues its conversions one
+# at a time (Gradio runs each event one call at a time unless told otherwise), so only a caller
+# running passes on threads of its own meets this, and waiting would hang a pass started from inside
+# another's progress callback on the lock its own thread holds.
+_ONE_PASS = threading.Lock()
+
+
+@contextmanager
+def _only_pass():
+    if not _ONE_PASS.acquire(blocking=False):
+        raise PassAlreadyRunning(ALREADY_RUNNING)
+    try:
+        yield
+    finally:
+        _ONE_PASS.release()
+
+
 STOPPED_AT_LIMIT = (
     f"The depth pass stopped at its memory limit before it finished. Close other apps and "
     f"run it again, or use a smaller --input-size. To allow more, set "
@@ -400,7 +436,20 @@ def infer(
         raise ValueError(f"--input-size must be a multiple of 14 (DINOv2 patches), got {input_size}")
     if precision not in PRECISIONS:
         raise ValueError(f"precision must be one of {PRECISIONS}, got {precision!r}")
+    with _only_pass():
+        return _one_pass(frames, fps, input_size, precision, invert, device, on_window, on_warn)
 
+
+def _one_pass(
+    frames: np.ndarray,
+    fps: float,
+    input_size: int,
+    precision: str,
+    invert: bool,
+    device: str | None,
+    on_window: ProgressFn | None,
+    on_warn: WarnFn | None,
+) -> DepthResult:
     # Before the model loads, so a pass that cannot fit touches nothing.
     plan = memory.plan(frames.shape, input_size)
     if plan.refusal:

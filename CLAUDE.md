@@ -245,7 +245,11 @@ Phase 5 (automating the attach) is still deferred, but Phase 4 has now passed.
   words, at its stop points (`engine._stop_if_told`): the settle points `bound_memory` installs, each
   window's end, and after the last window upstream's two alignment helpers and its `np.stack`, which
   `engine._tail_hook` rebinds in their module the way the window hook rebinds `tqdm`, then between
-  the steps of `normalize`. A stop never lands inside one numpy call. Anything that builds the model
+  the steps of `normalize`. A stop never lands inside one numpy call. Closing the watch waits for a
+  reading still running (up to `vm_stat`'s own limit), and the stop is checked once more after that.
+  One pass at a time per process (`engine._only_pass`, from the check before it to its end): a second
+  is refused in plain words, never queued, because the hooks rebind upstream's module for the length
+  of a pass and the check sizes each pass as the only one. Anything that builds the model
   outside `load_model` needs the same three things, `bound_memory`, `limit_gpu` and `watching`, as
   `smoke.py` has them. A good pass's free memory swings by GBs between half-second readings, so the
   floor counts readings in a row; the measured table is beside it in `memory.py`. On a long clip or at
