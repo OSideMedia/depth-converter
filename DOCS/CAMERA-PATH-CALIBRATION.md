@@ -175,11 +175,66 @@ on an off-centre push. The joint fit is the reverse.
   `describe`'s camera words and every camera share line change for every kit, including a share
   that now crosses the line where PATH is judged or a clip counts as camera-led. The PATH line
   and the camera line still do not vote.
-- **The real-take reading is still an inference.** AI takes carry texture everywhere, and no
-  real textured take has been scored against a known camera. The next check is a generation
-  with a camera the prompt named, read by `describe` and checked by eye.
+- **The real-take reading was an inference when this was written.** It has since been scored on
+  real footage, and it failed: see the next section.
+
+## Real footage: the first score (2026-11-10)
+
+The clay score says the reader works on a scene built for it. This check asked whether it names
+clean moves on real pictures. It does not do so reliably. It cost $0.
+
+**The set.** 17 stock clips, each one 8 s window with no sound: 12 with one clear move (pan or
+truck, tilt, push-in, pull-out, three of each) and 5 locked-off shots with people or a train moving
+through. Plus 8 AI takes of one setup, 5 s each, where the camera pushes in on a man from a medium
+shot to a close-up. The clips and takes are held outside the repo.
+
+**The truth.** The clips were chosen by a person looking at frames, so that reading was not blind.
+A video model then labelled every clip without seeing the key. The two agreed on 14 of 17 clips and
+on all 8 takes; the owner watched the other three and ruled. All of that was written down, and the
+pass mark with it, before any reader answer was read.
+
+**The rules.** `depthc describe <clip> --json` on the default depth path, at the v0.16.0 reader
+(`describe.py` and `motion.py` are unchanged since). A move clip is right when the reader's longest
+moving segment holds the truth word. A locked-off clip is clean only when the reader names no move
+at all, however short. Pass: at most 2 moves missed, and no invented move on a locked-off clip.
+
+**The score: fail.**
+
+| | Depth path (scored) | `--rgb` (information only) |
+|---|---|---|
+| Moves right | 9 of 12 | 10 of 12 |
+| Locked-off clips with an invented move | 4 of 5 | 2 of 5 |
+
+- **Invented moves.** On four of the five locked-off clips the depth path named pans, tilts or
+  pulls while the background held still. On two the false move lasted 1.5 s in all; on the other
+  two it ran for most of the clip. Passing people and a passing train are what those clips have in common.
+- **Missed moves.** Two push-ins read as still for the whole clip: one very slow, one through a
+  dark passage. A pull-out, the one clip played backward, was named for half a second and then read
+  as still.
+- **The two paths disagree.** `--rgb` was clean on two locked-off clips the depth path got wrong
+  and found one of the missed push-ins and the missed pull-out, and it missed a push-in the depth
+  path found. Neither is
+  the better reader on this set.
+- **The 8 takes.** Every take's main segment held "pushes in". Every one also said "tilts up"
+  beside it, which neither watcher named. That may be a real effect of pushing toward a face above
+  the centre of the frame, or a false word. It has not been settled.
+
+**What this means.** The camera words in `describe` and the PATH line in `compare` are a hint to
+check by eye, most of all a move named on a shot that looks still while something moves through
+the frame. They still do not vote in any verdict, and should not until a reader
+passes on clips it has never seen.
+
+**What it does not say.** The set was the easy case: a clip that could not be read by eye was left
+out. It has no orbit, roll, handheld shake, whip pan or long lens. Messier footage is unmeasured
+and is unlikely to do better.
+
+**These clips are spent.** A reader changed after this score cannot be scored on the same 17 clips.
+It needs fresh ones.
 
 ## Limitations
+
+- **Real footage fails.** See the section above. The clay figures in this file do not carry over
+  to shots with people or vehicles moving through them.
 
 - **One scene.** Clay ground, rows of boxes and sky. The truth counts the static world
   only, so a crossing subject is excluded from it by construction.

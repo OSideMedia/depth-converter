@@ -5,6 +5,11 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **The camera reader was scored on real footage, and failed.** On 17 stock clips it named 9 of 12
+  clean moves and invented a move on 4 of 5 locked-off shots with people or a train passing through;
+  the pass mark was at most 2 misses and none invented. No code changed. The README and
+  `DOCS/CAMERA-PATH-CALIBRATION.md` now say so: the camera words in `describe` and `compare`'s PATH
+  line are a hint to check by eye, and they still do not vote in any verdict.
 - `depthc describe --json` now prints only the JSON on stdout. The matte line and the progress bar
   landed in front of it, so a script's `json.loads` failed on a command that exited 0. Warnings from
   every command now go to stderr too.
