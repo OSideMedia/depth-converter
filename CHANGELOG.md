@@ -35,6 +35,49 @@ the code's history. Started 2026-09-06.
   still do not vote in any verdict.
 - The "tilts up" the reader put beside every push-in on the 8 takes is settled: it is real. Those
   takes push toward a face above the centre of the frame.
+- **The camera round: shots, people, "can't tell", slow zooms. Unscored.** Four changes to the
+  picture reader, one for each way the second real-footage score failed. None of them has been
+  scored on clips the reader has not seen, and the camera words still do not vote in any verdict.
+  - **Cuts.** A clip is split into shots where almost no tracked point survives a frame AND the
+    brightness histogram jumps, and each shot is read on its own. `describe` prints `Shots: N, cut
+    at …`, and a kit records `cameraShots` (each shot's start, end and word). The detector is our
+    own rather than PySceneDetect: the tracker already measures point survival, and that cue is
+    what told a cut from a train passing on the seen clips, with no new dependency. A dissolve or
+    a fade is not found.
+  - **People are left out of the fit.** On macOS, Apple Vision finds the people in each frame
+    and their points get no vote (PyObjC, MIT, installed on macOS only; Vision ships with the OS,
+    so no weights). Without Vision, the nearer half of a depth of the same frames is left out
+    instead; with neither, every point votes as before. Vision finds people only: a train, a car
+    or a flower that fills the frame still wins the vote.
+  - **"Can't tell".** A shot, or a half-second of one, that leaves too little background to read,
+    or where no single motion carries half the points, now gets no camera word (`cameraUnread`,
+    a `null` label) instead of a guess or "locked off".
+  - **Slow zooms.** The zoom is also read across half a second, and a zoom too slow to see from
+    one frame to the next can be named from a lower floor. Beside a pan or tilt the old floor
+    still applies, since real pans show a small zoom of their own.
+  - **The scout warns about a second figure** when two or more people are in frame for 10% of the
+    clip or more (macOS only; counts people, never changes the ranking).
+  - On the clips the reader had already seen (development signal, not a score): the first set
+    went from a move invented on 1 of 5 locked-off shots to 0 of 5 with 12 of 12 moves kept; the
+    second set's scored clips went from 7 to 8 of 10 moves with 2 of 7 locked-off shots still
+    wrong (wind on grass, a flower); and 5 of its 15 messy locked-off-style clips still get a move
+    (8 before; the figures in `DOCS/CAMERA-PATH-CALIBRATION.md` say which change moved which).
+  - **Fixed after two reviews: one camera, read per shot.** The per-shot read (`cameraShots`)
+    and the half-second buckets each had their own rule for what was too short to count, and they
+    disagreed: a shot named a move could be called locked off by `describe`, or "can't tell" by
+    `compare`. Now every camera word is derived from the shot read (the rule is written once, in
+    `depthc/motion.py`): only a whole shot can be too short to read; inside a shot no gap is
+    dropped; one word for a clip (the kit's `cameraPath`, `describe`'s overall line, `compare`'s
+    PATH line) is the longest read shot's, from its own gaps; and bucket words follow their shot's
+    read, so a shot read as still has no move inside it and a shot read as moving has one. No bucket
+    mixes two shots. Limit: a pan and its return inside one shot cancel, and that shot reads still
+    everywhere. The camera-path calibration counts "can't tell" in its own column. Every body Vision
+    finds is masked and counted, by its outline or, where it drew none for that body, by its box.
+  - **Fixed after a third review: `compare`'s PATH words.** They no longer wait on a half-second
+    bucket (a seven-frame pan compared with itself had none). Against a shorter take, the reference
+    is worded over the overlap, read as if the clip ended there, its shots cut short and read by
+    the same gates as whole shots; a stretch under a quarter of a second is "can't tell". The camera
+    share and the kit's motion-type line are still measured on the depth, outside the per-shot rule.
 
 ## v0.16.1 — 2026-11-10
 

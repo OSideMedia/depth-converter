@@ -56,7 +56,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from depthc.motion import REGION_COLS, REGION_ROWS, MotionProfile, path_label, sparkline
+from depthc.describe import UNREAD
+from depthc.motion import (
+    REGION_COLS, REGION_ROWS, SHOT_MIN_READ, MotionProfile, bucket_rows, sparkline,
+)
 
 BUCKET_SECONDS = 0.5
 # Lags measured in buckets: ±1.0 s in 0.5 s steps. Wider lags on a 5 s clip leave too few
@@ -252,28 +255,56 @@ def _region_layer(
 
 
 def _path_series(profile: MotionProfile, seconds: float) -> np.ndarray | None:
-    """[buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`."""
+    """[buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`: the direction
+    series the cosine compares. It names nothing; the PATH words come from `_path_word`.
+
+    A picture-read path has NaN rows where the camera could not be read: a bucket is the mean
+    of its readable rows, and NaN itself when fewer than SHOT_MIN_READ of it were. No bucket mixes
+    two shots (`motion.bucket_rows`): a pan left cut against a pan right inside one half-second
+    averaged to no move at all.
+    """
     if profile.path is None or not profile.path.size:
         return None
     step = max(1, int(round(BUCKET_SECONDS * profile.fps)))
-    path = profile.path[: int(round(seconds * profile.fps))]
-    n = path.shape[0] - step + 1
-    if n <= 0:
+    path = profile.path[: _overlap_gaps(profile, seconds)]
+    buckets = bucket_rows(path.shape[0], step, profile.shots)
+    if not buckets:
         return None
-    return np.stack([path[i:i + step].mean(axis=0) for i in range(0, n, step)])
+    out = []
+    for _, rows, size in buckets:
+        chunk = path[rows]
+        finite = np.isfinite(chunk).all(axis=1)
+        out.append(chunk[finite].mean(axis=0) if finite.sum() / size >= SHOT_MIN_READ else np.full(3, np.nan))
+    return np.stack(out)
 
 
-def _path_summary(series: np.ndarray) -> dict:
-    moving = np.any(series != 0, axis=1)
-    if not moving.any():
-        return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
-    dx, dy, radial = (float(v) for v in series[moving].mean(axis=0))
-    return {"dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
-            "label": path_label(dx, dy, radial)}
+def _has_path(profile: MotionProfile) -> bool:
+    return profile.path is not None and bool(profile.path.size)
+
+
+def _overlap_gaps(profile: MotionProfile, seconds: float) -> int:
+    """How many gaps (frame-to-frame motions) the first `seconds` of a profile hold: one fewer
+    than its frames, so a take of N frames and the first N frames of its reference hold as many."""
+    return max(0, int(round(seconds * profile.fps)) - 1)
+
+
+def _path_word(profile: MotionProfile, seconds: float) -> dict:
+    """The PATH word for the first `seconds` of a profile, by the ONE CAMERA rule (`depthc.motion`):
+    that stretch read as if the clip ended there (`MotionProfile.camera_path_over`), so over the
+    whole clip it is the kit's cameraPath, and over a shorter overlap it is the move in the stretch
+    compared. Never from the time buckets: the longest shot of three short ones can own none of
+    them, and was called "can't tell"; and a shot too short for a bucket is still worded."""
+    word = profile.camera_path_over(_overlap_gaps(profile, seconds))
+    return {"dx": None, "dy": None, "radial": None, "label": UNREAD} if word is None else word
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float | None:
-    """Cosine similarity of two flattened series; None when either has no direction."""
+    """Cosine similarity of two flattened series; None when either has no direction.
+
+    Buckets either side could not read (NaN) are left out of both.
+    """
+    both = np.isfinite(a).all(axis=-1) & np.isfinite(b).all(axis=-1) if a.ndim > 1 else np.isfinite(a) & np.isfinite(b)
+    a, b = a[both], b[both]
     a, b = a.ravel().astype(np.float64), b.ravel().astype(np.float64)
     na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
     if na < 1e-9 or nb < 1e-9:
@@ -378,15 +409,16 @@ def compare_profiles(
             (comparison.region_r, comparison.region_weights,
              comparison.structure_r, comparison.mirror_r) = layer
 
-    if camera_path:
+    if camera_path and _has_path(ref) and _has_path(gen):
+        # The words never wait on the cosine: a shot too short for a whole bucket is still read
+        # and worded (ONE CAMERA, `depthc.motion`); only the cosine needs a bucket on each side.
+        comparison.ref_path = _path_word(ref, overlap)
+        comparison.gen_path = _path_word(gen, overlap)
+        comparison.path_judged = ref.camera is not None and ref.camera >= PATH_JUDGE_SHARE
         rp, gp = _path_series(ref, overlap), _path_series(gen, overlap)
-        if rp is not None and gp is not None:
+        if comparison.path_judged and rp is not None and gp is not None:
             n = min(rp.shape[0], gp.shape[0])
-            rp, gp = rp[:n], gp[:n]
-            comparison.ref_path = _path_summary(rp)
-            comparison.gen_path = _path_summary(gp)
-            comparison.path_judged = ref.camera is not None and ref.camera >= PATH_JUDGE_SHARE
-            comparison.path_cos = _cosine(rp, gp) if comparison.path_judged else None
+            comparison.path_cos = _cosine(rp[:n], gp[:n])
 
     comparison.suggestion, comparison.reasons = _suggest(comparison)
     return comparison

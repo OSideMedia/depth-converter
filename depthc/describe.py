@@ -28,11 +28,15 @@ import cv2
 import numpy as np
 
 from depthc.motion import (
-    REGION_COLS, REGION_ROWS, STATIC_FLOOR, STRONG_ENERGY, WEAK_ENERGY, MotionProfile,
-    path_label, path_speed, path_tempo,
+    PATH_RADIAL_STILL, REGION_COLS, REGION_ROWS, SHOT_MIN_READ, STATIC_FLOOR, STRONG_ENERGY,
+    WEAK_ENERGY, MotionProfile, Shot, bucket_rows, path_label, path_speed, path_tempo, path_word,
+    shot_min_gaps,
 )
 
 BUCKET_SECONDS = 0.5
+# A bucket whose camera could not be read (fewer than SHOT_MIN_READ of its gaps): it gets no
+# camera word, never a segment, and is listed as unread instead.
+UNREAD = "can't tell"
 COLUMN_NAMES = ("frame-left", "centre", "frame-right")
 ROW_NAMES = ("top", "middle", "bottom")
 COLUMN_SHORT = ("L", "C", "R")
@@ -217,6 +221,8 @@ class Description:
     camera_share: float | None
     camera_overall: dict | None                  # {dx, dy, radial, label}
     camera_segments: list[Segment] = field(default_factory=list)
+    camera_unread: list[Segment] = field(default_factory=list)   # stretches with no camera word
+    shots: list[dict] | None = None              # the cuts, each shot with its own word
     placement: list[str] = field(default_factory=list)      # per bucket: "L"/"C"/"R"/"·"
     placement_rows: list[str] = field(default_factory=list) # per bucket: "T"/"M"/"B"/"·"
     travel: str | None = None                    # "frame-left → frame-right" or None
@@ -235,6 +241,8 @@ class Description:
             "cameraShare": self.camera_share,
             "cameraOverall": self.camera_overall,
             "cameraSegments": [s.as_dict() for s in self.camera_segments],
+            "cameraUnread": [{"start": round(s.start, 2), "end": round(s.end, 2)} for s in self.camera_unread],
+            "shots": self.shots,
             "placement": "".join(self.placement),
             "placementRows": "".join(self.placement_rows),
             "travel": self.travel,
@@ -270,48 +278,129 @@ def _segments(labels: list[str], bucket_seconds: float) -> list[Segment]:
 
 def path_buckets(
     path: np.ndarray | None, fps: float, bucket_seconds: float = BUCKET_SECONDS,
+    radial_floor: float = PATH_RADIAL_STILL, tail: bool = False, shots: list[Shot] | None = None,
 ) -> list[tuple[str, float, tuple[float, float, float]]]:
     """Per bucket: (label, speed, mean (dx, dy, radial) over the gaps that moved).
 
     The one place a path series becomes words. `camera_segments` collapses these into runs;
     the camera-path calibration (`depthc.calibrate`) scores them bucket by bucket against a
     Blender ground truth — so what the calibration measures is exactly what describe says.
+    NaN rows are gaps the reader could not read: a bucket with fewer than SHOT_MIN_READ of its
+    gaps readable is UNREAD, and the rest are worded from their readable gaps only.
+    `radial_floor` is the profile's (`MotionProfile.radial_floor`). With `tail`, no gap is left
+    out: a last part bucket of at least `shot_min_gaps` stands on its own and a shorter one joins
+    the bucket before it (`motion.bucket_rows`). With `shots` (a path read from the picture), no
+    bucket mixes two shots and the words follow each shot's read (`follow_shot`, and the ONE
+    CAMERA rule in `depthc.motion`).
     """
     if path is None or not path.size:
         return []
     step = max(1, int(round(bucket_seconds * fps)))
-    n = path.shape[0] - step + 1
-    if n <= 0:
-        return []
     out: list[tuple[str, float, tuple[float, float, float]]] = []
-    for i in range(0, n, step):
-        chunk = path[i:i + step]
+    owners: list[int] = []
+    for owner, rows, size in bucket_rows(path.shape[0], step, shots, shot_min_gaps(fps) if tail else 0):
+        owners.append(owner)
+        chunk = path[rows]
+        finite = np.isfinite(chunk).all(axis=1)
+        if float(finite.sum()) / size < SHOT_MIN_READ:
+            out.append((UNREAD, 0.0, (0.0, 0.0, 0.0)))
+            continue
+        chunk = chunk[finite]
         moving = np.any(chunk != 0, axis=1)
         if not moving.any():
             out.append(("static", 0.0, (0.0, 0.0, 0.0)))
             continue
         dx, dy, radial = (float(v) for v in chunk[moving].mean(axis=0))
-        out.append((path_label(dx, dy, radial), path_speed(dx, dy, radial), (dx, dy, radial)))
+        out.append((path_label(dx, dy, radial, radial_floor), path_speed(dx, dy, radial), (dx, dy, radial)))
+    if shots is None:
+        return out
+    for index, shot in enumerate(shots):
+        mine = [k for k, owner in enumerate(owners) if owner == index]
+        word = path_word(path[shot.gaps], radial_floor) if shot.read else None
+        for k, bucket in zip(mine, follow_shot([out[k] for k in mine], word)):
+            out[k] = bucket
+    return out
+
+
+def follow_shot(
+    buckets: list[tuple[str, float, tuple[float, float, float]]], word: dict | None,
+) -> list[tuple[str, float, tuple[float, float, float]]]:
+    """One shot's bucket words made to follow the shot's own read (`word`, `motion.path_word`).
+
+    The shot read decides WHETHER the camera moved in a shot; its buckets only say when. A shot
+    with no word (not read) is "can't tell" throughout. In a shot read as still, every readable
+    bucket is still. In a shot read as moving, the buckets stand when at least one names a move;
+    when none does (the move sat in gaps a bucket could not word on its own), the readable
+    buckets that hold any motion take the shot's word, or every readable bucket when none does.
+    So `describe` never says "locked off" or "can't tell" for a shot cameraShots names a move in.
+    """
+    zero = (0.0, 0.0, 0.0)
+    if word is None:
+        return [(UNREAD, 0.0, zero) for _ in buckets]
+    if word["label"] == "static":
+        return [b if b[0] == UNREAD else ("static", 0.0, zero) for b in buckets]
+    if any(b[0] not in ("static", UNREAD) for b in buckets):
+        return buckets
+    vec = (word["dx"], word["dy"], word["radial"])
+    named = (word["label"], path_speed(*vec), vec)
+    stirred = [b[0] != UNREAD and b[1] > 0 for b in buckets]
+    if not any(stirred):
+        stirred = [b[0] != UNREAD for b in buckets]
+    return [named if take else b for b, take in zip(buckets, stirred)]
+
+
+def _shot_runs(profile: MotionProfile, bucket_seconds: float) -> list[Segment]:
+    """Every run of one label inside one shot, UNREAD runs included, in clip seconds."""
+    if profile.path is None or not profile.path.size:
+        return []
+    shots = profile.shots or [Shot(0, profile.path.shape[0] + 1)]
+    out: list[Segment] = []
+    for shot in shots:
+        offset = shot.start / profile.fps
+        if not shot.read:
+            out.append(Segment(offset, shot.end / profile.fps, UNREAD))
+            continue
+        rows = profile.path[shot.gaps]
+        # A shot read from the picture is worded to its end and follows its own read (ONE CAMERA
+        # in `depthc.motion`); a path read the old way (no shots) keeps full buckets only, as the
+        # calibration scores it.
+        read = profile.shots is not None
+        buckets = path_buckets(
+            rows, profile.fps, bucket_seconds, profile.radial_floor,
+            tail=read, shots=[Shot(0, rows.shape[0] + 1)] if read else None,
+        )
+        labels = [label for label, _, _ in buckets]
+        speeds = [speed for _, speed, _ in buckets]
+        runs = _segments(labels, bucket_seconds)
+        for segment in runs:
+            # Tempo is graded over the whole run, not per bucket: a per-bucket adverb would
+            # split one "pans left" into fragments at every flicker across a band edge.
+            if segment.label not in ("static", UNREAD):
+                lo = int(round(segment.start / bucket_seconds))
+                hi = int(round(segment.end / bucket_seconds))
+                segment.tempo = path_tempo(float(np.mean(speeds[lo:hi])))
+            segment.start += offset
+            segment.end = min(segment.end + offset, shot.end / profile.fps)
+            out.append(segment)
+        if read and runs:
+            runs[-1].end = shot.end / profile.fps  # the last bucket holds the shot's last gap
     return out
 
 
 def camera_segments(profile: MotionProfile, bucket_seconds: float = BUCKET_SECONDS) -> list[Segment]:
-    """The camera path named per bucket, then collapsed into runs ("pans left 0-1.5s")."""
-    buckets = path_buckets(profile.path, profile.fps, bucket_seconds)
-    if not buckets:
-        return []
-    labels = [label for label, _, _ in buckets]
-    speeds = [speed for _, speed, _ in buckets]
-    segments = _segments(labels, bucket_seconds)
-    # Tempo is graded over the whole run, not per bucket: a per-bucket adverb would split
-    # one "pans left" into fragments at every flicker across a band edge.
-    for segment in segments:
-        if segment.label == "static":
-            continue
-        lo = int(round(segment.start / bucket_seconds))
-        hi = int(round(segment.end / bucket_seconds))
-        segment.tempo = path_tempo(float(np.mean(speeds[lo:hi])))
-    return segments
+    """The camera path named per bucket, then collapsed into runs ("pans left 0-1.5s").
+
+    Shot by shot: a run never crosses a cut, and its times are the clip's. A stretch whose
+    camera could not be read is not a segment at all (see `camera_unread`): a segment always
+    carries a camera word.
+    """
+    return [s for s in _shot_runs(profile, bucket_seconds) if s.label != UNREAD]
+
+
+def camera_unread(profile: MotionProfile, bucket_seconds: float = BUCKET_SECONDS) -> list[Segment]:
+    """The stretches that got no camera word: a shot too short or too crowded to read, or a
+    half-second inside one where too little of the background could be tracked."""
+    return [s for s in _shot_runs(profile, bucket_seconds) if s.label == UNREAD]
 
 
 def placement_track(
@@ -381,6 +470,8 @@ def describe(
         camera_share=profile.camera,
         camera_overall=profile.camera_path,
         camera_segments=camera_segments(profile, bucket_seconds),
+        camera_unread=camera_unread(profile, bucket_seconds),
+        shots=profile.camera_shots,
         placement=cols,
         placement_rows=rows,
         travel=travel(cols),
@@ -395,11 +486,22 @@ def describe(
 def _sentences(d: Description) -> list[str]:
     out: list[str] = []
 
+    # 0. Shots — only when there is more than one: every camera word below is one shot's.
+    if d.shots and len(d.shots) > 1:
+        cuts = ", ".join(f"{shot['startSeconds']:g}s" for shot in d.shots[1:])
+        out.append(f"Shots: {len(d.shots)}, cut at {cuts} — the camera is read in each on its own.")
+
     # 1. Camera — in the words a prompt uses.
-    if d.camera_overall is not None:
+    unread = ""
+    if d.camera_unread:
+        spans = ", ".join(f"{s.start:g}–{s.end:g}s" for s in d.camera_unread)
+        unread = f" Can't tell {spans}: too little background to read."
+    if d.camera_overall is None and d.shots is not None:
+        out.append("Camera: can't tell — too little of the background could be read.")
+    elif d.camera_overall is not None:
         moving = [s for s in d.camera_segments if s.label != "static"]
         if not moving:
-            out.append("Camera: locked off — no whole-frame move measured.")
+            out.append(f"Camera: locked off — no whole-frame move measured.{unread}")
         else:
             runs = ", then ".join(
                 " ".join(filter(None, [s.tempo, s.label])) + f" {s.start:g}–{s.end:g}s"
@@ -412,7 +514,7 @@ def _sentences(d: Description) -> list[str]:
                     else f" ({d.camera_share * 100:.0f}% of the movement is whole-frame — "
                          f"the rest is the subject)"
                 )
-            out.append(f"Camera: {runs}{kind}.")
+            out.append(f"Camera: {runs}{kind}.{unread}")
     else:
         out.append("Camera: not measured (flow pass skipped).")
 

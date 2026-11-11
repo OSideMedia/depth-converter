@@ -117,7 +117,10 @@ PATH_READER = "regions-2026-11"  # names the reader in the calibration's saved e
 # through. They cast most of the votes and the reader named a pan. So the camera is now read from
 # the picture, by tracking points instead of dense flow, and the points that do not move with the
 # rest are dropped before anything votes.
-PICTURE_READER = "tracks-2026-11"  # names this reader in the calibration's saved estimates
+# "tracks-2026-11" was the first picture reader; "shots-2026-11" added the camera round below,
+# "shots2-2026-11" counted a shot's length in gaps (`shot_min_gaps`), and "shots3-2026-11" masks
+# every body Vision finds, outlined or not (`depthc.people`).
+PICTURE_READER = "shots3-2026-11"  # names this reader in the calibration's saved estimates
 # Tracked at this long edge: twice the analysis grid, so a slow push that moves a point a
 # twentieth of a grid pixel per frame is a tenth of a pixel here, which Lucas-Kanade resolves.
 TRACK_LONG_EDGE = 320
@@ -146,6 +149,55 @@ TRACK_REGION_POINTS = 2
 # A tracked gap counts as moving when the path averaged over this long around it clears the
 # naming floors (`_settle`). Half a second: the bucket every camera word is read in.
 TRACK_SETTLE_SECONDS = 0.5
+# --- the camera round (2026-11-11): shots, people, "can't tell", slow moves -----------------
+# The second real-footage score (DOCS/CAMERA-PATH-CALIBRATION.md) failed four ways and each block
+# below answers one. Every number in it was chosen on SEEN clips, which is development signal and
+# never a score: only clips this reader has not been tuned on can say whether any of it works.
+#
+# CUTS. A clip is split into shots before anything is read, and no fit or average crosses a cut.
+# A cut is a gap where almost none of the tracked points survive the there-and-back check AND the
+# brightness histogram jumps. Either cue alone fires on real footage: a passing train keeps the
+# histogram churning (0.20 between frames) and a dark, smeared shot loses most of its points
+# (survival 0.10), but no seen gap did both except at a cut. On the seen cuts survival was 0.03 or
+# less and the histogram moved 0.12 or more.
+# ponytail: two fixed bars set on nine seen cuts in three clips; a dissolve or a fade has no such
+# gap and reads as one shot. An adaptive detector (PySceneDetect's AdaptiveDetector, BSD-3) is
+# the upgrade if soft transitions ever matter.
+CUT_SURVIVAL = 0.05
+CUT_HISTOGRAM = 0.10        # half the L1 distance between the two frames' grey histograms
+CUT_HISTOGRAM_ALONE = 0.30  # a frame with too few corners to judge survival (black, flat): this
+CUT_HISTOGRAM_BINS = 32
+CUT_MIN_CORNERS = 10        # fewer corners than this and survival is not judged (a dark frame has 20)
+SHOT_MIN_SECONDS = 0.25     # a shot spanning fewer gaps than this is not read at all (`shot_min_gaps`)
+# PEOPLE. A person is the commonest thing in frame that moves on its own, and in the seen failures
+# one filled enough of it to outvote the background: dancers against a plain wall, a walker close
+# to the lens. Their points are dropped before the fit (`depthc.people`, Apple Vision, macOS only).
+# Without Vision, given a depth of the same frames, the points on the nearer part of the depth are
+# dropped instead, since a subject usually stands nearer than what is behind it. With neither,
+# every point votes, as before. A point this many px (at TRACK_LONG_EDGE) from a person is dropped
+# too: its tracking window holds part of the person.
+TRACK_MASK_GROW = 5
+# ponytail: "near" is everything nearer than this quantile of each frame's depth, a fixed share;
+# a subject no nearer than its background (a figure on a floor that runs to the lens) keeps its
+# points. Splitting the depth into layers is the upgrade if the fallback ever carries weight.
+DEPTH_FAR_QUANTILE = 0.5
+# CAN'T TELL. A gap is written NaN, "can't tell", when the fit has nothing to stand on: a person
+# mask left fewer than TRACK_MIN_POINTS points to track, or no single motion carries
+# TRACK_MIN_SHARE of them (it used to read as still). A shot names no camera at all when fewer than
+# SHOT_MIN_READ of its gaps could be read: a word built from the few readable gaps of a shot full
+# of dancers is the guess that failed.
+# ponytail: half, by judgement, not tuned; a shot read on 51% of its gaps can still be worded from
+# the wrong 51%. A per-shot confidence from the spread of the fit is the upgrade.
+SHOT_MIN_READ = 0.5
+# SLOW MOVES. A slow push moves a point a few hundredths of a pixel per frame, under what tracking
+# from one frame to the next resolves. So the zoom is also read across SLOW_BASELINE_SECONDS, one
+# reading every SLOW_STRIDE_SECONDS: half a second later the same point has moved twelve times as
+# far, and the tracking error has not grown twelvefold. That reading replaces the frame-to-frame
+# zoom wherever it exists, and is named from PATH_RADIAL_SLOW up, not from PATH_RADIAL_STILL. The
+# fit's outlier distance grows with the square root of the baseline, as tracking error does.
+SLOW_BASELINE_SECONDS = 0.5
+SLOW_STRIDE_SECONDS = 0.125
+PATH_RADIAL_SLOW = 0.012
 # WHERE the path is read. Flow only shows on pixels with texture in two directions (the aperture
 # problem): a flat wall moves without showing it, and in an all-pixel median it votes zero. So the
 # path is read on pixels whose structure-tensor strength clears this share of the frame's strongest
@@ -417,30 +469,216 @@ def _track_gray(picture: np.ndarray) -> np.ndarray:
     return np.stack([cv2.resize(f, size, interpolation=cv2.INTER_AREA) for f in source])
 
 
-def _tracked_reading(
-    previous: np.ndarray, current: np.ndarray, grid_w: int, grid_h: int, mean_radius: float,
-) -> tuple[float, float, float] | None | bool:
-    """One gap read from tracked points: (dx, dy, radial) in grid px per frame.
+@dataclass
+class Shot:
+    """One run of frames between cuts, frames [start, end), and whether its camera was read."""
 
-    False when there is too little to track (the caller falls back to the region reader), None
-    when there is plenty but no one motion carries the frame (the gap names no camera).
+    start: int
+    end: int
+    read: bool = True
+
+    @property
+    def gaps(self) -> slice:
+        """This shot's rows of a path: gap i joins frames i and i+1, so a cut gap is in no shot."""
+        return slice(self.start, max(self.start, self.end - 1))
+
+
+# ONE CAMERA, READ PER SHOT: the single rule every camera word follows.
+# The camera is read once per shot. A shot's word is `path_word` over that shot's own readable
+# gaps (`MotionProfile.camera_shots`, a kit's cameraShots); a shot spanning fewer than
+# `shot_min_gaps` gaps is not read at all (no word: "can't tell"), and nothing else is ever too
+# short to count. Every other camera word is derived from that read, so none can contradict it:
+#   - One word for a clip (a kit's cameraPath, describe's overall line, compare's PATH line) is the
+#     word of `main_shot`, read from that shot's own gaps, never from time buckets.
+#   - One word for the first part of a clip (compare's PATH line over the overlap, when the take
+#     and the reference differ in length) reads that part as if the clip ended there: its shots
+#     cut short at the end of it (`shots_cut_short`), each read again by the same gates as a whole
+#     shot, then the same `main_shot` and `path_word` (`MotionProfile.camera_path_over`). So it
+#     can name another move than the whole clip's cameraPath, the move in the stretch compared.
+#   - Time buckets (describe's segments, the calibration) only say WHEN inside a shot. They never
+#     cross a cut; inside a shot no gap is dropped (`bucket_rows`: a remainder too short to stand
+#     alone joins the bucket before it); and their words follow the shot's (`describe.follow_shot`):
+#     in a shot read as still every bucket is still, and in a shot read as moving at least one
+#     bucket names a move.
+# A path read the old way (from the depth, no shots) has no shot read; its buckets stand as the
+# calibration measured them. Time buckets also feed compare's direction cosine, which is a number
+# and names nothing, and which needs one whole bucket on each side: the PATH words do not.
+# Outside this rule: the camera SHARE (`MotionProfile.camera`, the whole-frame part of the motion)
+# and the kit's motion-type line worded from it (`checks.py`, "camera-path" or "subject-motion"
+# reference) are still measured on the depth, not read per shot. So a clip whose every shot reads
+# still can be called a camera-path reference, and the share still decides whether compare
+# judges the PATH cosine.
+# ponytail: a shot is one word, the mean of its moving gaps, so a pan and its return inside one
+# shot cancel and the whole shot reads still everywhere; reading a shot as runs (a word per run)
+# is the upgrade, and it changes what cameraShots records.
+
+
+def shot_min_gaps(fps: float) -> int:
+    """The fewest gaps (frame-to-frame motions) a shot needs to be read: SHOT_MIN_SECONDS of them.
+
+    The only "too short" in the camera words (ONE CAMERA, above): the shot gate in
+    `_camera_reading_from`, and the shortest part bucket `describe` lets stand on its own.
+    """
+    return max(1, int(np.ceil(SHOT_MIN_SECONDS * fps - 1e-9)))
+
+
+def path_word(rows: np.ndarray, radial_floor: float = PATH_RADIAL_STILL) -> dict | None:
+    """The camera word for a stretch of path: the mean over its MOVING readable rows, as
+    {dx, dy, radial (grid px/frame), label}; None when no row could be read.
+
+    A shot's word in cameraShots is this over the shot's gaps (ONE CAMERA, above).
+    """
+    finite = np.isfinite(rows).all(axis=1)
+    if not finite.any():
+        return None
+    moving = finite & np.any(np.nan_to_num(rows) != 0, axis=1)
+    if not moving.any():
+        return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
+    dx, dy, radial = (float(v) for v in rows[moving].mean(axis=0))
+    return {
+        "dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
+        "label": path_label(dx, dy, radial, radial_floor),
+    }
+
+
+def gap_owners(gaps: int, shots: list[Shot] | None) -> np.ndarray:
+    """[gaps] int: which shot each gap of a path belongs to; -1 for a cut gap. All 0 with no shots."""
+    if shots is None:
+        return np.zeros(gaps, dtype=np.int32)
+    owners = np.full(gaps, -1, dtype=np.int32)
+    for index, shot in enumerate(shots):
+        owners[shot.gaps] = index
+    return owners
+
+
+def bucket_rows(
+    gaps: int, step: int, shots: list[Shot] | None = None, tail: int = 0,
+) -> list[tuple[int, np.ndarray, int]]:
+    """A path of `gaps` rows cut into buckets of `step`, never across a cut: (shot, rows, size).
+
+    Every place that buckets a path goes through here (`describe.path_buckets`, `compare`'s
+    direction series, the camera-path calibration), so none of them averages one shot with the
+    next. Where a cut falls inside a bucket, the bucket keeps the rows of the shot that holds most
+    of its gaps, the earlier shot on a tie, and drops the rest; `size` is the whole bucket's
+    length, so a bucket left with a sliver of a shot is judged against all of it (SHOT_MIN_READ).
+
+    `tail` 0: full buckets only, for series laid side by side on one time grid (compare's cosine,
+    the calibration against its truth). `tail` > 0: no gap is dropped (ONE CAMERA): what is left
+    after the full buckets is a bucket of its own when it holds at least `tail` gaps, and joins
+    the bucket before it otherwise (or is the only bucket, on a path shorter than `step`).
+    """
+    owners = gap_owners(gaps, shots)
+    spans = [(start, start + step) for start in range(0, gaps - step + 1, step)]
+    rest = gaps - len(spans) * step
+    if tail and rest > 0:
+        if rest >= tail or not spans:
+            spans.append((gaps - rest, gaps))
+        else:
+            spans[-1] = (spans[-1][0], gaps)
+    out: list[tuple[int, np.ndarray, int]] = []
+    for start, stop in spans:
+        rows = np.arange(start, stop)
+        size = rows.size
+        ids = owners[rows]
+        held = ids[ids >= 0]
+        owner = -1
+        if held.size:
+            values, counts = np.unique(held, return_counts=True)
+            owner = int(values[int(np.argmax(counts))])  # the first maximum is the earlier shot
+            rows = rows[ids == owner]
+        out.append((owner, rows, size))
+    return out
+
+
+def main_shot(shots: list[Shot]) -> int | None:
+    """The shot one word for a clip with cuts names: the read shot holding the most gaps, the
+    earlier on a tie; None when no shot was read. `MotionProfile.camera_path_over` (the kit's
+    cameraPath, describe's overall line, compare's PATH line) names this shot, from its own gaps
+    (ONE CAMERA, above).
+    """
+    best, held = None, 0
+    for index, shot in enumerate(shots):
+        rows = shot.gaps
+        if shot.read and rows.stop - rows.start > held:
+            best, held = index, rows.stop - rows.start
+    return best
+
+
+def shots_cut_short(shots: list[Shot], path: np.ndarray, fps: float, gaps: int) -> list[Shot]:
+    """The shots of the first `gaps` gaps of `path`, as if the clip ended there (ONE CAMERA, above).
+
+    Each shot that starts inside keeps the gaps it has there and is read again by the gates a
+    whole shot is read by in `_camera_reading_from`: at least `shot_min_gaps` gaps, and
+    SHOT_MIN_READ of them readable. A shot not read whole is not read cut short, and a whole shot
+    passes both gates again unchanged, so over the whole path these are the shots as read.
+    """
+    out: list[Shot] = []
+    for shot in shots:
+        if shot.start >= gaps:
+            break
+        kept = Shot(shot.start, min(shot.end, gaps + 1), shot.read)
+        rows = path[kept.gaps]
+        kept.read = bool(
+            shot.read and rows.shape[0] >= shot_min_gaps(fps)
+            and float(np.isfinite(rows).all(axis=1).mean()) >= SHOT_MIN_READ
+        )
+        out.append(kept)
+    return out
+
+
+@dataclass
+class CameraReading:
+    """The camera over time, read from the picture: what `camera_reading` returns.
+
+    `path` is [gaps, 3] (dx, dy, radial) in grid px per frame, as `FlowSeries.path`, with one
+    addition: a NaN row is a gap that could not be read ("can't tell"), never a still one. `shots`
+    are the runs between cuts. `mask` says what was kept out of the fit: "people" (Vision),
+    "depth" (the nearer part of a depth of the same frames) or "none". `radial_floor` is the zoom
+    a label may name from (PATH_RADIAL_SLOW: the zoom is read across half a second here).
+    """
+
+    path: np.ndarray = field(repr=False)
+    shots: list[Shot] = field(default_factory=list)
+    mask: str = "none"
+    radial_floor: float = PATH_RADIAL_SLOW
+
+
+def _track(
+    previous: np.ndarray, current: np.ndarray, allowed: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, float] | None:
+    """Corners of `previous` (where `allowed`), tracked to `current` and back.
+
+    (start, end, survival): the points that came back within TRACK_RETURN_PX, where they went,
+    and the share of the corners that did. None when there were fewer than CUT_MIN_CORNERS
+    corners, too few to say even whether the frame cut; a reading needs TRACK_MIN_POINTS back.
     """
     import cv2
 
-    points = cv2.goodFeaturesToTrack(previous, TRACK_MAX_POINTS, TRACK_QUALITY, TRACK_SPACING)
-    if points is None or len(points) < TRACK_MIN_POINTS:
-        return False
+    points = cv2.goodFeaturesToTrack(previous, TRACK_MAX_POINTS, TRACK_QUALITY, TRACK_SPACING, mask=allowed)
+    if points is None or len(points) < CUT_MIN_CORNERS:
+        return None
     there, found, _ = cv2.calcOpticalFlowPyrLK(previous, current, points, None, winSize=(21, 21), maxLevel=3)
     back, found_back, _ = cv2.calcOpticalFlowPyrLK(current, previous, there, None, winSize=(21, 21), maxLevel=3)
     kept = (
         (found.ravel() == 1) & (found_back.ravel() == 1)
         & (np.linalg.norm((back - points).reshape(-1, 2), axis=1) < TRACK_RETURN_PX)
     )
-    if int(kept.sum()) < TRACK_MIN_POINTS:
-        return False
-    start, end = points[kept].reshape(-1, 2), there[kept].reshape(-1, 2)
+    return points[kept].reshape(-1, 2), there[kept].reshape(-1, 2), float(kept.mean())
+
+
+def _fit(
+    start: np.ndarray, end: np.ndarray, size: tuple[int, int], grid_w: int, grid_h: int,
+    mean_radius: float, frames: int = 1,
+) -> tuple[float, float, float] | None | bool:
+    """Tracked points to (dx, dy, radial) in grid px per frame, over a span of `frames` frames.
+
+    None when no single motion carries TRACK_MIN_SHARE of the points (the gap names no camera).
+    False when the points that do bunch in too few regions to vote (the region reader decides).
+    """
+    import cv2
+
     fit, inliers = cv2.estimateAffinePartial2D(
-        start, end, method=cv2.RANSAC, ransacReprojThreshold=TRACK_FIT_PX,
+        start, end, method=cv2.RANSAC, ransacReprojThreshold=TRACK_FIT_PX * float(np.sqrt(frames)),
         maxIters=2000, confidence=0.995,
     )
     if fit is None or float(inliers.mean()) < TRACK_MIN_SHARE:
@@ -448,9 +686,9 @@ def _tracked_reading(
     world = inliers.ravel() == 1
     start, end = start[world], end[world]
 
-    height, width = previous.shape
+    height, width = size
     to_grid = grid_w / width
-    travel = (end - start) * to_grid
+    travel = (end - start) * to_grid / frames
     offset = (start - np.array([(width - 1) / 2.0, (height - 1) / 2.0])) * to_grid
     column = np.clip((start[:, 0] * PATH_REGIONS / width).astype(int), 0, PATH_REGIONS - 1)
     row = np.clip((start[:, 1] * PATH_REGIONS / height).astype(int), 0, PATH_REGIONS - 1)
@@ -468,36 +706,157 @@ def _tracked_reading(
     return dx, dy, stretch * mean_radius
 
 
-def _camera_path_from(grid: np.ndarray, tracked: np.ndarray, fps: float = 24.0) -> np.ndarray:
-    """camera_path on frames already reduced: the analysis grid and the TRACK_LONG_EDGE greys."""
+def _cuts(tracked: np.ndarray, survival: np.ndarray) -> np.ndarray:
+    """The gaps that are cuts: [gaps] bool, from point survival and the histogram jump (see CUT_SURVIVAL)."""
     import cv2
 
-    gaps = max(0, tracked.shape[0] - 1)
+    hist = np.stack([
+        cv2.calcHist([frame], [0], None, [CUT_HISTOGRAM_BINS], [0, 256]).ravel() for frame in tracked
+    ])
+    hist /= np.maximum(hist.sum(axis=1, keepdims=True), 1.0)
+    jump = 0.5 * np.abs(np.diff(hist, axis=0)).sum(axis=1)
+    unknown = np.isnan(survival)
+    return np.where(
+        unknown, jump >= CUT_HISTOGRAM_ALONE,
+        (np.nan_to_num(survival, nan=1.0) <= CUT_SURVIVAL) & (jump >= CUT_HISTOGRAM),
+    )
+
+
+def _shots(frames: int, cuts: np.ndarray) -> list[Shot]:
+    """The runs of frames between cut gaps; gap g is a cut between frame g and frame g+1."""
+    edges = [0, *(int(g) + 1 for g in np.flatnonzero(cuts)), frames]
+    return [Shot(a, b) for a, b in zip(edges[:-1], edges[1:]) if b > a]
+
+
+def _slow_radial(
+    tracked: np.ndarray, allowed: list[np.ndarray | None], shots: list[Shot], unread: np.ndarray,
+    fps: float, grid_w: int, grid_h: int, mean_radius: float,
+) -> np.ndarray:
+    """The zoom read across SLOW_BASELINE_SECONDS, per gap: [gaps], NaN where nothing covered it."""
+    gaps = tracked.shape[0] - 1
+    span = max(2, int(round(SLOW_BASELINE_SECONDS * fps)))
+    stride = max(1, int(round(SLOW_STRIDE_SECONDS * fps)))
+    total = np.zeros(gaps, dtype=np.float64)
+    count = np.zeros(gaps, dtype=np.int32)
+    for shot in shots:
+        last = shot.end - 1 - span  # the last first frame whose partner is still in this shot
+        if last < shot.start:
+            continue
+        starts = list(range(shot.start, last + 1, stride))
+        if starts[-1] != last:
+            starts.append(last)
+        for first in starts:
+            if unread[first:first + span].mean() > 0.5:
+                continue
+            tracks = _track(tracked[first], tracked[first + span], allowed[first])
+            if tracks is None or len(tracks[0]) < TRACK_MIN_POINTS:
+                continue
+            reading = _fit(tracks[0], tracks[1], tracked.shape[1:], grid_w, grid_h, mean_radius, frames=span)
+            if not isinstance(reading, tuple):
+                continue
+            total[first:first + span] += reading[2]
+            count[first:first + span] += 1
+    out = np.full(gaps, np.nan, dtype=np.float64)
+    out[count > 0] = total[count > 0] / count[count > 0]
+    return out
+
+
+def _camera_reading_from(
+    grid: np.ndarray, tracked: np.ndarray, fps: float = 24.0, people: np.ndarray | None = None,
+) -> CameraReading:
+    """camera_reading on frames already reduced: the analysis grid, the TRACK_LONG_EDGE greys, and
+    `people`, [N, H, W] bool at the greys' size, True where the fit must not look (or None)."""
+    import cv2
+
+    frames = tracked.shape[0]
+    gaps = max(0, frames - 1)
     path = np.zeros((gaps, 3), dtype=np.float32)
     if gaps == 0:
-        return path
+        return CameraReading(path=path, shots=[Shot(0, frames, read=False)] if frames else [])
     grid_h, grid_w = grid.shape[1:]
     ys, xs = np.mgrid[0:grid_h, 0:grid_w].astype(np.float32)
     mean_radius = float(np.hypot(xs - (grid_w - 1) / 2.0, ys - (grid_h - 1) / 2.0).mean())
+    allowed: list[np.ndarray | None] = [None] * frames
+    if people is not None:
+        grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * TRACK_MASK_GROW + 1,) * 2)
+        for index, mask in enumerate(people):
+            if mask.any():
+                allowed[index] = np.where(cv2.dilate(mask.astype(np.uint8), grow) > 0, 0, 255).astype(np.uint8)
     cv2.setRNGSeed(0)  # RANSAC draws at random; the same clip must read the same twice
-    untracked: list[int] = []
-    for index, (previous, current) in enumerate(zip(tracked[:-1], tracked[1:])):
-        reading = _tracked_reading(previous, current, grid_w, grid_h, mean_radius)
-        if reading is False:
-            untracked.append(index)
-        elif reading is not None:
+
+    unread = np.zeros(gaps, dtype=bool)      # can't tell
+    untracked = np.zeros(gaps, dtype=bool)   # the region reader's to read
+    survival = np.full(gaps, np.nan)
+    for index in range(gaps):
+        tracks = _track(tracked[index], tracked[index + 1], allowed[index])
+        # A cut is judged on every corner, people included: on what the mask leaves, a train
+        # rushing past a masked bystander loses its points on every gap and reads as cut after cut.
+        whole = tracks if allowed[index] is None else _track(tracked[index], tracked[index + 1])
+        if whole is not None:
+            survival[index] = whole[2]
+        reading = False
+        if tracks is not None and len(tracks[0]) >= TRACK_MIN_POINTS:
+            reading = _fit(tracks[0], tracks[1], tracked.shape[1:], grid_w, grid_h, mean_radius)
+        if reading is None:
+            unread[index] = True
+        elif reading is False:
+            # With a mask in this frame, too little was left to read, and the region reader
+            # cannot leave the people out: can't tell. Without one, the region reader decides.
+            if allowed[index] is not None:
+                unread[index] = True
+            else:
+                untracked[index] = True
+        else:
             path[index] = reading
-    keep = np.zeros(gaps, dtype=bool)
-    if untracked:
+
+    cuts = _cuts(tracked, survival)
+    shots = _shots(frames, cuts)
+    unread |= cuts
+    for shot in shots:
+        if shot.end - shot.start - 1 < shot_min_gaps(fps):
+            shot.read = False
+            unread[shot.gaps] = True
+    untracked &= ~unread
+    if untracked.any():
         # Filled in BEFORE settling: a tracked gap is judged against what really happened around
         # it, and a hole where the region reader's answer belongs would read as stillness there.
         fallback = flow_series(grid, fps).path
         path[untracked] = fallback[untracked]
-        keep[untracked] = True  # the region reader already zeroed its own still gaps
-    return _settle(path, fps, keep)
+
+    slow = _slow_radial(tracked, allowed, shots, unread, fps, grid_w, grid_h, mean_radius)
+    path[unread] = np.nan
+    for shot in shots:
+        rows = shot.gaps
+        if not shot.read or rows.stop <= rows.start:
+            shot.read = False
+            path[rows] = np.nan
+            continue
+        part = path[rows]
+        # Where the frame-to-frame zoom clears PATH_RADIAL_STILL it stands: across half a second a
+        # dolly past things at different distances fits the far layer and reads a fraction of
+        # its push (seen: 0.01 against 0.14). Under that floor the half-second reading replaces
+        # it, and may be named from PATH_RADIAL_SLOW: there it is the quieter of the two (a flower
+        # swaying on a locked-off shot read 0.016 frame to frame and 0.003 across half a second).
+        quick = _around(part, fps)[:, 2]
+        swap = np.isfinite(slow[rows]) & ~untracked[rows] & np.isfinite(part).all(axis=1)
+        swap &= np.abs(quick) < PATH_RADIAL_STILL
+        part[swap, 2] = slow[rows][swap]
+        path[rows] = _settle(part, fps, untracked[rows], np.where(swap, PATH_RADIAL_SLOW, PATH_RADIAL_STILL))
+        if float(np.isfinite(path[rows]).all(axis=1).mean()) < SHOT_MIN_READ:
+            shot.read = False
+            path[rows] = np.nan
+    return CameraReading(path=path, shots=shots)
 
 
-def _settle(path: np.ndarray, fps: float, keep: np.ndarray | None = None) -> np.ndarray:
+def _camera_path_from(grid: np.ndarray, tracked: np.ndarray, fps: float = 24.0) -> np.ndarray:
+    """The path of `_camera_reading_from` with no mask: what calibration scripts call."""
+    return _camera_reading_from(grid, tracked, fps).path
+
+
+def _settle(
+    path: np.ndarray, fps: float, keep: np.ndarray | None = None,
+    radial_floor: float | np.ndarray = PATH_RADIAL_STILL,
+) -> np.ndarray:
     """Zero the gaps where the camera is not moving, as `flow_series` does with its static floor.
 
     Everything that reads a path takes a zero row to mean "still" and averages the rest
@@ -507,7 +866,11 @@ def _settle(path: np.ndarray, fps: float, keep: np.ndarray | None = None) -> np.
     path around it, averaged over TRACK_SETTLE_SECONDS, would earn a word from `path_label`.
     Averaging first is what keeps a slow push: each gap of it is under the floor's noise, the
     half-second around it is not. Gaps marked in `keep` count toward the averages and are never
-    zeroed here.
+    zeroed here. NaN rows (can't tell) are left as they are and count toward no average.
+
+    The zoom is judged against `radial_floor` (one per gap, or one for all), and a kept gap whose
+    zoom does not clear it on its own loses the zoom: a pan's frame-to-frame zoom is noise, and
+    named from the slow floor it would turn every pan into "pans left, pushes in".
 
     ponytail: a gate per gap plus "average the survivors" downstream means a bucket where the
     camera reverses can be worded from the half that survived. `flow_series` has the same shape
@@ -517,31 +880,93 @@ def _settle(path: np.ndarray, fps: float, keep: np.ndarray | None = None) -> np.
     gaps = path.shape[0]
     if gaps == 0:
         return path
-    span = max(1, min(gaps, int(round(TRACK_SETTLE_SECONDS * fps))))
-    kernel = np.ones(span, dtype=np.float64) / span
-    # 'same' with the tail counted honestly: divide by how many gaps each window really held
-    held = np.convolve(np.ones(gaps), kernel, mode="same")
-    around = np.stack([np.convolve(path[:, k], kernel, mode="same") / held for k in range(3)], axis=1)
-    moving = (np.hypot(around[:, 0], around[:, 1]) >= PATH_STILL) | (np.abs(around[:, 2]) >= PATH_RADIAL_STILL)
-    if keep is not None:
-        moving |= keep
+    finite = np.isfinite(path).all(axis=1)
+    around = _around(path, fps)
+    zoom = np.abs(around[:, 2]) >= radial_floor
+    moving = (np.hypot(around[:, 0], around[:, 1]) >= PATH_STILL) | zoom
+    told = np.zeros(gaps, dtype=bool) if keep is None else keep.astype(bool)
     settled = path.copy()
-    settled[~moving] = 0.0
+    settled[finite & ~(moving | told)] = 0.0
+    settled[finite & ~zoom & ~told, 2] = 0.0
     return settled
 
 
-def camera_path(picture: np.ndarray, fps: float = 24.0) -> np.ndarray:
-    """The camera over time, read from the PICTURE: [gaps, 3] (dx, dy, radial), grid px per frame.
+def _around(path: np.ndarray, fps: float) -> np.ndarray:
+    """Each gap's path averaged over the TRACK_SETTLE_SECONDS around it, NaN rows left out."""
+    gaps = path.shape[0]
+    span = max(1, min(gaps, int(round(TRACK_SETTLE_SECONDS * fps))))
+    kernel = np.ones(span, dtype=np.float64) / span
+    finite = np.isfinite(path).all(axis=1)
+    values = np.where(finite[:, None], path, 0.0)
+    # 'same' with the tail counted honestly: divide by how many readable gaps each window held
+    held = np.maximum(np.convolve(finite.astype(np.float64), kernel, mode="same"), 1e-12)
+    return np.stack([np.convolve(values[:, k], kernel, mode="same") / held for k in range(path.shape[1])], axis=1)
+
+
+def camera_reading(
+    picture: np.ndarray, fps: float = 24.0, *, depth: np.ndarray | None = None,
+    near: str | None = "bright", people: str | np.ndarray | None = "auto",
+) -> CameraReading:
+    """The camera over time, read from the PICTURE, shot by shot, with people left out of the fit.
+
+    Points are tracked from each frame to the next, the ones that do not move with the rest are
+    dropped by a RANSAC similarity fit, and the survivors vote by region through `_read_camera`,
+    the same shift-and-stretch reading the region reader uses. Before that, the clip is cut into
+    shots (CUT_SURVIVAL) and the points on people are left out (`depthc.people`; with no Vision,
+    the nearer part of `depth`, where `near` says which end of the depth is near: "bright", the
+    model's own, or "dark" for an inverted one). The zoom is also read across half a second
+    (SLOW_BASELINE_SECONDS). A gap with too little to track and no mask is read by `flow_series`
+    on the same picture. A gap or shot that cannot be read is NaN. Never hand this depth frames as
+    the picture: see PICTURE_READER for why.
+
+    `people`: "auto" asks Vision, None leaves everyone in, an [N, H, W] bool array is used as given
+    (at any size; it is resized to the tracking size).
+    """
+    import cv2
+
+    tracked = _track_gray(picture)
+    grid = analysis_gray(picture)
+    size = (tracked.shape[2], tracked.shape[1])
+    masks, how = None, "none"
+    if isinstance(people, str):
+        from depthc import people as peoplelib
+
+        found = peoplelib.find(picture, size=size) if people == "auto" else None
+        if found is not None:
+            masks, how = found.masks, "people"
+    elif people is not None:
+        masks = np.stack([
+            cv2.resize(np.asarray(m, dtype=np.uint8), size, interpolation=cv2.INTER_NEAREST) > 0 for m in people
+        ])
+        how = "people"
+    if masks is None and depth is not None and near in ("bright", "dark") and depth.shape[0] == picture.shape[0]:
+        masks, how = _near_masks(depth, size, near), "depth"
+    reading = _camera_reading_from(grid, tracked, fps, masks)
+    reading.mask = how
+    return reading
+
+
+def _near_masks(depth: np.ndarray, size: tuple[int, int], near: str) -> np.ndarray:
+    """[N, H, W] bool at `size` (width, height): the part of each depth frame nearer than DEPTH_FAR_QUANTILE."""
+    import cv2
+
+    out = []
+    for frame in depth:
+        grey = frame if frame.ndim == 2 else frame[..., 0]
+        grey = cv2.resize(grey, size, interpolation=cv2.INTER_AREA).astype(np.float32)
+        if near == "dark":
+            grey = 255.0 - grey
+        out.append(grey > float(np.quantile(grey, DEPTH_FAR_QUANTILE)))
+    return np.stack(out)
+
+
+def camera_path(picture: np.ndarray, fps: float = 24.0, **kwargs) -> np.ndarray:
+    """`camera_reading(...).path`: [gaps, 3] (dx, dy, radial) in grid px per frame, NaN = can't tell.
 
     The same figures and units as `FlowSeries.path`, so every word, bucket and tempo band built on
-    that reads this unchanged. What differs is where the votes come from. Points are tracked from
-    each frame to the next, the ones that do not move with the rest are dropped by a RANSAC
-    similarity fit, and the survivors vote by region through `_read_camera`, the same shift-and-
-    stretch reading the region reader uses. A gap with too little to track is read by
-    `flow_series` on the same picture. A gap where no single motion carries half the points names
-    no camera. Never hand this depth frames: see PICTURE_READER for why.
+    that reads this unchanged, once its NaN rows are left out. Never hand this depth frames.
     """
-    return _camera_path_from(analysis_gray(picture), _track_gray(picture), fps)
+    return camera_reading(picture, fps, **kwargs).path
 
 
 PICTURE_SLACK = 2  # frames: two decodes of one clip at the same fps can differ by a frame or two
@@ -596,21 +1021,27 @@ def camera_share_from(flow: FlowSeries) -> float:
     return round(float(camera.mean()) / total, 3) if total > 0 else 0.0
 
 
-def path_label(dx: float, dy: float, radial: float) -> str:
+def path_label(dx: float, dy: float, radial: float, radial_floor: float = PATH_RADIAL_STILL) -> str:
     """Name a mean camera path in camera terms, from the pixel motion it produced.
 
     Pixels moving RIGHT means the camera panned LEFT; pixels moving DOWN, a tilt UP;
     expansion, a push-in. Translation and radial are named independently ("pans left,
     pushes in"). Below the floors it is "static". This is a translation-and-zoom
-    vocabulary by construction — an orbit or a roll has no honest name here.
+    vocabulary by construction — an orbit or a roll has no honest name here. `radial_floor`
+    is the zoom the path's reader can resolve: PATH_RADIAL_SLOW for a picture path, whose zoom
+    is read across half a second (`MotionProfile.radial_floor` carries it). That lower floor
+    names a zoom only when nothing else moves: a pan or tilt past things at different distances
+    shows a small zoom of its own (seen on real pans: 0.01 to 0.05), so beside one a zoom still
+    has to clear PATH_RADIAL_STILL.
     """
     parts = []
-    if np.hypot(dx, dy) >= PATH_STILL:
+    moved = bool(np.hypot(dx, dy) >= PATH_STILL)
+    if moved:
         if abs(dx) >= abs(dy):
             parts.append("pans left" if dx > 0 else "pans right")
         else:
             parts.append("tilts up" if dy > 0 else "tilts down")
-    if abs(radial) >= PATH_RADIAL_STILL:
+    if abs(radial) >= (max(radial_floor, PATH_RADIAL_STILL) if moved else radial_floor):
         parts.append("pushes in" if radial > 0 else "pulls out")
     return ", ".join(parts) if parts else "static"
 
@@ -698,6 +1129,12 @@ class MotionProfile:
     # FlowSeries.path [gaps, 3] (dx, dy, radial) with zeros on static gaps.
     regions: np.ndarray | None = field(default=None, repr=False)
     path: np.ndarray | None = field(default=None, repr=False)
+    # The camera round (2026-11-11). A picture-read path has NaN rows where the camera could not
+    # be read, comes in shots split at the cuts, and names a zoom from a lower floor. None / the
+    # defaults = a path read the old way, which has none of the three.
+    shots: list[Shot] | None = field(default=None, repr=False)
+    radial_floor: float = PATH_RADIAL_STILL
+    camera_mask: str | None = None  # "people" | "depth" | "none": what was kept out of the fit
 
     # ------------------------------------------------------------------ scalars
     @property
@@ -843,19 +1280,52 @@ class MotionProfile:
             [self.regions[i:i + step].mean(axis=0) for i in range(0, n, step)]
         )
 
+    def _path_mean(self, rows: np.ndarray) -> dict | None:
+        """`path_word` at this profile's zoom floor: the one way a stretch of path is worded."""
+        return path_word(rows, self.radial_floor)
+
     @property
     def camera_path(self) -> dict | None:
-        """Mean camera path over the MOVING gaps: dx, dy, radial (grid px/frame) + label."""
+        """Mean camera path over the MOVING gaps: dx, dy, radial (grid px/frame) + label.
+
+        Never across a cut: on a clip with more than one shot it is the longest read shot's
+        (`main_shot`), and `camera_shots` gives every shot's. Averaged over the whole clip, a pan
+        left cut against a pan right came out as no move at all.
+
+        None when there is no path, and when no gap of it could be read (can't tell): either
+        way there is no camera word to give. `camera_shots` says which.
+        """
+        return self.camera_path_over()
+
+    def camera_path_over(self, gaps: int | None = None) -> dict | None:
+        """`camera_path` for the first `gaps` gaps of the path (all of it when None): that part
+        read as if the clip ended there, its shots cut short (`shots_cut_short`) and read by the
+        same gates and the same word as whole shots (ONE CAMERA). compare's PATH line over the
+        overlap; the kit's cameraPath is this over the whole path.
+        """
         if self.path is None or not self.path.size:
             return None
-        moving = np.any(self.path != 0, axis=1)
-        if not moving.any():
-            return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
-        dx, dy, radial = (float(v) for v in self.path[moving].mean(axis=0))
-        return {
-            "dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
-            "label": path_label(dx, dy, radial),
-        }
+        path = self.path if gaps is None else self.path[:max(0, gaps)]
+        if self.shots is None:
+            return self._path_mean(path) if path.size else None
+        shots = shots_cut_short(self.shots, self.path, self.fps, path.shape[0])
+        main = main_shot(shots)
+        return None if main is None else self._path_mean(path[shots[main].gaps])
+
+    @property
+    def camera_shots(self) -> list[dict] | None:
+        """Per shot: where it sits and the camera word read in it (None = can't tell)."""
+        if self.shots is None or self.path is None:
+            return None
+        out = []
+        for shot in self.shots:
+            mean = self._path_mean(self.path[shot.gaps]) if shot.read else None
+            out.append({
+                "startSeconds": round(shot.start / self.fps, 2),
+                "endSeconds": round(shot.end / self.fps, 2),
+                "label": mean["label"] if mean else None,
+            })
+        return out
 
     def as_dict(self) -> dict:
         dead = self.dead_stretch
@@ -873,6 +1343,9 @@ class MotionProfile:
             "spikeSeconds": self.spikes,
             "regionEnergy": self.region_energy,
             "cameraPath": self.camera_path,
+            # Only on a profile whose camera was read from the picture: the shots, each with its
+            # own camera word or null for "can't tell". A reader that predates it ignores it.
+            **({"cameraShots": self.camera_shots} if self.shots is not None else {}),
             # v2: aspect-preserving grid. Energy means agree with v1's fixed "160x90";
             # the flow-based cameraShare is the figure that may differ on non-16:9 kits.
             "grid": f"long-edge {GRID_LONG_EDGE} (aspect-preserving, v2)",
@@ -882,26 +1355,34 @@ class MotionProfile:
 
 def measure(
     frames: np.ndarray, fps: float, with_flow: bool = True, picture: np.ndarray | None = None,
+    near: str | None = "bright",
 ) -> MotionProfile:
     """Profile one clip. `with_flow=False` skips the optical-flow pass on very long clips.
 
     `picture` is the same clip as the eye sees it, frame for frame, when `frames` are its depth.
-    Given, the camera PATH is read from it (`camera_path`) and everything else, the camera share
-    included, still comes from `frames`. Without it the path is read from `frames` as before,
-    which is right only when `frames` are themselves a picture.
+    Given, the camera PATH is read from it (`camera_reading`) and everything else, the camera
+    share included, still comes from `frames`. Without it the path is read from `frames` as
+    before, which is right only when `frames` are themselves a picture.
+
+    When Vision cannot find the people, `frames` stand in as the depth that leaves the near part
+    out of the camera fit, unless `picture` IS `frames` (`describe --rgb`, no depth) or `near` is
+    None (a ref that is not a depth, the edges variant). `near` says which end is near: "bright"
+    as the model writes it, "dark" for an inverted depth.
     """
     if fps <= 0:
         raise ValueError("fps must be positive")
     deltas, changed, regions = frame_stats_regions(frames)
     flow = flow_series(frames, fps) if with_flow else None
     path = flow.path if flow is not None else None
+    reading = None
     if with_flow and picture is not None:
         if picture.shape[0] != frames.shape[0]:
             raise ValueError(
                 f"picture has {picture.shape[0]} frames and the clip {frames.shape[0]}: "
                 "they must be the same frames"
             )
-        path = camera_path(picture, fps)
+        reading = camera_reading(picture, fps, depth=None if picture is frames else frames, near=near)
+        path = reading.path
     return MotionProfile(
         fps=float(fps),
         deltas=deltas,
@@ -909,6 +1390,9 @@ def measure(
         camera=camera_share_from(flow) if flow is not None else None,
         regions=regions,
         path=path,
+        shots=reading.shots if reading is not None else None,
+        radial_floor=reading.radial_floor if reading is not None else PATH_RADIAL_STILL,
+        camera_mask=reading.mask if reading is not None else None,
     )
 
 
@@ -948,6 +1432,9 @@ class Window:
     cut: bool
     sharpness: float = 1.0
     balance: float = 1.0
+    # Share of this window's people samples with two or more people in frame (`scout_clip`, Apple
+    # Vision). None = not counted (no Vision here). Reported in the note; never in the score.
+    figures: float | None = None
 
     @property
     def seconds(self) -> float:
@@ -955,6 +1442,8 @@ class Window:
 
     def note(self) -> str:
         notes = []
+        if self.figures is not None and self.figures >= SECOND_FIGURE_SHARE:
+            notes.append(f"a second figure in {self.figures * 100:.0f}% of it")
         if self.cut:
             notes.append("contains a cut")
         if self.dead:
@@ -1003,11 +1492,14 @@ def score_windows(
 
     Counting subjects was tried and cut. Connected components on the frame difference splits a
     single body into limbs and edges: CLIP C's clean one-walker window measured 3-6 "movers"
-    against 3-5 for the crowded one, i.e. no signal at all. Doing it properly needs person
-    segmentation, which is a second model and a second licence.
+    against 3-5 for the crowded one, i.e. no signal at all. Since the camera round (2026-11-11)
+    `scout_clip` counts people with Apple Vision (`depthc.people`, an OS framework on macOS, no
+    weights) and each window's note says when a second figure is in it. The count WARNS; it does
+    not enter this score, and off macOS there is no count at all.
 
     So: LOOK AT sheet.png BEFORE FIRING. That is not a nicety, it is the step that catches the
-    one failure this scorer is structurally blind to.
+    one failure this scorer is structurally blind to, and the people count is only a person
+    count: a dog, a car or a flag is a second motion it cannot see.
     """
     if not profile.deltas.size or target_seconds <= 0:
         return []
@@ -1116,13 +1608,40 @@ class ScoutResult:
     scout_fps: float
     elapsed: float
     target_seconds: float
+    # People in frame, one count per SCOUT_PEOPLE_FPS sample (Apple Vision); None = not counted.
+    people: np.ndarray | None = field(default=None, repr=False)
+    people_fps: float = 0.0
 
     @property
     def best(self) -> Window | None:
         return self.windows[0] if self.windows else None
 
+    @property
+    def second_figure(self) -> float | None:
+        """Share of the people samples with two or more people in frame; None = not counted."""
+        if self.people is None or not self.people.size:
+            return None
+        return float((self.people >= 2).mean())
+
+    def figures_between(self, start: float, end: float) -> float | None:
+        """`second_figure` over one stretch of the clip, in seconds."""
+        if self.people is None or not self.people.size or self.people_fps <= 0:
+            return None
+        lo = max(0, int(np.floor(start * self.people_fps)))
+        hi = min(self.people.size, max(lo + 1, int(np.ceil(end * self.people_fps))))
+        piece = self.people[lo:hi]
+        return float((piece >= 2).mean()) if piece.size else None
+
 
 SCOUT_FPS = 12.0
+# The scout counts people twice a second: a figure walking in stays a second or more, and Vision
+# costs tens of milliseconds a frame, which at the scout's 12 fps would outweigh the depth pass.
+SCOUT_PEOPLE_FPS = 2.0
+# The scout warns when two or more people are in frame for at least this share of the samples,
+# over the clip or over one window.
+# ponytail: a tenth, by judgement: half a second of a five-second window is already a second motion
+# the generation may copy. A share weighted by the second figure's size or motion is the upgrade.
+SECOND_FIGURE_SHARE = 0.10
 SCOUT_LONG_EDGE = 384
 SCOUT_INPUT_SIZE = 196   # multiple of 14, as DINOv2 patching requires
 
@@ -1166,7 +1685,6 @@ def scout_clip(
     result = engine.infer(
         frames, scout_fps, input_size=input_size, precision="fp32", on_window=on_window
     )
-    elapsed = time.perf_counter() - started
 
     deltas, changed = frame_stats(result.frames)
     profile = MotionProfile(
@@ -1183,14 +1701,23 @@ def scout_clip(
     windows = score_windows(
         profile, target_seconds, sharpness=sharpness_series(frames)
     )
-    return ScoutResult(
+    from depthc import people as peoplelib
+
+    stride = max(1, int(round(scout_fps / SCOUT_PEOPLE_FPS)))
+    found = peoplelib.find(frames[::stride])
+    result = ScoutResult(
         profile=profile,
         windows=spread(windows),
         per_second=profile.buckets,
         scout_fps=scout_fps,
-        elapsed=elapsed,
+        elapsed=time.perf_counter() - started,
         target_seconds=target_seconds,
+        people=found.counts if found is not None else None,
+        people_fps=scout_fps / stride,
     )
+    for window in result.windows:
+        window.figures = result.figures_between(window.start, window.end)
+    return result
 
 
 # ---------------------------------------------------------------------- ref variants

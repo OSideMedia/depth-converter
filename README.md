@@ -96,7 +96,8 @@ bash scripts/setup.sh
 ```
 
 Everything lands inside the project folder: a pinned `uv` in `.tools/`, Python and the
-locked dependencies in `.venv/`, Video Depth Anything at a pinned commit in `vendor/`, and the
+locked dependencies in `.venv/` (on macOS these include PyObjC's Vision bindings, MIT, which the
+camera reader uses to find people; Vision is part of macOS, so no model weights come with it), Video Depth Anything at a pinned commit in `vendor/`, and the
 116 MB checkpoint in `checkpoints/`, verified against its SHA-256. Deleting the folder undoes it,
 apart from the Python build and download cache `uv` keeps in your home folder (`~/.local/share/uv`
 and `~/.cache/uv`). Always run through `./.tools/uv`.
@@ -196,6 +197,10 @@ scored: motion blur is what talked us out of the right window in the first place
 motion a window carries and cannot see how many separate things are moving, so a second figure
 walking into frame reads as more signal rather than as the competing signal it is. On one
 walk-in clip the top-ranked window was exactly the stretch a human had cut away for that reason.
+On macOS the scout also counts the people in frame twice a second (Apple Vision) and says so when
+two or more are in frame for a tenth of the clip or more, with a note on each window that has one.
+The count warns and never changes the ranking. It counts people only, so a dog, a car or a flag is
+still yours to spot on `sheet.png`.
 
 ### The web UI and desktop apps: secondary
 
@@ -394,7 +399,11 @@ ref's energy actually sits, and runs the same check against the horizontally *mi
 generation: when the mirror wins clearly, the report says `MIRRORED — moves the other way`.
 **PATH** names the camera move on both sides in camera terms (`pans left, pushes
 in`) and, when the ref is a camera-path ref, scores direction agreement as a cosine; on a body
-ref it is named but not judged. Neither moves the suggested verdict: no measured fire has been
+ref it is named but not judged. Both sides are named over the overlap only, the stretch being
+compared: a reference longer than the take is read as if it ended where the take does, so its
+word can differ from the kit's `cameraPath` for the whole clip, and a stretch under a quarter of
+a second is `can't tell`. The cosine needs a whole half-second on both sides and shows `—`
+without one; the words do not. Neither moves the suggested verdict: no measured fire has been
 scored on them yet, so they inform your read. `--no-regions` and `--no-camera-path` switch them
 off. The camera reader was scored against a known Blender camera on clay, and then on real
 footage, where it failed: reading the depth picture, it named 9 of 12 clean moves and invented a
@@ -402,7 +411,12 @@ move on 4 of 5 locked-off shots with people or a train passing through. Since th
 read from the picture instead (the kit's `source.mp4` on the reference side), with whatever moves
 on its own dropped first. That reader was scored on 40 clips it had never seen and failed too: 7 of 10
 clear moves named, and a move invented on 2 of 7 locked-off shots, both with a subject filling the
-frame. On phone-on-a-stand dance videos it named a move on 7 of 11 windows. Treat the camera words as a hint to check by eye,
+frame. On phone-on-a-stand dance videos it named a move on 7 of 11 windows. Since then (the camera
+round, 2026-11-11) it splits a clip at its cuts and reads each shot on its own, leaves people out
+of the fit (Apple Vision on macOS; without it, the nearer half of the depth), says `can't tell` for
+a shot or half-second it cannot read instead of guessing, and reads a slow zoom across half a
+second. That round was built on clips the reader had already seen, so it has **no score yet**.
+Treat the camera words as a hint to check by eye,
 most of all when they name a move on a shot that looks still. The scores and the method are in
 [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md).
 
@@ -427,12 +441,18 @@ the energy shape. So "did it follow the prompt's direction?" becomes: read the p
 do they agree. `--json` for a machine-readable block. Description only: it cannot tell whether
 the moving thing is the one the prompt named, which stays a by-eye call. The radial push/pull term
 is recorded only when all four quadrants of the frame agree, so a subject walking toward the lens
-is not booked as a camera move.
+is not booked as a camera move. A clip with cuts is described shot by shot (`Shots: 3, cut at
+2.1s, 4.5s`), and a stretch whose camera could not be read says `can't tell`, never `locked off`;
+`--json` lists both (`shots`, `cameraUnread`). Each shot's camera is read once, and every camera
+word follows that read: the times only say when, so a shot read as moving always has its move
+named and a shot read as still has none. A pan and its return inside one shot cancel in that
+read, so such a shot reads `locked off`.
 
 The camera words are the least reliable part. They are read from the picture, on the depth path
 and with `--rgb` alike. Read from the depth, as they were until 2026-11-11, they invented moves
 on locked-off shots with people passing and missed slow push-ins; the picture read failed its own
-score on unseen footage (7 of 10 moves, a move invented on 2 of 7 locked-off shots), so check
+score on unseen footage (7 of 10 moves, a move invented on 2 of 7 locked-off shots), and the
+changes made since (cuts, people, can't tell, slow zooms) have not been scored, so check
 them against the picture
 (see [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md)).
 

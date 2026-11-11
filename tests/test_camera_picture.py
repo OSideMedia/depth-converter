@@ -43,16 +43,21 @@ def walkers(frames: int = FRAMES, speed: int = 3) -> tuple[np.ndarray, np.ndarra
     return picture, depth
 
 
-def words(path: np.ndarray) -> str:
-    """The move a path names over its moving gaps, the way MotionProfile.camera_path words it."""
-    moving = np.any(path != 0, axis=1)
+def words(path: np.ndarray, radial_floor: float = m.PATH_RADIAL_STILL) -> str:
+    """The move a path names over its moving gaps, the way MotionProfile.camera_path words it.
+    NaN rows are "can't tell" and count toward nothing; a path of nothing else names nothing."""
+    finite = np.isfinite(path).all(axis=1)
+    if not finite.any():
+        return "can't tell"
+    moving = finite & np.any(np.nan_to_num(path) != 0, axis=1)
     if not moving.any():
         return "static"
-    return m.path_label(*(float(v) for v in path[moving].mean(axis=0)))
+    return m.path_label(*(float(v) for v in path[moving].mean(axis=0)), radial_floor=radial_floor)
 
 
 def moving_share(path: np.ndarray) -> float:
-    return float(np.any(path != 0, axis=1).mean())
+    """Share of the gaps read as moving; a NaN (can't tell) gap is not one."""
+    return float((np.isfinite(path).all(axis=1) & np.any(np.nan_to_num(path) != 0, axis=1)).mean())
 
 
 def zooming(rate: float, frames: int = FRAMES) -> np.ndarray:

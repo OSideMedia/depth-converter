@@ -327,7 +327,7 @@ def _compare_reference_call(kit_dir, clip, monkeypatch):
     real_measure = motionlib.measure
 
     def measure(frames, fps, **kwargs):
-        seen["frames"], seen["picture"] = frames.shape[0], kwargs.get("picture")
+        seen["frames"], seen["picture"], seen["near"] = frames.shape[0], kwargs.get("picture"), kwargs.get("near")
         return real_measure(frames, fps, **kwargs)
 
     def depth_pass(*_a, **_k):
@@ -363,6 +363,8 @@ def test_compare_reads_the_reference_camera_from_the_kits_own_picture(clip_tiny,
     assert seen["picture"] is not None, _text(seen["result"])
     assert seen["picture"].shape[0] == seen["frames"] and seen["picture"].shape[-1] == 3
     assert "read from the depth picture" not in _text(seen["result"])
+    # and is told which end of the ref is near, for when Vision cannot find the people
+    assert seen["near"] == "bright"
 
 
 def test_compare_says_so_when_a_kit_has_no_picture_to_read_the_camera_from(clip_tiny, tmp_path, monkeypatch):

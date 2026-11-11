@@ -359,14 +359,14 @@ def similarity_path(frames: np.ndarray, fps: float = 24.0) -> np.ndarray:
     return path
 
 
-def estimate(kit: Path, which: str) -> np.ndarray:
+def estimate(kit: Path, which: str) -> "np.ndarray | motion.CameraReading":
     from depthc.video_io import probe, read_frames, target_size
 
     reader = textured_path if which.endswith("-tex") else similarity_path if which.endswith("-sim") else None
     which = which.removesuffix("-tex").removesuffix("-sim")
     if which == "pic":
         info = probe(kit / "blockout.mp4")
-        return motion.camera_path(read_frames(info, fps=24.0, size=target_size(info, "480p")), 24.0)
+        return motion.camera_reading(read_frames(info, fps=24.0, size=target_size(info, "480p")), 24.0)
     if which == "rgb":
         info = probe(kit / "blockout.mp4")
         frames = read_frames(info, fps=24.0, size=target_size(info, "480p"))
@@ -411,12 +411,26 @@ def run_case(name: str, estimators: list[str], rebuild: bool) -> dict:
         # the old one left here. Earlier estimates stay on disk under their own names.
         version = motion.PICTURE_READER if which == "pic" else motion.PATH_READER
         cached = case_dir / f"est-{which}-{kit.name}-{version}.npy"
+        # The picture reader's shots ride beside its path, so its buckets are cut the way
+        # `describe` and `compare` cut them: never across a cut (`motion.bucket_rows`).
+        shots_file = cached.with_suffix(".shots.json")
+        shots = None
         if cached.exists():
             path = np.load(cached)
+            if shots_file.exists():
+                shots = [motion.Shot(**s) for s in json.loads(shots_file.read_text())]
         else:
-            path = estimate(kit, which)
+            got = estimate(kit, which)
+            if isinstance(got, motion.CameraReading):
+                path, shots = got.path, got.shots
+                shots_file.write_text(json.dumps([vars(s) for s in shots]))
+            else:
+                path = got
             np.save(cached, path)
-        est_buckets = path_buckets(path, 24.0)
+        # The picture reader names a zoom from its own floor (it reads the zoom across half a
+        # second); every other reader from the region reader's.
+        floor = motion.PATH_RADIAL_SLOW if which == "pic" else motion.PATH_RADIAL_STILL
+        est_buckets = path_buckets(path, 24.0, radial_floor=floor, shots=shots)
         score = calibrate.score_buckets(truth_buckets, est_buckets)
         score["said"] = _runs(est_buckets)
         row["estimators"][which] = score
@@ -451,13 +465,14 @@ def report(rows: list[dict], estimators: list[str]) -> str:
         exact = [f"{r['estimators'][e]['exact']}/{r['estimators'][e]['buckets']}" for e in estimators]
         said = [r["estimators"][e]["said"] for e in estimators]
         lines.append(f"| {r['case']} | {r['truth']} | " + " | ".join(exact) + " | " + " | ".join(said) + " |")
-    lines += ["", "| estimator | exact | translation right | radial right | missed motion | false motion | speed ratio (median of medians) |",
-              "|---|---|---|---|---|---|---|"]
+    lines += ["", "| estimator | exact | translation right | radial right | missed motion | false motion | can't tell | speed ratio (median of medians) |",
+              "|---|---|---|---|---|---|---|---|"]
     for e in estimators:
-        tot = {k: sum(r["estimators"][e][k] for r in rows) for k in ("buckets", "exact", "translation", "radial", "missedMotion", "falseMotion")}
+        tot = {k: sum(r["estimators"][e][k] for r in rows)
+               for k in ("buckets", "exact", "translation", "radial", "missedMotion", "falseMotion", "unread")}
         ratios = [r["estimators"][e]["speedRatioMedian"] for r in rows if r["estimators"][e]["speedRatioMedian"] is not None]
         lines.append(f"| {e} | {tot['exact']}/{tot['buckets']} | {tot['translation']}/{tot['buckets']} | "
-                     f"{tot['radial']}/{tot['buckets']} | {tot['missedMotion']} | {tot['falseMotion']} | "
+                     f"{tot['radial']}/{tot['buckets']} | {tot['missedMotion']} | {tot['falseMotion']} | {tot['unread']} | "
                      f"{round(float(np.median(ratios)), 3) if ratios else '—'} |")
     lines += ["", "## Every bucket that missed", "",
               "Vectors are (dx, dy, radial) in grid px/frame, mean over the bucket's moving gaps.", "",

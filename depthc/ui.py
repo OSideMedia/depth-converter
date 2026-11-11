@@ -345,7 +345,9 @@ def _convert(
         # gate must not depend on which surface produced the kit.
         from depthc import motion as motionlib
 
-        depth_motion = motionlib.measure(result.frames, result.fps, picture=frames)
+        depth_motion = motionlib.measure(
+            result.frames, result.fps, picture=frames, near="dark" if result.inverted else "bright",
+        )
         source_motion = motionlib.measure(frames, result.fps, with_flow=False)
         motionlib.contact_sheet(result.frames, result.fps, paths.sheet)
 

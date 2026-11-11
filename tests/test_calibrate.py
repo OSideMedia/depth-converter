@@ -201,3 +201,17 @@ def test_label_parts_and_scoring():
     assert (s["exact"], s["translation"], s["radial"]) == (0, 1, 1)
     assert s["falseMotion"] == 1 and s["missedMotion"] == 0
     assert s["speedRatioMedian"] == pytest.approx(1.2)
+
+
+def test_cant_tell_is_counted_on_its_own_never_as_a_word():
+    """An unread bucket against a true pan is not a pan named, and against a held shot it is not a
+    move invented: scored as a word it gave missedMotion 0 and falseMotion 1."""
+    from depthc.describe import UNREAD
+
+    truth = [("pans left", 1.0, (1.0, 0.0, 0.0)), ("static", 0.0, (0.0, 0.0, 0.0)), ("pushes in", 0.2, (0.0, 0.0, 0.2))]
+    est = [(UNREAD, 0.0, (0.0, 0.0, 0.0))] * 3
+    s = calibrate.score_buckets(truth, est)
+    assert s["unread"] == 3
+    assert (s["exact"], s["translation"], s["radial"]) == (0, 0, 0)
+    assert s["missedMotion"] == 0 and s["falseMotion"] == 0
+    assert s["speedRatioMedian"] is None

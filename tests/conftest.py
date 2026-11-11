@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from depthc import memory, vendor_path
+from depthc import memory, people, vendor_path
 
 
 def vendor_present() -> bool:
@@ -45,6 +45,13 @@ def pytest_collection_modifyitems(config, items):
     checkout from `git archive` before the workflow was ever pushed: three `vendor` tests
     were failing that the `slow` marker alone did not cover.
     """
+    if not people.available():
+        # Positive evidence too: `available` imports the framework and asks it for the request.
+        for item in items:
+            if item.get_closest_marker("vision"):
+                item.add_marker(pytest.mark.skip(
+                    reason="needs Apple Vision (macOS 14+, pyobjc-framework-vision) — labelled "
+                           "self-skip, see tests/conftest.py"))
     have_vendor, have_ckpt = vendor_present(), checkpoint_present()
     if have_vendor and have_ckpt:
         return
@@ -68,6 +75,19 @@ def pytest_runtest_setup(item):
         refusal = memory.plan((72, 240, 320, 3), 518).refusal
         if refusal:
             pytest.skip(f"too busy for a real-model test right now: {refusal.splitlines()[0]}")
+
+
+@pytest.fixture(autouse=True)
+def vision_only_when_asked(request, monkeypatch):
+    """Apple Vision is off in every test not marked `vision`.
+
+    CI runs ubuntu, where there is no Vision, and a Mac has it: left on, the same test would read a
+    clip with people masked on one machine and without on the other. So the suite reads every clip
+    the way CI does, and the tests that are ABOUT Vision ask for it by marker (they skip off macOS
+    with a reason that names itself). Tests that need a person mask hand one in (`people=`).
+    """
+    if not request.node.get_closest_marker("vision"):
+        monkeypatch.setattr(people, "available", lambda: False)
 
 
 @pytest.fixture(autouse=True)
