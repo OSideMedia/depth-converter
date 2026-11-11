@@ -240,12 +240,18 @@ Phase 5 (automating the attach) is still deferred, but Phase 4 has now passed.
 - A default depth pass (8 s of 720p) peaks near 7.3 GB, and `ps` will not show it: GPU memory is not in RSS. Read
   `top -l 1 -pid <pid> -stats mem`. The backbone's grouping (`engine.bound_memory`) is what holds
   it there, and `memory.py` refuses a pass the machine cannot spare. While a pass runs,
-  `memory.Watch` reads what is free at the settle points `bound_memory` installs and stops the pass in
-  plain words when it stays under the floor (`engine.watching`). Anything that builds the model
+  `memory.Watch` reads what is free from its own thread every half second (`engine.watching`, first
+  window to the end of `normalize`). The thread never stops anything: the pass stops itself, in plain
+  words, at its stop points (`engine._stop_if_told`): the settle points `bound_memory` installs, each
+  window's end, and after the last window upstream's two alignment helpers and its `np.stack`, which
+  `engine._tail_hook` rebinds in their module the way the window hook rebinds `tqdm`, then between
+  the steps of `normalize`. A stop never lands inside one numpy call. Anything that builds the model
   outside `load_model` needs the same three things, `bound_memory`, `limit_gpu` and `watching`, as
   `smoke.py` has them. A good pass's free memory swings by GBs between half-second readings, so the
   floor counts readings in a row; the measured table is beside it in `memory.py`. On a long clip or at
   a small `--input-size` the peak is at the end of the pass and on the CPU side, where upstream holds
-  several copies of the depth, so a smaller `--input-size` stops helping. A memory test runs one clip
-  at a time, under a kill switch below what is free.
+  several copies of the depth, so a smaller `--input-size` stops helping. On the 30 s 1280 x 534 pass
+  timed by phase (default size) that end took 1.9 s, free memory was lowest while the windows ran, and the
+  process's own peak came after the pass, in the command's own work, which the watch does not cover.
+  A memory test runs one clip at a time, under a kill switch below what is free.
 - `pytest` is scoped to `tests/`; upstream ships a CUDA-only test file that errors on import.

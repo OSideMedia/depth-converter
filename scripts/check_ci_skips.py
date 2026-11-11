@@ -22,7 +22,7 @@ from pathlib import Path
 # markers, on machines that skip none of them.
 EXPECTED = {
     "real-model test, no VDA assets": 11,
-    "needs the vendored VDA checkout": 3,
+    "needs the vendored VDA checkout": 4,
     "no OSIDE checkout beside this repo": 1,
 }
 

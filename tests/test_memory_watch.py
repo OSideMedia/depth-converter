@@ -1,14 +1,18 @@
 """The watch on a running depth pass: a machine that runs out partway stops the pass in plain words.
 
 No model and no real memory reading. A fake sampler says what is free, and a stand-in model runs
-its windows through the same settle points `engine.bound_memory` installs on the real one.
+its windows through the same settle points `engine.bound_memory` installs on the real one, then
+does what upstream does after its last window: the alignment and the stack.
 """
 
 from __future__ import annotations
 
 import sys
+import threading
+import time
 import types
 import weakref
+from typing import Callable
 
 import numpy as np
 import pytest
@@ -20,8 +24,10 @@ from depthc import cli, engine, memory
 GB = memory.GB
 LOW = int(0.1 * GB)  # far under any floor
 PLENTY = 12 * GB
-# Where a stand-in window settles: once per backbone group, then once per temporal stage.
-SETTLES_PER_WINDOW = engine.INFER_LEN // engine.BACKBONE_FRAMES + 4
+# Where a stand-in pass can stop in each window: once per backbone group, once per temporal stage,
+# and once the window is done.
+STOPS_PER_WINDOW = engine.INFER_LEN // engine.BACKBONE_FRAMES + 4 + 1
+WATCH_THREAD = "depthc-memory-watch"
 runner = CliRunner()
 
 
@@ -36,23 +42,19 @@ class Sampler:
         return PLENTY if self.calls <= self.before else self.after
 
 
-class Clock:
-    def __init__(self):
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 def _watch(readings: list[int | None]) -> list[str | None]:
-    """A watch fed these readings, one full interval apart."""
-    clock, feed = Clock(), iter(readings)
-    watch = memory.Watch(read=lambda: next(feed), clock=clock)
+    """A watch fed these readings one at a time, as its thread would, and asked after each."""
+    feed = iter(readings)
+    watch = memory.Watch(read=lambda: next(feed))
     said = []
     for _ in readings:
+        watch.reading()
         said.append(watch.check())
-        clock.now += memory.WATCH_EVERY
     return said
+
+
+def _watch_threads() -> list[threading.Thread]:
+    return [t for t in threading.enumerate() if t.name == WATCH_THREAD]
 
 
 # ------------------------------------------------------------------ the watch alone
@@ -72,14 +74,25 @@ def test_a_dip_that_recovers_never_stops_a_good_pass():
     assert _watch(dips) == [None] * len(dips)
 
 
-def test_it_reads_no_more_often_than_its_interval():
-    """Each reading starts `vm_stat`, and a pass settles a dozen times a window."""
-    clock, reads = Clock(), []
-    watch = memory.Watch(read=lambda: reads.append(clock.now) or PLENTY, clock=clock)
-    for now in (0.0, 0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2):
-        clock.now = now
-        watch.check()
-    assert reads == [0.0, 0.6, 1.2]
+def test_once_the_floor_has_held_the_stop_stands_until_the_pass_gets_to_it():
+    """The thread reads on between two stop points. A reading back over the floor in that gap must
+    not take back a stop the pass has not reached yet."""
+    under = memory.WATCH_FLOOR - 1
+    said = _watch([under] * memory.WATCH_READINGS + [PLENTY, PLENTY])
+    assert said[-1] is not None and said[-1] == said[memory.WATCH_READINGS - 1]
+
+
+def test_it_reads_once_every_interval():
+    """Each reading starts `vm_stat`, so it reads no more often than its interval."""
+    reads, waits = [], []
+    watch = memory.Watch(read=lambda: reads.append(1) or PLENTY)
+
+    def wait(seconds: float) -> bool:  # stands in for the thread's wait; `close` ends the third
+        waits.append(seconds)
+        return len(waits) == 3
+
+    watch._sample(wait)
+    assert len(reads) == 3 and waits == [memory.WATCH_EVERY] * 3
     assert memory.WATCH_EVERY == 0.5
 
 
@@ -91,6 +104,19 @@ def test_a_mac_that_stops_answering_partway_is_stopped_not_waved_through(monkeyp
     assert said[-1] is not None and "stopped reporting" in said[-1]
     # One failed reading between good ones is a hiccup, not a stall.
     assert _watch([None, PLENTY] * 5) == [None] * 10
+
+
+def test_a_reading_that_blows_up_is_a_failed_reading_not_a_dead_watch(monkeypatch):
+    """The thread must not die on an error and leave the rest of the pass unwatched."""
+    monkeypatch.setattr(memory, "_MAC", True)
+
+    def broken() -> int:
+        raise ValueError("vm_stat said something new")
+
+    watch = memory.Watch(read=broken)
+    for _ in range(memory.WATCH_READINGS):
+        watch.reading()
+    assert watch.check() is not None and "stopped reporting" in watch.check()
 
 
 def test_off_the_mac_there_is_nothing_to_read_so_the_watch_stands_down(monkeypatch):
@@ -120,6 +146,31 @@ def test_the_floor_sits_under_what_the_check_before_a_pass_keeps_free():
     assert 0 < memory.WATCH_FLOOR < memory._KEEP_FREE
 
 
+def test_its_thread_reads_on_while_the_pass_sits_in_one_long_call(monkeypatch):
+    """Inside one numpy call the pass never comes back to Python, so only a thread can read there."""
+    monkeypatch.setattr(memory, "WATCH_EVERY", 0.01)
+    sampler, settled = Sampler(before=0), threading.Event()
+
+    def read() -> int | None:
+        value = sampler()
+        if sampler.calls > memory.WATCH_READINGS:  # the third has been counted by now
+            settled.set()
+        return value
+
+    watch = memory.Watch(read=read)
+    watch.start()
+    try:
+        # This thread waits without coming back to Python, as it does inside one numpy call.
+        assert settled.wait(timeout=10), "nothing was read while the pass sat in one call"
+        assert watch.check() is not None
+    finally:
+        watch.close()
+    taken = sampler.calls
+    time.sleep(0.1)
+    assert sampler.calls == taken, "it went on reading after the pass had ended"
+    assert not _watch_threads()
+
+
 # ------------------------------------------------------------------ inside a pass
 
 class _Held:
@@ -139,16 +190,23 @@ class _Head(torch.nn.Module):
 
 
 class StandIn(torch.nn.Module):
-    """Runs windows the way upstream does: the backbone a group at a time, then the temporal stages."""
+    """Runs a pass the way upstream does: each window's backbone a group at a time, then its temporal
+    stages. After the last window it aligns each window's depth to the last with upstream's two
+    helpers and stacks the result with its module's `np`, the names the real one calls there."""
 
     def __init__(self, **_):
         super().__init__()
         self.pretrained, self.head = _Backbone(), _Head()
-        self.windows = 0
+        self.started = self.windows = 0
         self.sizes: list[int] = []
         self.held: weakref.ref | None = None
+        self.phase = "windows"
+        self.aligned = 0
+        self.stacked: weakref.ref | None = None
+        self.long_call: Callable[[], object] = lambda: None  # a test's one long call, after the windows
 
     def forward(self, x):  # one window, which is all smoke runs
+        self.started += 1
         self.pretrained.get_intermediate_layers(x.flatten(0, 1), [0], return_class_token=True)
         for stage in self.head.motion_modules:
             stage(x)
@@ -159,18 +217,36 @@ class StandIn(torch.nn.Module):
         import video_depth_anything.video_depth as vda
 
         self.sizes.append(input_size)
+        self.phase, self.aligned, self.stacked = "windows", 0, None
         held = _Held()
         self.held = weakref.ref(held)
+        depth = []
         for _ in vda.tqdm(range(0, frames.shape[0], engine.INFER_LEN - engine.OVERLAP)):
             self.forward(torch.zeros(1, engine.INFER_LEN, 3, 2, 2))
-        return np.random.rand(*frames.shape[:3]).astype(np.float32), fps
+            depth.append(np.random.rand(engine.INFER_LEN, *frames.shape[1:3]).astype(np.float32))
+
+        self.phase = "tail"
+        self.long_call()
+        aligned = list(depth[0])
+        for window in depth[1:]:
+            scale, shift = vda.compute_scale_and_shift(window, window, None)
+            self.aligned += 1
+            aligned[-1:] = vda.get_interpolate_frames(aligned[-1:], [window[engine.OVERLAP - 1] * scale + shift])
+            self.aligned += 1
+            aligned += list(window[engine.OVERLAP:])
+        stacked = vda.np.stack(aligned[: frames.shape[0]], axis=0)
+        self.stacked = weakref.ref(stacked)
+        self.phase = "stacked"
+        return stacked, fps
 
 
-@pytest.fixture
-def stand_in(monkeypatch):
+def _stand_in(monkeypatch) -> StandIn:
     """The model every pass gets, wrapped by the real `bound_memory`, behind a stand-in vendor module."""
     vda = types.ModuleType("video_depth_anything.video_depth")
     vda.tqdm = lambda iterable, *_a, **_k: iterable
+    vda.compute_scale_and_shift = lambda *_a: (1.0, 0.0)
+    vda.get_interpolate_frames = lambda pre, post: post
+    vda.np = np
     vda.VideoDepthAnything = StandIn  # what smoke builds
     monkeypatch.setitem(sys.modules, "video_depth_anything", types.ModuleType("video_depth_anything"))
     monkeypatch.setitem(sys.modules, "video_depth_anything.video_depth", vda)
@@ -178,13 +254,37 @@ def stand_in(monkeypatch):
     model = StandIn()
     engine.bound_memory(model, "cpu")
     monkeypatch.setattr(engine, "load_model", lambda device=None: (model, "cpu"))
-    monkeypatch.setattr(memory, "WATCH_EVERY", 0.0)  # every settle reads; time is tested above
     monkeypatch.setenv(memory.OVERRIDE_ENV, "20")  # let in before the pass, without a reading
     return model
 
 
-def test_memory_falling_partway_stops_the_pass_at_the_next_settle(stand_in, monkeypatch):
-    sampler = Sampler(before=2 * SETTLES_PER_WINDOW)
+@pytest.fixture
+def stand_in(monkeypatch):
+    """The stand-in, with the watch's thread swapped for one reading at each stop point, as though half
+    a second passed between any two, so a test can say exactly where a pass stops. The thread itself
+    is tested above and by `threaded` below."""
+    model = _stand_in(monkeypatch)
+    check = memory.Watch.check
+
+    def read_then_check(self):
+        self.reading()
+        return check(self)
+
+    monkeypatch.setattr(memory.Watch, "start", lambda self: None)
+    monkeypatch.setattr(memory.Watch, "check", read_then_check)
+    return model
+
+
+@pytest.fixture
+def threaded(monkeypatch):
+    """The stand-in, with the watch's own thread reading every hundredth of a second."""
+    model = _stand_in(monkeypatch)
+    monkeypatch.setattr(memory, "WATCH_EVERY", 0.01)
+    return model
+
+
+def test_memory_falling_partway_stops_the_pass_at_the_next_stop_point(stand_in, monkeypatch):
+    sampler = Sampler(before=2 * STOPS_PER_WINDOW)
     monkeypatch.setattr(memory, "available_bytes", sampler)
     frames = np.zeros((110, 8, 8, 3), np.uint8)  # five windows
 
@@ -192,13 +292,81 @@ def test_memory_falling_partway_stops_the_pass_at_the_next_settle(stand_in, monk
         engine.infer(frames, 24.0)
 
     assert stand_in.windows == 2, "the pass ran on past the stop"
-    assert sampler.calls == 2 * SETTLES_PER_WINDOW + memory.WATCH_READINGS
+    assert sampler.calls == 2 * STOPS_PER_WINDOW + memory.WATCH_READINGS
     assert engine.STOPPED_AT_LIMIT not in str(caught.value)
     assert stand_in.sizes == [518], "a stopped pass must not be run again, at any size"
 
 
+def test_the_end_of_each_window_is_a_stop_point_too(stand_in, monkeypatch):
+    """Once a window's depth is back on the CPU, before the next window or the alignment begins."""
+    monkeypatch.setattr(memory, "available_bytes", Sampler(before=STOPS_PER_WINDOW - memory.WATCH_READINGS))
+    with pytest.raises(engine.NotEnoughMemory, match="stopped partway"):
+        engine.infer(np.zeros((48, 8, 8, 3), np.uint8), 24.0)
+    assert stand_in.windows == 1 and stand_in.started == 1, "the next window began after the floor had held"
+
+
+def test_memory_falling_after_the_last_window_stops_the_pass_in_the_alignment(stand_in, monkeypatch):
+    """On a long clip the alignment and the stack are the CPU-side peak, and no GPU work settles there."""
+    monkeypatch.setattr(memory, "available_bytes", lambda: LOW if stand_in.phase == "tail" else PLENTY)
+    frames = np.zeros((110, 8, 8, 3), np.uint8)  # five windows
+
+    with pytest.raises(engine.NotEnoughMemory, match="stopped partway"):
+        engine.infer(frames, 24.0)
+
+    assert stand_in.windows == 5, "it stopped before the windows were done"
+    assert stand_in.aligned == memory.WATCH_READINGS - 1, "it did not stop at the alignment's stop points"
+    assert stand_in.stacked is None, "the whole clip was stacked after the floor had held"
+    assert sys.modules["video_depth_anything.video_depth"].np is np, "upstream's module was left rebound"
+
+
+def test_memory_falling_after_the_stack_stops_the_pass_and_lets_go_of_the_depth(stand_in, monkeypatch):
+    """The stack and `normalize` hold the clip's depth more than once. A stop there frees it all."""
+    monkeypatch.setattr(memory, "available_bytes", lambda: LOW if stand_in.phase == "stacked" else PLENTY)
+    still_held: list[bool] = []
+    real_settle = engine._settle
+
+    def settle(device: str) -> None:
+        still_held.append(stand_in.stacked is not None and stand_in.stacked() is not None)
+        real_settle(device)
+
+    monkeypatch.setattr(engine, "_settle", settle)
+    with pytest.raises(engine.NotEnoughMemory, match="stopped partway") as caught:
+        engine.infer(np.zeros((48, 8, 8, 3), np.uint8), 24.0)
+
+    assert stand_in.stacked is not None, "it stopped before the stack, not after it"
+    assert stand_in.stacked() is None, "the clip's depth is still held after the stop"
+    assert still_held[-1] is False, "the GPU was handed back while the depth was still held"
+    assert caught.value.__context__ is None and caught.value.__cause__ is None
+
+
+def test_a_long_call_after_the_last_window_is_read_through_and_the_pass_stops_right_after(
+    threaded, monkeypatch
+):
+    """The real thread this time. While the pass sits in one call that never comes back to Python,
+    as it does in a numpy call over the whole clip, the watch reads on; the next stop point stops it."""
+    settled, sampler = threading.Event(), Sampler(before=0)
+
+    def read() -> int | None:
+        if threaded.phase != "tail":
+            return PLENTY
+        value = sampler()
+        if sampler.calls > memory.WATCH_READINGS:  # the third has been counted by now
+            settled.set()
+        return value
+
+    monkeypatch.setattr(memory, "available_bytes", read)
+    threaded.long_call = lambda: settled.wait(timeout=5)
+
+    with pytest.raises(engine.NotEnoughMemory, match="stopped partway"):
+        engine.infer(np.zeros((110, 8, 8, 3), np.uint8), 24.0)
+
+    assert settled.is_set(), "nothing was read while the pass sat in one long call"
+    assert threaded.aligned == 0, "the pass went on past the first stop point after the call"
+    assert not _watch_threads(), "the watch outlived its pass"
+
+
 def test_the_override_does_not_let_a_pass_run_the_machine_out(stand_in, monkeypatch):
-    """The stand-in fixture sets DEPTHC_MEMORY_GB, so the test above already runs under it. Said
+    """The stand-in fixture sets DEPTHC_MEMORY_GB, so the tests above already run under it. Said
     here on its own so a change to that fixture cannot quietly drop the case."""
     import os
 
@@ -210,7 +378,7 @@ def test_the_override_does_not_let_a_pass_run_the_machine_out(stand_in, monkeypa
 
 def test_a_mac_that_stops_answering_partway_stops_the_pass(stand_in, monkeypatch):
     monkeypatch.setattr(memory, "_MAC", True)
-    monkeypatch.setattr(memory, "available_bytes", Sampler(before=SETTLES_PER_WINDOW, after=None))
+    monkeypatch.setattr(memory, "available_bytes", Sampler(before=STOPS_PER_WINDOW, after=None))
     with pytest.raises(engine.NotEnoughMemory, match="stopped reporting"):
         engine.infer(np.zeros((110, 8, 8, 3), np.uint8), 24.0)
     assert stand_in.windows == 1
@@ -238,16 +406,21 @@ def test_the_stop_lets_go_of_the_stopped_window_before_the_gpu_is_handed_back(st
 
 def test_each_pass_counts_from_zero(stand_in, monkeypatch):
     """A watch left over from the last pass would stop the next one on its first dip."""
+    frames = np.zeros((10, 8, 8, 3), np.uint8)  # one window each
+    counting = Sampler(before=10**6)
+    monkeypatch.setattr(memory, "available_bytes", counting)
+    engine.infer(frames, 24.0)
+    stops = counting.calls  # the stop points in one such pass, each read once here
+
     under = memory.WATCH_FLOOR - 1
     almost = [under] * (memory.WATCH_READINGS - 1)  # one short of a stop
-    first = [PLENTY] * (SETTLES_PER_WINDOW - len(almost)) + almost  # ends on the near miss
-    second = [under] + [PLENTY] * (SETTLES_PER_WINDOW - 1)  # opens on one more dip
+    first = [PLENTY] * (stops - len(almost)) + almost  # ends on the near miss
+    second = [under] + [PLENTY] * (stops - 1)  # opens on one more dip
     readings = iter(first + second)
     monkeypatch.setattr(memory, "available_bytes", lambda: next(readings))
-    frames = np.zeros((10, 8, 8, 3), np.uint8)  # one window each
     engine.infer(frames, 24.0)
     engine.infer(frames, 24.0)
-    assert stand_in.windows == 2
+    assert stand_in.windows == 3
 
 
 def test_nothing_is_read_outside_a_pass(stand_in, monkeypatch):
@@ -255,6 +428,7 @@ def test_nothing_is_read_outside_a_pass(stand_in, monkeypatch):
     monkeypatch.setattr(memory, "available_bytes", sampler)
     stand_in(torch.zeros(1, engine.INFER_LEN, 3, 2, 2))
     assert sampler.calls == 0
+    assert not _watch_threads()
 
 
 def test_smoke_runs_its_window_under_the_same_watch(stand_in, monkeypatch, tmp_path, capsys):
@@ -276,6 +450,25 @@ def test_smoke_runs_its_window_under_the_same_watch(stand_in, monkeypatch, tmp_p
     assert "Traceback" not in out and "GATE 0 OK" not in out
 
 
+@pytest.mark.vendor
+def test_the_stop_points_after_the_last_window_reach_upstreams_own_calls():
+    """The stand-in calls these names because upstream does. This holds that against upstream."""
+    import inspect
+
+    engine.ensure_vendor_on_path()
+    import video_depth_anything.video_depth as vda
+
+    after_the_windows = inspect.getsource(vda.VideoDepthAnything.infer_video_depth).split("del frame_list")[1]
+    for call in ("compute_scale_and_shift(", "get_interpolate_frames(", "np.stack("):
+        assert call in after_the_windows, call
+    names = ("tqdm", "compute_scale_and_shift", "get_interpolate_frames", "np")
+    before = {name: getattr(vda, name) for name in names}
+    with engine._window_hook("cpu", None):
+        assert all(getattr(vda, name) is not before[name] for name in names)
+        assert vda.np.concatenate is before["np"].concatenate, "the rest of numpy is not upstream's"
+    assert {name: getattr(vda, name) for name in names} == before
+
+
 # ------------------------------------------------------------------ every surface
 
 class TestEverySurfaceSaysItPlainly:
@@ -284,7 +477,7 @@ class TestEverySurfaceSaysItPlainly:
     @pytest.fixture(autouse=True)
     def _runs_out_after_one_window(self, stand_in, monkeypatch):
         self.model = stand_in
-        monkeypatch.setattr(memory, "available_bytes", Sampler(before=SETTLES_PER_WINDOW))
+        monkeypatch.setattr(memory, "available_bytes", Sampler(before=STOPS_PER_WINDOW))
 
     def _stopped(self, result) -> None:
         text = result.output

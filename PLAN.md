@@ -456,9 +456,14 @@ Key engineering decisions:
   not tiling. `engine.bound_memory` feeds the backbone 4 frames at a time (7.1 to 7.3 GB, same
   bytes, same speed), and `memory.py` sizes each pass to what the machine has free.
   **[AMENDED 2026-11-11]** That check read the machine once, before the pass. `memory.Watch` now
-  reads it again while the pass runs, at the points `bound_memory` already settles the GPU, and
-  stops the pass when free memory stays under 0.75 GB for three readings in a row. The floor and the
-  real passes it was set from are beside it in `memory.py`.
+  reads it again from a thread of its own every half second while the pass runs, from the first
+  window to the end of `normalize`, and the pass stops when free memory stays under 0.75 GB for three
+  readings in a row. The thread only reads; the pass stops itself at its stop points: the points
+  `bound_memory` already settles the GPU, each window's end, upstream's alignment helpers and its
+  `np.stack` after the last window (rebound in its module for the pass, as `tqdm` is), and between the
+  steps of `normalize`. A first version read only at the settle points, so the work after the last
+  window (1.9 s on a 30 s clip) went unread. A stop never lands inside one numpy call. The floor, the
+  real passes it was set from and the ceiling are beside it in `memory.py`.
 
 ---
 
