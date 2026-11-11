@@ -5,6 +5,11 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **`depthc result` no longer writes over a fire log it cannot read.** If a kit's `result.json` was
+  there but unreadable (cut off, saved as UTF-16, or JSON of the wrong shape), the next fire was
+  written over it and every earlier fire was lost. Now the command refuses, says which file it left
+  untouched and to move it aside or repair it, and exits 1. A missing file still starts a new log,
+  and the index, `compare` and the library list still treat a broken log as an unfired kit.
 - **The camera is now read from the picture, not from the depth.** The real-footage failure in
   v0.16.1 came from the input: a depth picture of a real scene is mostly flat, so the people
   walking through a locked-off shot were nearly all the reader could see, and it named them a pan.
