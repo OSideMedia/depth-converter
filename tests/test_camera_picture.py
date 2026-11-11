@@ -196,6 +196,37 @@ def test_a_single_frame_has_no_path():
     assert m.camera_path(texture()[None], 24.0).shape == (0, 3)
 
 
+def test_gaps_the_region_reader_filled_count_as_motion_around_a_tracked_gap():
+    """A pan read half by tracking and half by the region reader is one pan. Judged against holes
+    where the fallback belongs, every tracked gap would average under the floor and be dropped."""
+    gaps = 48
+    path = np.zeros((gaps, 3), dtype=np.float32)
+    path[:, 0] = 0.15
+    keep = np.zeros(gaps, dtype=bool)
+    keep[1::2] = True
+    assert np.array_equal(m._settle(path, 24.0, keep), path)
+    holes = path.copy()
+    holes[1::2] = 0.0  # the same predicate on the order that loses it
+    assert not np.any(m._settle(holes, 24.0)[0::2])
+
+
+def test_settling_never_zeroes_a_gap_it_was_told_to_keep():
+    path = np.zeros((24, 3), dtype=np.float32)
+    path[5] = (0.02, 0.0, 0.0)
+    keep = np.zeros(24, dtype=bool)
+    keep[5] = True
+    assert m._settle(path, 24.0, keep)[5, 0] == pytest.approx(0.02)
+    assert not np.any(m._settle(path, 24.0))
+
+
+def test_settling_a_clip_shorter_than_its_window_or_off_24fps():
+    slow = np.tile(np.array([[0.0, 0.0, 0.06]], dtype=np.float32), (5, 1))
+    assert np.array_equal(m._settle(slow, 24.0), slow)
+    assert np.array_equal(m._settle(np.zeros((0, 3), dtype=np.float32), 24.0), np.zeros((0, 3), dtype=np.float32))
+    pan = np.tile(np.array([[0.2, 0.0, 0.0]], dtype=np.float32), (120, 1))
+    assert np.array_equal(m._settle(pan, 60.0), pan)
+
+
 # ---------------------------------------------------------------------------------- fit_picture
 
 def test_fit_picture_cuts_or_holds_within_the_slack():

@@ -953,7 +953,17 @@ def _kit_picture(kit_dir: Path, count: int):
     try:
         info = probe_file(source)
         if isinstance(recorded, dict) and "crop" in recorded:
-            rect = Crop.parse(recorded["crop"]) if recorded["crop"] else None
+            said = recorded["crop"]
+            if said is None:
+                rect = None
+            elif not isinstance(said, str):
+                return None  # not a rectangle this tool wrote
+            else:
+                rect = Crop.parse(said)
+                # ffmpeg clamps a rectangle that hangs off the frame and carries on, which
+                # would be a different picture from the one the depth was made from
+                if rect.x + rect.width > info.width or rect.y + rect.height > info.height:
+                    return None
         else:
             rect = detect_crop(info)
         frames = read_frames(info, fps=24.0, size=target_size(info, "480p", crop=rect), crop=rect)

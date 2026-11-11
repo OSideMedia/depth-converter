@@ -487,14 +487,17 @@ def _camera_path_from(grid: np.ndarray, tracked: np.ndarray, fps: float = 24.0) 
             untracked.append(index)
         elif reading is not None:
             path[index] = reading
-    path = _settle(path, fps)
+    keep = np.zeros(gaps, dtype=bool)
     if untracked:
+        # Filled in BEFORE settling: a tracked gap is judged against what really happened around
+        # it, and a hole where the region reader's answer belongs would read as stillness there.
         fallback = flow_series(grid, fps).path
         path[untracked] = fallback[untracked]
-    return path
+        keep[untracked] = True  # the region reader already zeroed its own still gaps
+    return _settle(path, fps, keep)
 
 
-def _settle(path: np.ndarray, fps: float) -> np.ndarray:
+def _settle(path: np.ndarray, fps: float, keep: np.ndarray | None = None) -> np.ndarray:
     """Zero the gaps where the camera is not moving, as `flow_series` does with its static floor.
 
     Everything that reads a path takes a zero row to mean "still" and averages the rest
@@ -503,7 +506,13 @@ def _settle(path: np.ndarray, fps: float) -> np.ndarray:
     averaged with 10 gaps of a real pan would read as static. So a gap is kept only where the
     path around it, averaged over TRACK_SETTLE_SECONDS, would earn a word from `path_label`.
     Averaging first is what keeps a slow push: each gap of it is under the floor's noise, the
-    half-second around it is not.
+    half-second around it is not. Gaps marked in `keep` count toward the averages and are never
+    zeroed here.
+
+    ponytail: a gate per gap plus "average the survivors" downstream means a bucket where the
+    camera reverses can be worded from the half that survived. `flow_series` has the same shape
+    with its static floor. The upgrade is for buckets to average every gap, which changes what
+    the calibrated floors mean and so needs the clay re-scored.
     """
     gaps = path.shape[0]
     if gaps == 0:
@@ -514,6 +523,8 @@ def _settle(path: np.ndarray, fps: float) -> np.ndarray:
     held = np.convolve(np.ones(gaps), kernel, mode="same")
     around = np.stack([np.convolve(path[:, k], kernel, mode="same") / held for k in range(3)], axis=1)
     moving = (np.hypot(around[:, 0], around[:, 1]) >= PATH_STILL) | (np.abs(around[:, 2]) >= PATH_RADIAL_STILL)
+    if keep is not None:
+        moving |= keep
     settled = path.copy()
     settled[~moving] = 0.0
     return settled
