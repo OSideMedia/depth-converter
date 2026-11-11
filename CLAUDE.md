@@ -45,7 +45,10 @@ bundles for no real gain over doing it here.
    HOW MUCH motion a window carries and is blind to HOW MANY things are moving — a second
    figure walking in reads as *more* signal, not as the competing signal it is. Verified on
    CLIP C: the top-ranked window is exactly the stretch the original trim cut away for that
-   reason. Overriding the scout is a normal outcome; say why in `--desc`.
+   reason. Overriding the scout is a normal outcome; say why in `--desc`. Since 2026-11-11 the
+   scout counts people with Apple Vision (macOS only) and warns when two or more are in frame
+   for 10% of the clip or more; it counts people only and never changes the ranking, so the
+   sheet is still the check.
 4. `./.tools/uv run depthc kit "Inbox/<clip>" --trim <in> <out> --tags "..." --desc "..." --archive`
 5. **Look at the depth output**, don't just read the checker. The letterbox bug — matte bars
    becoming the brightest object in the frame at 160/255 against 55 for the real subject —
@@ -59,7 +62,8 @@ bundles for no real gain over doing it here.
    scored (PATH has a clay score and FAILED on real footage 2026-11-10, inventing moves on
    locked-off shots; since 2026-11-11 the camera is read from the picture, and that reader FAILED a
    second set of unseen clips the same day, 7 of 10 moves and a move invented on 2 of 7
-   locked-off shots, `DOCS/CAMERA-PATH-CALIBRATION.md`): read them, quote them in
+   locked-off shots, `DOCS/CAMERA-PATH-CALIBRATION.md`; the camera round after it, cuts, a
+   person mask, "can't tell" and slow zooms, is UNSCORED): read them, quote them in
    the notes, but they do not vote — when a fire is MIRRORED or the path cosine is negative, that is a by-eye finding to record, not a verdict the tool
    made. Then `depthc result <kit> --verdict … --notes
    "…"` with the measured numbers. A generation is the only evidence that says whether any
@@ -177,6 +181,9 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
 - **VDA-Small only.** Across DA-V2, VDA and DA3 only the Small checkpoints are Apache-2.0;
   every Base/Large/Giant is CC-BY-NC-4.0. The owner makes commercial films. There is no
   model-size selector by design, and adding one is a licensing violation, not an upgrade.
+  Apple Vision (the person mask, `depthc/people.py`) is an OS framework reached through PyObjC
+  (MIT), not a model this repo ships or downloads: that is why it was allowed. It stays optional
+  and macOS-only (`sys_platform == 'darwin'`); CI runs without it.
 - **Written for a public repo.** No personal names, machine paths, credentials or provider
   ids in any tracked file, commit message or PR text. Say "the owner". A vendor's rule is
   described, never worked around: a refusal is the provider's call.

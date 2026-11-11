@@ -51,7 +51,7 @@ usable `source.mp4`, described further down. `motion.camera_path` does it in fiv
 2. **Drop what moves on its own.** One shift, scale and rotation is fitted to the points. A point
    that does not go where the fit sends it is a person, a car or a wave, and it loses its vote.
 3. **Refuse a frame with no world in it.** If the fit carries fewer than half the points, the gap
-   names no camera.
+   names no camera (since the camera round below, it reads "can't tell" rather than still).
 4. **Vote by region, as before.** The points that are left vote through the same 8×8 split and
    the same stretch-then-shift reading as the region reader below, with the same floors and the
    same words. A gap with fewer than 40 usable points, or with votes in fewer than 12 regions, is
@@ -84,7 +84,8 @@ On the tuned clips it gains two buckets and loses two: a crane and a truck with 
 one bucket better, and two buckets of a fast truck pick up "pulls out".
 
 **On unseen real footage it failed** ("Second real-footage score" below): 7 of 10 moves, and a
-move invented on 2 of 7 locked-off shots. On the 17 spent clips it names 12 of 12 moves and
+move invented on 2 of 7 locked-off shots. The camera round that followed is described after that
+score, and has not been scored. On the 17 spent clips it names 12 of 12 moves and
 invents a move on 1 of 5 locked-off shots, but it was built while looking at those clips, so that
 was never a score.
 
@@ -334,10 +335,98 @@ named as tilts and pushes.
 move in the score is one promoted clip. On two clips the labellers disagreed on direction; the
 count is 7 of 10 either way. These 40 clips are now spent as well.
 
+## The camera round: shots, people, "can't tell", slow zooms (2026-11-11) — UNSCORED
+
+Four changes to the picture reader, one for each way the second score failed. Every number in them
+was chosen while looking at the 57 spent clips (the two sets above), so nothing in this section is
+a score: that needs clips the reader has never seen. The camera words still do not vote in any
+verdict. The constants and their ceilings are in `depthc/motion.py`, in the block headed "the
+camera round".
+
+1. **Cuts.** Three film windows came back as a string of moves, one per shot. Now the clip is
+   split into shots first and each is read on its own; no fit, average or word crosses a cut. A
+   gap is a cut when at most 5% of the tracked points survive the there-and-back check AND the
+   grey histogram moves by 0.10 or more (0.30 alone when a frame has too few corners to judge).
+   Either cue alone fires on real footage: a train keeps the histogram churning at 0.20 a frame,
+   and a dark, smeared shot loses 90% of its points. A shot under a quarter of a second is not
+   read. Our own detector, not PySceneDetect (BSD-3, allowed): the tracker already measures point
+   survival, and survival is the cue that told a cut from the train; no dependency is added.
+   PySceneDetect's adaptive detector is the named upgrade if dissolves and fades ever matter,
+   because this one does not find them.
+2. **People.** A dancer filling a vertical frame, or a walker close to the lens, has more points
+   than the wall behind, and the fit followed them. Now, on macOS, Apple Vision's person instance
+   mask is taken for each frame and the points on (or within 5 px of) a person get no vote. The
+   instance mask outlines something even when nobody is there (it covered most of a flower and a
+   forest on the seen clips), so an outline counts only where Vision's body detector also drew a
+   box around it. Vision ships with macOS: no weights, reached through PyObjC (MIT, installed on
+   macOS only). Without Vision, given a depth of the same frames (`compare`'s reference, a kit
+   build), the nearer half of each depth frame is left out instead, reading "near" from the end
+   the kit says (an inverted kit's dark end). With neither, every point votes, as before.
+3. **"Can't tell".** A crowd was read as a move rather than as nothing. Now a gap is "can't tell"
+   when the person mask leaves fewer than 40 trackable points, or when no single motion carries
+   half of them, and a shot names no camera at all when fewer than half its gaps could be read.
+   `describe` says `can't tell` and lists those stretches (`cameraUnread`); a kit's `cameraShots`
+   gives such a shot a `null` word; `compare`'s PATH line says `can't tell` and leaves those
+   buckets out of its cosine. Half is a judgement, not a tuned figure.
+4. **Slow zooms.** A slow zoom along a wall and a faint pull-out got no word. Now the zoom is also
+   read across half a second, one reading every eighth of a second, and where the frame-to-frame
+   zoom is under the usual floor (0.05) that reading replaces it and is named from 0.012. Across
+   half a second a dolly past things at different distances reads a fraction of its push (0.011
+   against 0.137 on one seen clip), so where the frame-to-frame zoom clears 0.05 it stands. Beside
+   a pan or tilt the zoom still needs 0.05: seen pans showed a zoom of their own of 0.01 to 0.05.
+
+**The scout** counts people the same way, twice a second, and warns when two or more are in frame
+for 10% of the clip or more, noting it on each window that has one. It counts people only and
+never changes the ranking.
+
+**On the spent clips (development signal, not a score).** Same clips, old reader against new,
+with Vision on:
+
+| | before | after |
+|---|---|---|
+| First set: moves named | 12/12 | 12/12 |
+| First set: locked-off shots with a move invented | 1/5 | 0/5 |
+| Second set, scored clips: moves named | 7/10 | 8/10 |
+| Second set, scored clips: locked-off shots with a move invented | 2/7 | 2/7 |
+| Second set, messy locked-off-style clips with a move named | 8/15 | 6/15 |
+| Cuts found in the three film windows (nine, marked by eye) | not looked for | 9 of 9, none invented on any other clip |
+
+Still wrong on the scored clips: the vertical move through trees is still named a pan; the slow
+truck past a near bookshelf now reads "pulls out" for its first 2.5 seconds (its sideways travel
+is under the pan floor, so only the zoom is left); wind on the grass keeps a move on one
+locked-off shot once its walker is masked; and the flower is not a person, so nothing masks it.
+Of the 6 messy clips still named, on one the background points the mask leaves move together
+(95% of 230), so either the phone stand moved or the mask missed something; that is not settled
+by eye. Without Vision (the CI path, no depth) the numbers are 10 of 12 and 1 of 5 on the first
+set, 8 of 10 and 2 of 7 on the second, and 8 of 15 messy. Two further film scenes the owner
+supplied came back with 7 and 8 cuts, all real by eye, and about three cuts missed in the last
+stretch of fast action in one, which reads as "can't tell". With Vision on, a 25-second clip took
+about 12 seconds to read on one Apple Silicon Mac.
+
+**On clay** (the cached clips, $0):
+
+| | `pic` before | `pic` after |
+|---|---|---|
+| Tuned clips, exact buckets | 162/168 | 160/168 |
+| Tuned, missed motion / false motion | 0 / 0 | 0 / 1 |
+| Held-out clips, exact buckets | 52/63 | 52/63 |
+| Held-out, missed motion / false motion | 3 / 0 | 3 / 1 |
+
+Both false-motion buckets are the first half-second of a slow zoom (one in, one out) whose true
+zoom is 0.047, just under the 0.05 floor the truth is worded with; the new floor names it. The
+other lost bucket is a push beside a truck that the beside-a-pan rule no longer names.
+
+**What it cannot do.** Vision finds people only: a train, a car or a flower that fills the frame
+still wins the vote. A macOS update can change what Vision finds. The depth fallback leaves out
+half of every frame whatever is in it, and a subject no nearer than its background keeps its
+points. A dissolve or a fade is one shot. A shot read on just over half its gaps can still be
+worded from the wrong half.
+
 ## Limitations
 
 - **Both readers failed on real footage.** The depth read failed the first set and the picture
-  read that replaced it failed the second (7 of 10 moves, 2 of 7 locked-off shots). The clay
+  read that replaced it failed the second (7 of 10 moves, 2 of 7 locked-off shots). The camera
+  round after that has not been scored on unseen clips. The clay
   figures in this file do not carry over to shots with people or vehicles moving through them.
 
 - **One scene.** Clay ground, rows of boxes and sky. The truth counts the static world
