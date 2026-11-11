@@ -109,6 +109,43 @@ REGION_COLS = 3
 PATH_STILL = 0.10         # grid px per frame; a median flow below this has no direction to name
 PATH_RADIAL_STILL = 0.05  # px per frame of expansion/contraction below this is not a zoom
 PATH_READER = "regions-2026-11"  # names the reader in the calibration's saved estimates
+# --- the camera, read from the PICTURE (2026-11-11) -----------------------------------------
+# flow_series reads whatever frames it is handed, and for a kit, a compare and a describe those
+# were DEPTH frames. On real footage that failed (DOCS/CAMERA-PATH-CALIBRATION.md, "Real footage"):
+# a depth picture of a real scene is mostly flat, so the only texture is the outline of whatever
+# stands at a different distance, and in a locked-off shot those outlines are the people walking
+# through. They cast most of the votes and the reader named a pan. So the camera is now read from
+# the picture, by tracking points instead of dense flow, and the points that do not move with the
+# rest are dropped before anything votes.
+PICTURE_READER = "tracks-2026-11"  # names this reader in the calibration's saved estimates
+# Tracked at this long edge: twice the analysis grid, so a slow push that moves a point a
+# twentieth of a grid pixel per frame is a tenth of a pixel here, which Lucas-Kanade resolves.
+TRACK_LONG_EDGE = 320
+# Shi-Tomasi corners: at most this many, at the detector's own default quality, this far apart.
+TRACK_MAX_POINTS = 600
+TRACK_QUALITY = 0.01
+TRACK_SPACING = 6
+# Fewer points than this that survive the there-and-back check and the gap is not tracked at all:
+# the region reader takes it, which is what it was calibrated for (clay through a long lens holds
+# about 18 corners).
+TRACK_MIN_POINTS = 40
+# A point is kept when tracking it forward and then back lands within this many pixels of where it
+# started. A point on a blur, a reflection or an edge that slides along itself does not.
+TRACK_RETURN_PX = 0.5
+# WHO moves with the camera. One similarity (shift, uniform scale, rotation) is fitted to the points
+# by RANSAC; a point further than this from where the fit sends it is something moving on its own.
+TRACK_FIT_PX = 0.75
+# And the fit has to carry at least this share of the points, or nothing in the frame is the world:
+# the gap names no camera. A subject that fills most of the frame still wins this vote, and the
+# reader cannot tell it from a pan (the train passing the windows in the real-footage set).
+# ponytail: one dominant motion, no depth cue to say which layer is the background. A second cue
+# (the depth pass, when there is one) is the upgrade if a frame-filling subject ever matters.
+TRACK_MIN_SHARE = 0.5
+# A region of the 8x8 split votes with this many surviving points; its vote is their median travel.
+TRACK_REGION_POINTS = 2
+# A tracked gap counts as moving when the path averaged over this long around it clears the
+# naming floors (`_settle`). Half a second: the bucket every camera word is read in.
+TRACK_SETTLE_SECONDS = 0.5
 # WHERE the path is read. Flow only shows on pixels with texture in two directions (the aperture
 # problem): a flat wall moves without showing it, and in an all-pixel median it votes zero. So the
 # path is read on pixels whose structure-tensor strength clears this share of the frame's strongest
@@ -360,6 +397,170 @@ def flow_series(frames: np.ndarray, fps: float = 24.0) -> FlowSeries:
         path[index] = (dx, dy, stretch * mean_radius)
         residual[index] = float(np.hypot(flow[..., 0][mask] - dx, flow[..., 1][mask] - dy).mean())
     return FlowSeries(path=path, residual=residual, moving=moving)
+
+
+def _track_gray(picture: np.ndarray) -> np.ndarray:
+    """The picture as uint8 grey at TRACK_LONG_EDGE, aspect kept. [N,H,W] or [N,H,W,3] in."""
+    import cv2
+
+    if picture.ndim == 4 and picture.shape[-1] == 3:
+        source = [cv2.cvtColor(f, cv2.COLOR_RGB2GRAY) for f in picture]
+    elif picture.ndim == 3:
+        source = list(picture)
+    else:
+        raise ValueError(f"Expected [N,H,W] or [N,H,W,3] frames, got {picture.shape}")
+    if not source:
+        return np.zeros((0, 1, 1), dtype=np.uint8)
+    height, width = source[0].shape[:2]
+    scale = TRACK_LONG_EDGE / max(height, width)
+    size = (max(1, int(round(width * scale))), max(1, int(round(height * scale))))
+    return np.stack([cv2.resize(f, size, interpolation=cv2.INTER_AREA) for f in source])
+
+
+def _tracked_reading(
+    previous: np.ndarray, current: np.ndarray, grid_w: int, grid_h: int, mean_radius: float,
+) -> tuple[float, float, float] | None | bool:
+    """One gap read from tracked points: (dx, dy, radial) in grid px per frame.
+
+    False when there is too little to track (the caller falls back to the region reader), None
+    when there is plenty but no one motion carries the frame (the gap names no camera).
+    """
+    import cv2
+
+    points = cv2.goodFeaturesToTrack(previous, TRACK_MAX_POINTS, TRACK_QUALITY, TRACK_SPACING)
+    if points is None or len(points) < TRACK_MIN_POINTS:
+        return False
+    there, found, _ = cv2.calcOpticalFlowPyrLK(previous, current, points, None, winSize=(21, 21), maxLevel=3)
+    back, found_back, _ = cv2.calcOpticalFlowPyrLK(current, previous, there, None, winSize=(21, 21), maxLevel=3)
+    kept = (
+        (found.ravel() == 1) & (found_back.ravel() == 1)
+        & (np.linalg.norm((back - points).reshape(-1, 2), axis=1) < TRACK_RETURN_PX)
+    )
+    if int(kept.sum()) < TRACK_MIN_POINTS:
+        return False
+    start, end = points[kept].reshape(-1, 2), there[kept].reshape(-1, 2)
+    fit, inliers = cv2.estimateAffinePartial2D(
+        start, end, method=cv2.RANSAC, ransacReprojThreshold=TRACK_FIT_PX,
+        maxIters=2000, confidence=0.995,
+    )
+    if fit is None or float(inliers.mean()) < TRACK_MIN_SHARE:
+        return None
+    world = inliers.ravel() == 1
+    start, end = start[world], end[world]
+
+    height, width = previous.shape
+    to_grid = grid_w / width
+    travel = (end - start) * to_grid
+    offset = (start - np.array([(width - 1) / 2.0, (height - 1) / 2.0])) * to_grid
+    column = np.clip((start[:, 0] * PATH_REGIONS / width).astype(int), 0, PATH_REGIONS - 1)
+    row = np.clip((start[:, 1] * PATH_REGIONS / height).astype(int), 0, PATH_REGIONS - 1)
+    cell = row * PATH_REGIONS + column
+    votes = [
+        (float(np.median(travel[cell == k, 0])), float(np.median(travel[cell == k, 1])),
+         float(offset[cell == k, 0].mean()), float(offset[cell == k, 1].mean()))
+        for k in np.unique(cell) if int((cell == k).sum()) >= TRACK_REGION_POINTS
+    ]
+    if len(votes) < PATH_MIN_REGIONS:
+        # Points enough, but bunched in a few regions: the same picture PATH_MIN_REGIONS refuses,
+        # a figure on a bare field. The region reader decides, by its own rule.
+        return False
+    dx, dy, stretch = _read_camera(*np.array(votes, dtype=np.float64).T, (grid_w - 1) / 2.0, (grid_h - 1) / 2.0)
+    return dx, dy, stretch * mean_radius
+
+
+def _camera_path_from(grid: np.ndarray, tracked: np.ndarray, fps: float = 24.0) -> np.ndarray:
+    """camera_path on frames already reduced: the analysis grid and the TRACK_LONG_EDGE greys."""
+    import cv2
+
+    gaps = max(0, tracked.shape[0] - 1)
+    path = np.zeros((gaps, 3), dtype=np.float32)
+    if gaps == 0:
+        return path
+    grid_h, grid_w = grid.shape[1:]
+    ys, xs = np.mgrid[0:grid_h, 0:grid_w].astype(np.float32)
+    mean_radius = float(np.hypot(xs - (grid_w - 1) / 2.0, ys - (grid_h - 1) / 2.0).mean())
+    cv2.setRNGSeed(0)  # RANSAC draws at random; the same clip must read the same twice
+    untracked: list[int] = []
+    for index, (previous, current) in enumerate(zip(tracked[:-1], tracked[1:])):
+        reading = _tracked_reading(previous, current, grid_w, grid_h, mean_radius)
+        if reading is False:
+            untracked.append(index)
+        elif reading is not None:
+            path[index] = reading
+    keep = np.zeros(gaps, dtype=bool)
+    if untracked:
+        # Filled in BEFORE settling: a tracked gap is judged against what really happened around
+        # it, and a hole where the region reader's answer belongs would read as stillness there.
+        fallback = flow_series(grid, fps).path
+        path[untracked] = fallback[untracked]
+        keep[untracked] = True  # the region reader already zeroed its own still gaps
+    return _settle(path, fps, keep)
+
+
+def _settle(path: np.ndarray, fps: float, keep: np.ndarray | None = None) -> np.ndarray:
+    """Zero the gaps where the camera is not moving, as `flow_series` does with its static floor.
+
+    Everything that reads a path takes a zero row to mean "still" and averages the rest
+    (`MotionProfile.camera_path`, the half-second buckets). Tracking never returns an exact zero:
+    a held shot comes back as hundredths of a pixel of noise on every gap, and 169 such gaps
+    averaged with 10 gaps of a real pan would read as static. So a gap is kept only where the
+    path around it, averaged over TRACK_SETTLE_SECONDS, would earn a word from `path_label`.
+    Averaging first is what keeps a slow push: each gap of it is under the floor's noise, the
+    half-second around it is not. Gaps marked in `keep` count toward the averages and are never
+    zeroed here.
+
+    ponytail: a gate per gap plus "average the survivors" downstream means a bucket where the
+    camera reverses can be worded from the half that survived. `flow_series` has the same shape
+    with its static floor. The upgrade is for buckets to average every gap, which changes what
+    the calibrated floors mean and so needs the clay re-scored.
+    """
+    gaps = path.shape[0]
+    if gaps == 0:
+        return path
+    span = max(1, min(gaps, int(round(TRACK_SETTLE_SECONDS * fps))))
+    kernel = np.ones(span, dtype=np.float64) / span
+    # 'same' with the tail counted honestly: divide by how many gaps each window really held
+    held = np.convolve(np.ones(gaps), kernel, mode="same")
+    around = np.stack([np.convolve(path[:, k], kernel, mode="same") / held for k in range(3)], axis=1)
+    moving = (np.hypot(around[:, 0], around[:, 1]) >= PATH_STILL) | (np.abs(around[:, 2]) >= PATH_RADIAL_STILL)
+    if keep is not None:
+        moving |= keep
+    settled = path.copy()
+    settled[~moving] = 0.0
+    return settled
+
+
+def camera_path(picture: np.ndarray, fps: float = 24.0) -> np.ndarray:
+    """The camera over time, read from the PICTURE: [gaps, 3] (dx, dy, radial), grid px per frame.
+
+    The same figures and units as `FlowSeries.path`, so every word, bucket and tempo band built on
+    that reads this unchanged. What differs is where the votes come from. Points are tracked from
+    each frame to the next, the ones that do not move with the rest are dropped by a RANSAC
+    similarity fit, and the survivors vote by region through `_read_camera`, the same shift-and-
+    stretch reading the region reader uses. A gap with too little to track is read by
+    `flow_series` on the same picture. A gap where no single motion carries half the points names
+    no camera. Never hand this depth frames: see PICTURE_READER for why.
+    """
+    return _camera_path_from(analysis_gray(picture), _track_gray(picture), fps)
+
+
+PICTURE_SLACK = 2  # frames: two decodes of one clip at the same fps can differ by a frame or two
+
+
+def fit_picture(picture: np.ndarray, count: int) -> np.ndarray | None:
+    """`picture` cut or held to exactly `count` frames, or None when it is not the same clip.
+
+    For a picture decoded from a different file than the depth it rides beside (a kit's
+    `source.mp4` next to its `depth.mp4`). Within PICTURE_SLACK frames the tail is dropped, or
+    the last frame held, which reads as a still gap. Further apart than that the two are not
+    frame for frame and the caller reads the path from what it has.
+    """
+    have = picture.shape[0]
+    if have == 0 or abs(have - count) > PICTURE_SLACK:
+        return None
+    if have >= count:
+        return picture[:count]
+    return np.concatenate([picture, np.repeat(picture[-1:], count - have, axis=0)])
 
 
 def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
@@ -679,19 +880,35 @@ class MotionProfile:
         }
 
 
-def measure(frames: np.ndarray, fps: float, with_flow: bool = True) -> MotionProfile:
-    """Profile one clip. `with_flow=False` skips the optical-flow pass on very long clips."""
+def measure(
+    frames: np.ndarray, fps: float, with_flow: bool = True, picture: np.ndarray | None = None,
+) -> MotionProfile:
+    """Profile one clip. `with_flow=False` skips the optical-flow pass on very long clips.
+
+    `picture` is the same clip as the eye sees it, frame for frame, when `frames` are its depth.
+    Given, the camera PATH is read from it (`camera_path`) and everything else, the camera share
+    included, still comes from `frames`. Without it the path is read from `frames` as before,
+    which is right only when `frames` are themselves a picture.
+    """
     if fps <= 0:
         raise ValueError("fps must be positive")
     deltas, changed, regions = frame_stats_regions(frames)
     flow = flow_series(frames, fps) if with_flow else None
+    path = flow.path if flow is not None else None
+    if with_flow and picture is not None:
+        if picture.shape[0] != frames.shape[0]:
+            raise ValueError(
+                f"picture has {picture.shape[0]} frames and the clip {frames.shape[0]}: "
+                "they must be the same frames"
+            )
+        path = camera_path(picture, fps)
     return MotionProfile(
         fps=float(fps),
         deltas=deltas,
         changed=changed,
         camera=camera_share_from(flow) if flow is not None else None,
         regions=regions,
-        path=flow.path if flow is not None else None,
+        path=path,
     )
 
 

@@ -10,6 +10,8 @@ each against the truth bucket by bucket, in the words `depthc describe` would pr
     rgb      the clay picture itself (describe --rgb)
     vda      VDA-Small depth of the clay picture (describe / compare's generation side)
     blender  Blender's exact depth.mp4 (a kit's reference side, no estimation error)
+    pic      the clay picture through `motion.camera_path`, the reader depthc ships since
+             2026-11-11 for every camera word (tracked points, movers dropped)
 
 Each takes a `-tex` suffix (`rgb-tex`, `blender-tex`, `vda-tex`): the same Farneback pass
 with the static floor and the median read on TEXTURED pixels only (Shi-Tomasi corner
@@ -362,6 +364,9 @@ def estimate(kit: Path, which: str) -> np.ndarray:
 
     reader = textured_path if which.endswith("-tex") else similarity_path if which.endswith("-sim") else None
     which = which.removesuffix("-tex").removesuffix("-sim")
+    if which == "pic":
+        info = probe(kit / "blockout.mp4")
+        return motion.camera_path(read_frames(info, fps=24.0, size=target_size(info, "480p")), 24.0)
     if which == "rgb":
         info = probe(kit / "blockout.mp4")
         frames = read_frames(info, fps=24.0, size=target_size(info, "480p"))
@@ -404,7 +409,8 @@ def run_case(name: str, estimators: list[str], rebuild: bool) -> dict:
     for which in estimators:
         # Keyed by the reader's version: a change to flow_series must not be scored on the numbers
         # the old one left here. Earlier estimates stay on disk under their own names.
-        cached = case_dir / f"est-{which}-{kit.name}-{motion.PATH_READER}.npy"
+        version = motion.PICTURE_READER if which == "pic" else motion.PATH_READER
+        cached = case_dir / f"est-{which}-{kit.name}-{version}.npy"
         if cached.exists():
             path = np.load(cached)
         else:

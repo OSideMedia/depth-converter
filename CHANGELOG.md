@@ -5,6 +5,20 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **The camera is now read from the picture, not from the depth.** The real-footage failure in
+  v0.16.1 came from the input: a depth picture of a real scene is mostly flat, so the people
+  walking through a locked-off shot were nearly all the reader could see, and it named them a pan.
+  `describe`, `compare`'s PATH line and a kit's `cameraPath` now track points on the picture, drop
+  the ones that move on their own, and let the rest vote the way the region reader did. Slow
+  push-ins the old read lost come back with the floors unchanged. `compare` reads the reference
+  from the kit's `source.mp4` and says so when a kit has none. On clay it is level with the region
+  reader on the tuned clips (162 of 168) and two buckets ahead on the held-out ones (52 of 63
+  against 50), with no false motion. **It has no score on unseen real footage yet**, a subject that fills the
+  frame still reads as a pan, and the camera share is still measured on the depth. The camera words
+  still do not vote in any verdict.
+- The "tilts up" the reader put beside every push-in on the 8 takes is settled: it is real. Those
+  takes push toward a face above the centre of the frame.
+
 ## v0.16.1 — 2026-11-10
 
 - **The camera reader was scored on real footage, and failed.** On 17 stock clips it named 9 of 12

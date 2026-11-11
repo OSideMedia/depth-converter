@@ -568,7 +568,7 @@ def kit(
 
         # Measured on the frames themselves rather than the encoded file: same arrays, same
         # count, same fps for both sides, which is what makes the retention ratio meaningful.
-        depth_motion = motionlib.measure(job.result.frames, job.result.fps)
+        depth_motion = motionlib.measure(job.result.frames, job.result.fps, picture=job.frames)
         source_motion = motionlib.measure(job.frames, job.result.fps, with_flow=False)
         motion_block = motionlib.manifest_block(depth_motion, source_motion)
 
@@ -927,6 +927,51 @@ def result(
         raise typer.Exit(1)
 
 
+def _kit_picture(kit_dir: Path, count: int):
+    """A kit's source.mp4 as `count` RGB frames at 24 fps, matte stripped, or None.
+
+    None when the kit has no source.mp4, it cannot be read, or it does not come out frame for
+    frame with the depth (`motion.fit_picture`). Decoded small: the camera is read at a 320 px
+    long edge, so 480p is already more than it uses.
+
+    Cropped to the rectangle the build recorded in kit.json (`source.crop`, null for none):
+    source.mp4 is kept uncropped, and a build told `--crop none` or handed a rectangle must be
+    read the way it was built. Only a kit that recorded nothing has its matte looked for.
+    """
+    import json
+
+    from depthc import kit as kitlib, motion as motionlib
+    from depthc.video_io import Crop, VideoIOError, detect_crop, probe as probe_file, read_frames, target_size
+
+    source = kit_dir / "source.mp4"
+    if not source.is_file():
+        return None
+    try:
+        recorded = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text()).get("source")
+    except (OSError, ValueError, AttributeError):
+        recorded = None
+    try:
+        info = probe_file(source)
+        if isinstance(recorded, dict) and "crop" in recorded:
+            said = recorded["crop"]
+            if said is None:
+                rect = None
+            elif not isinstance(said, str):
+                return None  # not a rectangle this tool wrote
+            else:
+                rect = Crop.parse(said)
+                # ffmpeg clamps a rectangle that hangs off the frame and carries on, which
+                # would be a different picture from the one the depth was made from
+                if rect.x + rect.width > info.width or rect.y + rect.height > info.height:
+                    return None
+        else:
+            rect = detect_crop(info)
+        frames = read_frames(info, fps=24.0, size=target_size(info, "480p", crop=rect), crop=rect)
+    except (VideoIOError, ValueError):
+        return None
+    return motionlib.fit_picture(frames, count)
+
+
 def _depth_profile(info, resolution: str, input_size: int, precision: str,
                    trim_seconds: float | None = None):
     """Decode a clip (matte stripped, optionally trimmed), run the depth pass, profile it.
@@ -963,7 +1008,10 @@ def _depth_profile(info, resolution: str, input_size: int, precision: str,
         )
     # The analysis-grid depth frames ride along for framing (describe); compare ignores
     # them — its questions are all answered by the profile.
-    return rect, motionlib.measure(result.frames, 24.0), motionlib.analysis_gray(result.frames)
+    # The camera is read from the picture the depth was made from, never from the depth
+    # (motion.PICTURE_READER); everything else in the profile is the depth's.
+    profile = motionlib.measure(result.frames, 24.0, picture=frames)
+    return rect, profile, motionlib.analysis_gray(result.frames)
 
 
 @app.command()
@@ -999,7 +1047,7 @@ def describe(
             typer.echo(f"{BOLD}{clip.name}{OFF}  {DIM}{info.summary()}{OFF}")
         if rgb:
             frames = read_frames(info, fps=24.0, size=target_size(info, "480p"))
-            profile = motionlib.measure(frames, 24.0)
+            profile = motionlib.measure(frames, 24.0, picture=frames)
             framing = None  # in RGB, bright is not near — there is no figure to size
         else:
             _, profile, gray = _depth_profile(info, resolution, input_size, precision)
@@ -1113,8 +1161,18 @@ def compare(
         ref_info = probe_file(depth_path)
         ref_size = target_size(ref_info, "480p")
         ref_frames = read_frames(ref_info, fps=24.0, size=ref_size)
-        ref_profile = motionlib.measure(ref_frames, 24.0)
-        del ref_frames  # the depth pass below needs the room, and the memory check counts on it
+        # The ref's camera comes from the kit's own picture, source.mp4, cropped the way the
+        # build cropped it. A kit without one, or one whose picture is not frame for frame
+        # with its depth, has its camera read from the depth and says so: that read is the
+        # one that failed on real footage.
+        ref_picture = _kit_picture(kit_dir, ref_frames.shape[0])
+        if ref_picture is None and camera_path:
+            _warn(
+                "no usable source.mp4 beside this kit's depth, so the reference camera on the "
+                "PATH line is read from the depth picture, which invents moves on real footage."
+            )
+        ref_profile = motionlib.measure(ref_frames, 24.0, picture=ref_picture)
+        del ref_frames, ref_picture  # the depth pass below needs the room, and the memory check counts on it
 
         gen_info = probe_file(generated)
         typer.echo(f"{BOLD}{generated.name}{OFF}  {DIM}{gen_info.summary()}{OFF}")
