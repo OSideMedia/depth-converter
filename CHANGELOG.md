@@ -5,6 +5,8 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+## v0.16.1 — 2026-11-10
+
 - **The camera reader was scored on real footage, and failed.** On 17 stock clips it named 9 of 12
   clean moves and invented a move on 4 of 5 locked-off shots with people or a train passing through;
   the pass mark was at most 2 misses and none invented. No code changed. The README and
