@@ -95,9 +95,13 @@ was never a score.
   wrong is a train passing close to the lens, and on the fresh ones a person close to the lens and
   a flower opening: most of the points are on the subject, so the subject wins the
   vote and the shot reads as a pan. Nothing in the picture says which layer is the background.
-- **The camera share still comes from the depth.** `compare` judges the PATH cosine only when the
-  reference's camera share is 0.30 or more, and that share is still measured on the depth
-  picture, with the weakness described below. It was left alone here.
+- **The camera share and the motion-type line still come from the depth.** `compare` judges the
+  PATH cosine only when the reference's camera share is 0.30 or more, and a kit's motion-type
+  line ("a camera-path reference" or "a subject-motion reference") is worded from the same share.
+  Both are still measured on the depth picture, with the weakness described below, and both are
+  outside the per-shot rule the camera words follow (ONE CAMERA, below): a clip whose every shot
+  reads still (the walkers test fixture) can still be called a camera-path reference. They were
+  left alone here; changing them is a product call.
 - Everything under Limitations at the end still applies.
 
 ## The region reader: regions vote (2026-11-01)
@@ -397,6 +401,16 @@ counts a "can't tell" bucket in its own column instead of scoring it as a word (
 against a true pan and a false move against a held shot). And every body Vision finds is masked
 and counted: by its outline, or by its box where Vision drew no outline for that body (it had
 dropped a second body whenever it outlined only the first).
+
+A third review closed two more gaps in the same rule. `compare` words the PATH line whenever a
+shot is readable: a seven-frame pan at 24 fps has no whole half-second for the cosine, and its
+words had gone with the cosine. And against a take shorter than the reference, `compare` words
+the reference over the overlap only, the stretch compared: that stretch is read as if the clip
+ended there, its shots cut short and read by the same gates as whole shots (a quarter of a second
+of gaps, half of them readable), so it can name another move than the kit's `cameraPath` for the
+whole clip, and a stretch too short to read is "can't tell", as the take itself is. The generated
+set now compares every clip with takes cut from its start, and holds moving shots that read
+still; a companion test proves it fails when bucket words stop following the shot read.
 
 **On the spent clips (development signal, not a score).** Same clips, old reader against new,
 with Vision on:

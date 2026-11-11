@@ -399,7 +399,11 @@ ref's energy actually sits, and runs the same check against the horizontally *mi
 generation: when the mirror wins clearly, the report says `MIRRORED — moves the other way`.
 **PATH** names the camera move on both sides in camera terms (`pans left, pushes
 in`) and, when the ref is a camera-path ref, scores direction agreement as a cosine; on a body
-ref it is named but not judged. Neither moves the suggested verdict: no measured fire has been
+ref it is named but not judged. Both sides are named over the overlap only, the stretch being
+compared: a reference longer than the take is read as if it ended where the take does, so its
+word can differ from the kit's `cameraPath` for the whole clip, and a stretch under a quarter of
+a second is `can't tell`. The cosine needs a whole half-second on both sides and shows `—`
+without one; the words do not. Neither moves the suggested verdict: no measured fire has been
 scored on them yet, so they inform your read. `--no-regions` and `--no-camera-path` switch them
 off. The camera reader was scored against a known Blender camera on clay, and then on real
 footage, where it failed: reading the depth picture, it named 9 of 12 clean moves and invented a

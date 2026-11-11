@@ -490,6 +490,11 @@ class Shot:
 # short to count. Every other camera word is derived from that read, so none can contradict it:
 #   - One word for a clip (a kit's cameraPath, describe's overall line, compare's PATH line) is the
 #     word of `main_shot`, read from that shot's own gaps, never from time buckets.
+#   - One word for the first part of a clip (compare's PATH line over the overlap, when the take
+#     and the reference differ in length) reads that part as if the clip ended there: its shots
+#     cut short at the end of it (`shots_cut_short`), each read again by the same gates as a whole
+#     shot, then the same `main_shot` and `path_word` (`MotionProfile.camera_path_over`). So it
+#     can name another move than the whole clip's cameraPath, the move in the stretch compared.
 #   - Time buckets (describe's segments, the calibration) only say WHEN inside a shot. They never
 #     cross a cut; inside a shot no gap is dropped (`bucket_rows`: a remainder too short to stand
 #     alone joins the bucket before it); and their words follow the shot's (`describe.follow_shot`):
@@ -497,7 +502,12 @@ class Shot:
 #     bucket names a move.
 # A path read the old way (from the depth, no shots) has no shot read; its buckets stand as the
 # calibration measured them. Time buckets also feed compare's direction cosine, which is a number
-# and names nothing.
+# and names nothing, and which needs one whole bucket on each side: the PATH words do not.
+# Outside this rule: the camera SHARE (`MotionProfile.camera`, the whole-frame part of the motion)
+# and the kit's motion-type line worded from it (`checks.py`, "camera-path" or "subject-motion"
+# reference) are still measured on the depth, not read per shot. So a clip whose every shot reads
+# still can be called a camera-path reference, and the share still decides whether compare
+# judges the PATH cosine.
 # ponytail: a shot is one word, the mean of its moving gaps, so a pan and its return inside one
 # shot cancel and the whole shot reads still everywhere; reading a shot as runs (a word per run)
 # is the upgrade, and it changes what cameraShots records.
@@ -580,19 +590,40 @@ def bucket_rows(
     return out
 
 
-def main_shot(shots: list[Shot], gaps: int | None = None) -> int | None:
-    """The shot one word for a clip with cuts names: the read shot holding the most gaps (of the
-    first `gaps` gaps of the path, when given), the earlier on a tie; None when no shot was read.
-    `MotionProfile.camera_path` (the kit's cameraPath, describe's overall line) and compare's PATH
-    line both name this shot, from its own gaps (ONE CAMERA, above).
+def main_shot(shots: list[Shot]) -> int | None:
+    """The shot one word for a clip with cuts names: the read shot holding the most gaps, the
+    earlier on a tie; None when no shot was read. `MotionProfile.camera_path_over` (the kit's
+    cameraPath, describe's overall line, compare's PATH line) names this shot, from its own gaps
+    (ONE CAMERA, above).
     """
     best, held = None, 0
     for index, shot in enumerate(shots):
         rows = shot.gaps
-        stop = rows.stop if gaps is None else min(rows.stop, gaps)
-        if shot.read and stop - rows.start > held:
-            best, held = index, stop - rows.start
+        if shot.read and rows.stop - rows.start > held:
+            best, held = index, rows.stop - rows.start
     return best
+
+
+def shots_cut_short(shots: list[Shot], path: np.ndarray, fps: float, gaps: int) -> list[Shot]:
+    """The shots of the first `gaps` gaps of `path`, as if the clip ended there (ONE CAMERA, above).
+
+    Each shot that starts inside keeps the gaps it has there and is read again by the gates a
+    whole shot is read by in `_camera_reading_from`: at least `shot_min_gaps` gaps, and
+    SHOT_MIN_READ of them readable. A shot not read whole is not read cut short, and a whole shot
+    passes both gates again unchanged, so over the whole path these are the shots as read.
+    """
+    out: list[Shot] = []
+    for shot in shots:
+        if shot.start >= gaps:
+            break
+        kept = Shot(shot.start, min(shot.end, gaps + 1), shot.read)
+        rows = path[kept.gaps]
+        kept.read = bool(
+            shot.read and rows.shape[0] >= shot_min_gaps(fps)
+            and float(np.isfinite(rows).all(axis=1).mean()) >= SHOT_MIN_READ
+        )
+        out.append(kept)
+    return out
 
 
 @dataclass
@@ -1264,12 +1295,22 @@ class MotionProfile:
         None when there is no path, and when no gap of it could be read (can't tell): either
         way there is no camera word to give. `camera_shots` says which.
         """
+        return self.camera_path_over()
+
+    def camera_path_over(self, gaps: int | None = None) -> dict | None:
+        """`camera_path` for the first `gaps` gaps of the path (all of it when None): that part
+        read as if the clip ended there, its shots cut short (`shots_cut_short`) and read by the
+        same gates and the same word as whole shots (ONE CAMERA). compare's PATH line over the
+        overlap; the kit's cameraPath is this over the whole path.
+        """
         if self.path is None or not self.path.size:
             return None
-        if self.shots is not None and len(self.shots) > 1:
-            main = main_shot(self.shots)
-            return None if main is None else self._path_mean(self.path[self.shots[main].gaps])
-        return self._path_mean(self.path)
+        path = self.path if gaps is None else self.path[:max(0, gaps)]
+        if self.shots is None:
+            return self._path_mean(path) if path.size else None
+        shots = shots_cut_short(self.shots, self.path, self.fps, path.shape[0])
+        main = main_shot(shots)
+        return None if main is None else self._path_mean(path[shots[main].gaps])
 
     @property
     def camera_shots(self) -> list[dict] | None:

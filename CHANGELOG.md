@@ -73,6 +73,11 @@ the code's history. Started 2026-09-06.
     mixes two shots. Limit: a pan and its return inside one shot cancel, and that shot reads still
     everywhere. The camera-path calibration counts "can't tell" in its own column. Every body Vision
     finds is masked and counted, by its outline or, where it drew none for that body, by its box.
+  - **Fixed after a third review: `compare`'s PATH words.** They no longer wait on a half-second
+    bucket (a seven-frame pan compared with itself had none). Against a shorter take, the reference
+    is worded over the overlap, read as if the clip ended there, its shots cut short and read by
+    the same gates as whole shots; a stretch under a quarter of a second is "can't tell". The camera
+    share and the kit's motion-type line are still measured on the depth, outside the per-shot rule.
 
 ## v0.16.1 — 2026-11-10
 

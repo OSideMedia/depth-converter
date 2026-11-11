@@ -11,6 +11,7 @@ Camera words never vote in any verdict; nothing here tests a pass or a fail, onl
 
 from __future__ import annotations
 
+import functools
 import json
 
 import cv2
@@ -350,6 +351,15 @@ def pan_then_hold(base: np.ndarray, moving: int, held: int, step: int = 2) -> np
     return hold_then_pan(base, held, moving, step)[::-1].copy()
 
 
+def pan_and_back(base: np.ndarray, moving: int, step: int = 2) -> np.ndarray:
+    """One shot: the wall sliding `moving` frames one way and `moving` frames back to where it began.
+    Moving throughout, and read as still: the shot is one word, the mean of its moves, and they
+    cancel (the limit written beside ONE CAMERA)."""
+    out = [np.roll(base, i * step, axis=1) for i in range(moving + 1)]
+    out += [np.roll(base, (moving - i) * step, axis=1) for i in range(1, moving + 1)]
+    return np.stack(out)
+
+
 def cut_together(*shots: np.ndarray) -> np.ndarray:
     """Shots on their own walls and in turn at three brightnesses, so every join is a cut."""
     looks = (lambda frames: frames, brighter, darker)
@@ -376,40 +386,95 @@ def generated_clips(fps: float):
     yield "hold", hold(wall[0], s * 2)
     yield "pan", panned(wall[0], s, 2)
     yield "pan+pan", cut_together(panned(wall[0], s, 2), panned(wall[1], s + 1, -2))
+    for moving in (s // 2, s // 2 + 3, s):  # moving inside a shot that reads still
+        yield f"pan-back{moving}", pan_and_back(wall[3], moving)
+        yield f"hold+pan-back{moving}", cut_together(hold(wall[0], s), pan_and_back(wall[1], moving))
+
+
+@functools.lru_cache(maxsize=None)
+def _measured(fps: float) -> tuple:
+    """Every generated clip measured once, with takes cut from its start to compare it against:
+    (name, profile, ((frames, take profile), ...)). A take too short to read, one second, and half
+    the clip, wherever each is shorter than the clip."""
+    out = []
+    for name, clip in generated_clips(fps):
+        lengths = sorted({m.shot_min_gaps(fps), int(round(fps)), clip.shape[0] // 2})
+        takes = tuple(
+            (frames, m.measure(clip[:frames], fps, picture=clip[:frames]))
+            for frames in lengths if 2 <= frames < clip.shape[0]
+        )
+        out.append((name, m.measure(clip, fps, picture=clip), takes))
+    return tuple(out)
+
+
+def _main_word(profile) -> str:
+    from depthc.describe import UNREAD
+
+    main = m.main_shot(profile.shots)
+    return UNREAD if main is None else (profile.camera_shots[main]["label"] or UNREAD)
+
+
+def _broken(fps: float) -> list[tuple[str, str]]:
+    """Every place a camera word contradicts cameraShots on the generated clips, as (clip, what).
+
+    describe's line and segments, the kit's cameraPath and compare's PATH words: a shot named a
+    move has that word inside it in describe and no "locked off" or "can't tell" for the clip; a
+    shot read as still has no move inside it; an unread shot is "can't tell"; the one word for a
+    clip is its main shot's. Compared with a shorter take, both sides are worded over the overlap,
+    the stretch compared: what cameraShots says of the clip cut to the take's length.
+    """
+    from depthc import compare
+    from depthc.describe import describe
+
+    broken = []
+    for name, profile, takes in _measured(fps):
+        for label, one in [(name, profile)] + [(f"{name}[:{frames}]", take) for frames, take in takes]:
+            shots = one.camera_shots
+            d = describe(one)
+            record, text = d.as_dict(), " ".join(d.sentences)
+            for shot in shots:
+                said = [s["label"] for s in _segments_inside(record, shot, "cameraSegments")]
+                if shot["label"] is None and not (_segments_inside(record, shot, "cameraUnread") and not said):
+                    broken.append((label, f"unread shot {shot} worded {said}"))
+                elif shot["label"] == "static" and not set(said) <= {"static"}:
+                    broken.append((label, f"still shot {shot} worded {said}"))
+                elif shot["label"] not in (None, "static") and shot["label"] not in said:
+                    broken.append((label, f"moving shot {shot} worded {said}"))
+            if any(shot["label"] not in (None, "static") for shot in shots):
+                if "locked off" in text or "Camera: can't tell" in text:
+                    broken.append((label, f"a shot moved and describe said: {text}"))
+            word = _main_word(one)
+            kit = (m.manifest_block(one).get("cameraPath") or {}).get("label", "can't tell")
+            if kit != word:
+                broken.append((label, f"kit cameraPath {kit}, main shot {word}"))
+            itself = compare.compare_profiles(one, one, regions=False)
+            if (itself.ref_path or {}).get("label") != word:
+                broken.append((label, f"compare with itself {itself.ref_path}, main shot {word}"))
+        for frames, take in takes:
+            word = _main_word(take)
+            for ref, gen in ((profile, take), (take, profile)):
+                result = compare.compare_profiles(ref, gen, regions=False)
+                said = {(result.ref_path or {}).get("label"), (result.gen_path or {}).get("label")}
+                if said != {word}:
+                    broken.append((f"{name}[:{frames}]", f"compare over the overlap said {said}, cut there {word}"))
+    return broken
 
 
 @pytest.mark.parametrize("fps", [24.0, 30.0])
 def test_no_camera_word_ever_contradicts_the_shot_read(fps):
-    """For every generated clip: describe's line and segments, the kit's cameraPath and compare's
-    PATH word agree with cameraShots. A shot named a move has that word inside it in describe and
-    no "locked off" or "can't tell" for the clip; a shot read as still has no move inside it; an
-    unread shot is "can't tell"; and the one word for the clip is its main shot's."""
-    from depthc import compare
-    from depthc.describe import UNREAD, describe
+    """For every generated clip and every take cut from it: no camera word contradicts cameraShots
+    (`_broken`, above)."""
+    assert _broken(fps) == []
 
-    for name, clip in generated_clips(fps):
-        profile = m.measure(clip, fps, picture=clip)
-        shots = profile.camera_shots
-        assert shots, name
-        d = describe(profile)
-        record = d.as_dict()
-        text = " ".join(d.sentences)
-        for shot in shots:
-            said = [s["label"] for s in _segments_inside(record, shot, "cameraSegments")]
-            if shot["label"] is None:
-                assert _segments_inside(record, shot, "cameraUnread") and not said, (name, shot, said)
-            elif shot["label"] == "static":
-                assert set(said) <= {"static"}, (name, shot, said)
-            else:
-                assert shot["label"] in said, (name, shot, said)
-        if any(shot["label"] not in (None, "static") for shot in shots):
-            assert "locked off" not in text and "Camera: can't tell" not in text, (name, text)
-        main = m.main_shot(profile.shots)
-        word = None if main is None else shots[main]["label"]
-        kit = m.manifest_block(profile).get("cameraPath")
-        assert (kit or {}).get("label") == word, (name, kit, shots)
-        result = compare.compare_profiles(profile, profile)
-        assert result.ref_path is not None and result.ref_path["label"] == (word or UNREAD), (name, result.ref_path, shots)
+
+def test_the_shot_read_check_goes_red_when_bucket_words_stop_following_the_shot(monkeypatch):
+    """The check above is only as good as what it can see: with `follow_shot` made to change
+    nothing, it must fail, on the shots that move and read still above all."""
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module("depthc.describe"), "follow_shot", lambda buckets, word: buckets)
+    broken = {name for name, _ in _broken(24.0)}
+    assert {"pan-back12", "pan-back15", "pan-back24", "hold+pan-back12"} <= broken, sorted(broken)
 
 
 def test_bucket_words_follow_the_shot_read():
@@ -461,6 +526,55 @@ def test_a_clip_with_cuts_is_summed_up_by_one_shot_never_an_average_of_two():
     result = compare.compare_profiles(profile, profile)
     assert result.ref_path["label"] == "pans right"
     assert result.path_judged and result.path_cos == pytest.approx(1.0)
+
+
+def test_compare_words_a_shot_too_short_for_a_bucket():
+    """Codex, third read: a seven-frame pan at 24 fps is six gaps, long enough to read, and has no
+    half-second bucket; compared with itself, it lost its PATH words along with the cosine. The
+    words never wait on a bucket; only the cosine does."""
+    from depthc import compare
+
+    clip = panned(texture(), 7, 2)
+    profile = m.measure(clip, 24.0, picture=clip)
+    assert [shot["label"] for shot in profile.camera_shots] == ["pans left"]
+    result = compare.compare_profiles(profile, profile)
+    assert result.ref_path["label"] == result.gen_path["label"] == "pans left"
+    assert result.path_cos is None
+    line = [line for line in compare._render_structure(result, "", "", "", "") if "PATH" in line]
+    assert line and line[0].startswith("  PATH     ref pans left · gen pans left"), line
+
+
+def test_compare_words_the_overlap_as_the_clip_cut_there():
+    """Codex, third read: against a take shorter than the reference, compare words the reference
+    over the overlap only. That is the rule, not an accident (ONE CAMERA, depthc/motion.py): the
+    overlap is the stretch compared, read as if the clip ended there, its shots cut short and read
+    by the same gates as whole shots. So it can differ from the kit's cameraPath for the whole
+    clip, and a stretch too short to read a shot in is "can't tell", as the take itself is."""
+    from depthc import compare
+    from depthc.describe import UNREAD
+
+    clip = np.concatenate([panned(texture(), 25, 2), brighter(panned(texture(seed=23), 72, -2))])
+    ref = m.measure(clip, 24.0, picture=clip)
+    assert [shot["label"] for shot in ref.camera_shots] == ["pans left", "pans right"]
+    assert ref.camera_path["label"] == "pans right"
+    for frames, word in ((24, "pans left"), (27, "pans left"), (6, UNREAD)):
+        take = m.measure(clip[:frames], 24.0, picture=clip[:frames])
+        assert (take.camera_path or {"label": UNREAD})["label"] == word, frames
+        result = compare.compare_profiles(ref, take)
+        assert result.ref_path["label"] == result.gen_path["label"] == word, (frames, result.ref_path)
+
+
+def test_a_stretch_mostly_unread_inside_a_shot_read_whole_is_cant_tell():
+    """The overlap's shots pass the same gates as whole shots: SHOT_MIN_READ of the kept gaps."""
+    from depthc import compare
+    from depthc.describe import UNREAD
+
+    path = np.tile(np.array([[0.3, 0.0, 0.0]]), (24, 1))
+    path[:12] = np.nan  # half of the shot unread: the whole shot is still read
+    profile = m.MotionProfile(fps=24.0, deltas=np.zeros(24, np.float32), path=path, shots=[m.Shot(0, 25)])
+    assert profile.camera_path["label"] == m.path_label(0.3, 0.0, 0.0)
+    assert compare._path_word(profile, 17 / 24.0)["label"] == UNREAD  # 4 of its 16 gaps read
+    assert compare._path_word(profile, 25 / 24.0)["label"] == m.path_label(0.3, 0.0, 0.0)  # all 24
 
 
 def _fake_vision(monkeypatch, boxes: list[tuple[float, float, float, float]], outline: np.ndarray | None):
