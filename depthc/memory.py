@@ -17,7 +17,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
+from typing import Callable
 
 GB = 1024**3
 
@@ -84,10 +86,13 @@ def parse_vm_stat(text: str) -> int | None:
     return total * int(page.group(1))
 
 
+READ_TIMEOUT = 5.0  # seconds one `vm_stat` may take before the reading counts as failed
+
+
 def available_bytes() -> int | None:
     """What this machine has free right now, or None if it will not say."""
     try:
-        done = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5, check=True)
+        done = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=READ_TIMEOUT, check=True)
     except (OSError, subprocess.SubprocessError):
         return None
     return parse_vm_stat(done.stdout)
@@ -207,9 +212,8 @@ def decode_refusal(frame_bytes: int) -> str | None:
 def plan(shape: tuple[int, ...], input_size: int) -> Plan:
     """Decide this pass against this machine, right now.
 
-    ponytail: read once per pass, not during it. A machine that fills up after the pass starts can
-    still swap. Polling at each window would catch that, but what `vm_stat` calls free moves a lot on
-    a healthy Mac, so it needs a measured floor first or it stops good passes.
+    This reads the machine once, before the pass. Another app can still fill memory after the pass
+    starts, so `Watch` reads it again while the pass runs.
     """
     need = need_bytes(shape, input_size)
     allowed, why = _allowed_bytes()
@@ -231,3 +235,136 @@ def plan(shape: tuple[int, ...], input_size: int) -> Plan:
         lines.append("Or use a shorter clip or a lower resolution.")
     lines.append(f"To run it anyway, set {OVERRIDE_ENV} to the GB this pass may use.")
     return Plan(need, allowed, gpu_limit, "\n  ".join(lines))
+
+
+# While a pass runs. What `vm_stat` calls free (`available_bytes`), sampled every half second through
+# real default passes (`describe`, one pass at a time, nothing else running a model), with the
+# process's own footprint (`own_bytes`' reading) beside it. GB and seconds:
+#
+#     clip               free at start   lowest   at     of    drop   own peak
+#     640 x 360              11.15        5.38    9.1   37.8   5.77    5.80
+#     640 x 360              12.53        6.75   33.8   35.8   5.78    6.05
+#     480 x 270              12.09        6.24    9.1   36.3   5.85    6.07
+#     1280 x 720             10.77        5.97    9.1   27.8   4.81    5.71
+#     1280 x 720             11.94        5.41   34.8   37.9   6.53    7.33
+#     1280 x 720             12.14        6.12   34.8   37.3   6.01    6.75
+#     720 x 1280             10.79        5.17   13.1   37.8   5.61    7.29
+#     720 x 1280             12.02        5.94   30.8   37.3   6.08    6.82
+#     720 x 1280             11.93        5.72   34.8   36.8   6.21    7.31
+#     640 x 360, 30 s        10.63        4.56   16.6  132.8   6.07    7.06
+#     1280 x 720, 30 s       11.65        4.29   52.5   99.0   7.36    9.40
+#
+# The clips are 8 s unless marked; the 30 s ones are 8 s clips looped. The shape is the clip's, and a
+# matted clip runs cropped: the 1280 x 720 one looped to 30 s ran at 1280 x 534. "of" is the whole
+# command, model load and describe's own reading included. Of these rows only the two 30 s passes were
+# timed by phase, and both were lowest while the windows ran. On the 30 s 1280 x 534 one the work after
+# the last window took 1.9 s (alignment 0.95, stack 0.18, `normalize` 0.67), its lowest sample there
+# was 6.89 GB, and the watch read 4 times in it; the process's own peak, 9.40 GB, came 5 s after the pass,
+# in describe's own reading. Four of the 8 s passes were lowest 2.0 to 2.5 s before the command ended,
+# and an 8 s pass timed by phase ended about 3 s before its command, so those lows most likely came
+# after the pass too. Free fell by up to
+# 2.76 GB between two readings, and no pass stayed within 0.5 GB of its lowest for more than 2 readings
+# in a row. Every drop was at least 0.94 GB under what `need_bytes` asks for that clip, so a pass let in
+# at the very edge, with 1.5 GB to spare, would bottom out near 2.4 GB if nothing else grew. The floor
+# is half of that 1.5 GB, held for three readings in a row: about 1.7 GB under where such a pass would
+# bottom out, and a second or more of the machine below 0.75 GB before a pass is stopped.
+# ponytail: one 24 GB machine, four clip shapes, two 30 s clips, and never a machine in real trouble,
+# which was not safe to make. Under real pressure macOS may free pages in bursts, and a reading back over
+# the floor restarts the count. Three readings take a second or more, so memory that runs out in a
+# pass's last second stops nothing, and the command's own work after the pass (writing the kit,
+# describe's reading) is not watched at all. If a good pass is ever stopped or a stall gets through,
+# measure that machine the same way and set a floor per machine size; if the work after the pass is
+# ever seen to stall a machine, give it a watch of its own.
+WATCH_FLOOR = int(0.75 * GB)  # half of _KEEP_FREE
+WATCH_READINGS = 3  # in a row, under the floor, before a pass stops: a good pass's low held for 2 at most
+WATCH_EVERY = 0.5  # seconds between readings: each one starts `vm_stat`, and a pass settles far more often
+
+
+class Watch:
+    """Reads what this machine has free while a pass runs, and says when to stop it.
+
+    From `start` to `close` a thread of its own takes a reading every WATCH_EVERY seconds, so the
+    readings go on wherever the pass is: in a window, in upstream's alignment after the last one, or in
+    one long numpy call. That thread never stops the pass itself. The pass asks `check` at its stop
+    points and stops only there, so it is never cut off halfway through a step.
+    A pass stops once WATCH_READINGS readings in a row come in under WATCH_FLOOR, so a moment's dip does
+    not end a good pass, and once that has happened the stop stands even if the next reading recovers.
+    On a Mac a reading that fails counts as under the floor: `vm_stat` not answering is what a stalling
+    Mac looks like, as it is before a pass. Elsewhere there is no `vm_stat` to read at all, and the
+    check before the pass already works from half of RAM, so the watch stands down rather than stop
+    every pass. `DEPTHC_MEMORY_GB` sets what a pass may use; it does not let a pass run the machine out.
+    """
+
+    def __init__(self, read: Callable[[], int | None] | None = None):
+        self._read = read
+        self._under: list[int | None] = []
+        self._stop: str | None = None
+        self._done = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def reading(self) -> None:
+        """Take one reading, and settle the stop once the floor has held for long enough."""
+        try:
+            free = (self._read or available_bytes)()
+        except Exception:  # a reading that blew up did not say what is free, so it failed
+            free = None
+        if free is None and not _MAC:
+            return
+        if free is not None and free >= WATCH_FLOOR:
+            self._under.clear()
+            return
+        self._under.append(free)
+        if len(self._under) >= WATCH_READINGS and self._stop is None:
+            self._stop = _stopped_partway(list(self._under))
+
+    def check(self) -> str | None:
+        """None while the pass may go on; once it must stop, the words that say so. Reads nothing."""
+        return self._stop
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._sample, args=(self._done.wait,), name="depthc-memory-watch", daemon=True
+        )
+        self._thread.start()
+
+    def close(self) -> None:
+        """Stop reading, and wait for a reading still running to end, so the stop it settles can be checked.
+
+        The thread is waiting between readings nearly all the time, and then this returns at once. A
+        reading under way gets as long as `vm_stat` itself may take: a slow `vm_stat` is what a
+        struggling Mac looks like, and that reading may be the one that stops the pass.
+        """
+        self._done.set()
+        thread, self._thread = self._thread, None
+        if thread is None:
+            return
+        try:
+            thread.join(timeout=READ_TIMEOUT + 1.0)
+        except RuntimeError:  # its start was cut off before the thread said it ran; with `_done` set it
+            return  # reads once at most, into this watch, which nothing reads again
+        # ponytail: a reading that outlasts its own limit (a `vm_stat` that ignores the kill, or a `read`
+        # handed in that hangs) leaves the thread running after this returns. All it can still do is
+        # finish that reading and set a stop on this watch, which no stop point reads again: every pass
+        # makes its own watch, so it cannot stop the next pass, and it never touches the pass's memory.
+        # If one is ever seen, report it from here rather than wait longer.
+
+    def _sample(self, wait: Callable[[float], bool]) -> None:
+        while True:
+            self.reading()
+            if wait(WATCH_EVERY):  # True once `close` has been called
+                return
+
+
+def _stopped_partway(readings: list[int | None]) -> str:
+    last = readings[-1]
+    if last is None:
+        what = "this Mac stopped reporting how much memory is free"
+    else:
+        what = (
+            f"this machine was down to about {_gb(last)} free out of {_gb(total_bytes())}, "
+            f"under the {WATCH_FLOOR / GB:.2f} GB a running pass must leave free"  # 0.75, not "0.8"
+        )
+    return (
+        f"The depth pass stopped partway: {what}, {len(readings)} readings in a row.\n"
+        f"  Nothing was written. Close other apps and run it again."
+    )

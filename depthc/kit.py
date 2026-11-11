@@ -744,8 +744,14 @@ def write_replacing(path: Path, text: str) -> None:
         raise
 
 
-def read_results(kit_dir: Path) -> dict:
-    """The kit's fire log, or an empty one. A malformed file is never fatal."""
+def read_results(kit_dir: Path, *, strict: bool = False) -> dict:
+    """The kit's fire log, or an empty one. A malformed file is never fatal to a READER.
+
+    A missing file is an empty log. A file that exists but cannot be read as a fire log (bad
+    JSON, bytes that are not UTF-8 text, valid JSON of the wrong shape) reads as empty too,
+    so the index, `compare` and the sibling scan keep working. A WRITER must pass `strict=True`:
+    an unreadable log is not an empty one, and writing onto it would destroy paid evidence.
+    """
     path = Path(kit_dir) / "result.json"
     if path.is_file():
         try:
@@ -754,6 +760,14 @@ def read_results(kit_dir: Path) -> dict:
                 return data
         except (ValueError, OSError):  # ValueError holds bad JSON and bytes that are not text
             pass
+        # A symlink is replaced, never followed (write_replacing): the link holds no fires, and
+        # its target is someone else's file that the swap leaves alone, so there is nothing to lose.
+        if strict and not path.is_symlink():
+            raise ValueError(
+                f"{path} exists but cannot be read as a fire log, so nothing was written and "
+                f"the file was left untouched. It may hold fires you paid for: move it aside "
+                f"or repair it (valid JSON, an object with a \"fires\" list), then run this again."
+            )
     return {"schemaVersion": RESULT_SCHEMA_VERSION, "kitName": Path(kit_dir).name, "fires": []}
 
 
@@ -805,7 +819,7 @@ def record_result(
     if generation is not None:
         _refuse_a_recorded_generation(kit_dir, generation)
 
-    log = read_results(kit_dir)
+    log = read_results(kit_dir, strict=True)  # a write never lands on a log it cannot read
     log["kitName"] = Path(kit_dir).name
     log["schemaVersion"] = RESULT_SCHEMA_VERSION
     entry = {

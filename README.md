@@ -70,8 +70,15 @@ upload is the same anywhere, but no fire recorded in this repo used Variant B di
   `--input-size` when one would fit. A smaller size gives a coarser depth picture, so the tool never
   picks one for you. `DEPTHC_MEMORY_GB` sets the limit by hand. The 7.1 to 7.3 GB peak of a default
   pass was measured on one 24 GB Mac, and the estimate was checked there at eight picture sizes. For
-  other machines and clip shapes it is an estimate, with a hard limit on GPU memory behind it. The
-  check runs once per pass, so another app filling memory during a pass can still slow your Mac.
+  other machines and clip shapes it is an estimate, with a hard limit on GPU memory behind it. While
+  the pass runs the tool keeps reading what is free, twice a second, to the end of the pass: through
+  every window and through the work after the last one, where the windows are lined up, stacked and
+  scaled to grey. If another app takes that under 0.75 GB for three readings in a row, at least a
+  second, it stops the pass with a plain message and writes nothing. `DEPTHC_MEMORY_GB` does not turn
+  that off. That floor was set from real passes on one 24 GB Mac. What it cannot do: the stop lands
+  between two steps of the pass, never inside one (the longest measured step took under a second), so
+  memory that runs out in the last second of a pass does not stop it, and the writing that comes
+  after the pass is not watched.
 - **ffmpeg and ffprobe on your `PATH`.** Setup does not install them: `brew install ffmpeg`.
 - **git, curl and a network connection for setup,** which downloads about 1.1 GB. After that,
   everything runs locally.

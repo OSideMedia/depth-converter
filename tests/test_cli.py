@@ -253,6 +253,15 @@ class TestEverySurfaceVerifiesTheBinding:
         assert "[FAIL] binding" in _text(result)
         assert result.exit_code == 1  # and the command still says the kit is broken
 
+    def test_result_refuses_an_unreadable_log_cleanly_and_leaves_it_alone(self, tmp_path):
+        kit_dir = _fake_kit(tmp_path)
+        (kit_dir / "result.json").write_text("{not json")
+        result = runner.invoke(cli.app, ["result", str(kit_dir), "--verdict", "adhered"])
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)  # a refusal, not a traceback
+        assert "result.json" in _text(result) and "untouched" in _text(result)
+        assert (kit_dir / "result.json").read_text() == "{not json"
+
     def test_result_on_an_intact_kit_succeeds(self, tmp_path):
         kit_dir = _fake_kit(tmp_path)
         result = runner.invoke(cli.app, ["result", str(kit_dir), "--verdict", "adhered"])

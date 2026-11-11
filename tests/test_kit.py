@@ -783,10 +783,47 @@ def test_an_unknown_verdict_is_refused(tmp_path):
         kitlib.record_result(_kit_on_disk(tmp_path), verdict="great")
 
 
-def test_a_corrupt_result_file_is_replaced_not_fatal(tmp_path):
+def _one_fire_log(kit_dir) -> dict:
+    return {"schemaVersion": kitlib.RESULT_SCHEMA_VERSION, "kitName": kit_dir.name,
+            "fires": [{"firedAt": "2026-11-01T00:00:00+00:00", "verdict": "adhered", "notes": "paid"}]}
+
+
+@pytest.mark.parametrize("make", [
+    lambda log: json.dumps(log).encode("utf-16"),                  # not UTF-8 text
+    lambda log: json.dumps(log, indent=2).encode()[:-9],           # truncated JSON
+    lambda log: b"{not json",
+    lambda log: json.dumps(log["fires"]).encode(),                 # valid JSON, a list
+    lambda log: json.dumps({"kitName": "x", "fires": "none"}).encode(),  # no fires list
+    lambda log: json.dumps({k: v for k, v in log.items() if k != "fires"}).encode(),
+], ids=["utf16", "truncated", "not-json", "list", "fires-not-a-list", "no-fires"])
+def test_an_unreadable_fire_log_is_never_written_over(tmp_path, make):
+    """A fire is a paid generation. A log that cannot be read is not an empty log: recording
+    onto it must refuse, name the file, and leave its bytes exactly as they were."""
+    kit_dir = _kit_on_disk(tmp_path)
+    path = kit_dir / "result.json"
+    path.write_bytes(make(_one_fire_log(kit_dir)))
+    before = path.read_bytes()
+    with pytest.raises(ValueError) as err:
+        kitlib.record_result(kit_dir, verdict="partial")
+    message = str(err.value)
+    assert "result.json" in message and "untouched" in message and "move" in message
+    assert path.read_bytes() == before
+    # Read-only callers still work: a broken log shows as an unfired kit.
+    assert kitlib.read_results(kit_dir)["fires"] == []
+    assert kitlib.library_list(tmp_path)[0].verdict == "untested"
+
+
+def test_an_unreadable_log_also_stops_a_keyed_fire(tmp_path):
     kit_dir = _kit_on_disk(tmp_path)
     (kit_dir / "result.json").write_text("{not json")
-    assert kitlib.read_results(kit_dir)["fires"] == []
+    with pytest.raises(ValueError, match="untouched"):
+        kitlib.record_result(kit_dir, verdict="partial", generation_id=GEN)
+    assert (kit_dir / "result.json").read_text() == "{not json"
+
+
+def test_a_missing_result_file_is_an_empty_log_and_writing_works(tmp_path):
+    kit_dir = _kit_on_disk(tmp_path)
+    assert not (kit_dir / "result.json").exists()
     kitlib.record_result(kit_dir, verdict="partial")
     assert len(kitlib.read_results(kit_dir)["fires"]) == 1
 

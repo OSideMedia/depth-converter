@@ -31,8 +31,10 @@ output bytes do not change. `memory.py` then sets a limit from what the machine 
 
 from __future__ import annotations
 
+import contextvars
 import gc
 import sys
+import threading
 import time
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
@@ -95,7 +97,7 @@ def _in_groups(whole: Callable, device: str) -> Callable:
         for start in range(0, x.shape[0], BACKBONE_FRAMES):
             parts.append(whole(x[start:start + BACKBONE_FRAMES], n, reshape=reshape,
                                return_class_token=True, norm=norm))
-            _settle(device)
+            _checkpoint(device)
         return tuple(
             (torch.cat([part[layer][0] for part in parts]), torch.cat([part[layer][1] for part in parts]))
             for layer in range(len(parts[0]))
@@ -105,10 +107,63 @@ def _in_groups(whole: Callable, device: str) -> Callable:
 
 
 def bound_memory(model: torch.nn.Module, device: str) -> None:
-    """Keep a window's memory down, with no vendor edit and no change to the output."""
+    """Keep a window's memory down, with no vendor edit and no change to the output.
+
+    Each place it settles the GPU is also where a pass under `watching` reads the machine.
+    """
     model.pretrained.get_intermediate_layers = _in_groups(model.pretrained.get_intermediate_layers, device)
     for stage in model.head.motion_modules:
-        stage.register_forward_hook(lambda *_: _settle(device))
+        stage.register_forward_hook(lambda *_: _checkpoint(device))
+
+
+# The watch on the pass this thread is running, if any. The model is built once and kept, so its
+# settle points cannot carry a pass's watch themselves.
+_WATCH: contextvars.ContextVar[memory.Watch | None] = contextvars.ContextVar("depthc_watch", default=None)
+
+
+@contextmanager
+def watching():
+    """Stop a depth pass run inside this block if the machine runs out of memory partway.
+
+    `infer` runs every pass under it, from the first window to the end of `normalize`. Anything that
+    runs the model outside `infer` needs it too, as `smoke.py` has it. Each block gets a fresh
+    `memory.Watch`, reading from its own thread until the block ends, so one pass's dips never count
+    against the next.
+    """
+    watch = memory.Watch()
+    token = _WATCH.set(watch)
+    try:  # the thread starts in here, so an interrupt while it starts still closes it
+        watch.start()
+        yield
+    finally:
+        try:
+            watch.close()
+        finally:  # closing waits for the thread, and an interrupt can land in that wait
+            _WATCH.reset(token)
+    # Reached only when the block ran to its end. A reading still running at the pass's last stop point
+    # ends while `close` waits for it, so the stop it settles is checked here, once the thread is done.
+    stop = watch.check()
+    if stop:
+        raise _Stopped(stop)
+
+
+def _stop_if_told() -> None:
+    """A stop point: if the watch on this pass has said stop, the pass stops here."""
+    watch = _WATCH.get()
+    if watch is not None:
+        stop = watch.check()
+        if stop:
+            raise _Stopped(stop)
+
+
+def _checkpoint(device: str) -> None:
+    """Hand back what the GPU work just held, then stop here if the watch has said so.
+
+    These points come a dozen times a window, so a pass can stop partway through one. The per-window
+    hook comes once a window and never inside smoke's single window.
+    """
+    _settle(device)
+    _stop_if_told()
 
 
 def limit_gpu(device: str, limit: int) -> None:
@@ -158,7 +213,8 @@ def _window_hook(device: str, on_window: ProgressFn | None):
     of our own. Control returns to us after each loop body completes, which is precisely
     the moment to report progress and release MPS's cached allocations — the two hooks
     PLAN.md §2 asks for, with zero vendor edits and no reimplementation of their
-    scale/shift alignment maths.
+    scale/shift alignment maths. It is also a stop point for the memory watch, and it puts
+    the watch's stop points into the work after the last window too (`_tail_hook`).
     """
     import video_depth_anything.video_depth as vda
 
@@ -173,12 +229,57 @@ def _window_hook(device: str, on_window: ProgressFn | None):
             empty_cache(device)
             if on_window:
                 on_window(index + 1, total)
+            _stop_if_told()
 
     vda.tqdm = hooked
     try:
-        yield
+        with _tail_hook(vda):
+            yield
     finally:
         vda.tqdm = original
+
+
+class _StopBeforeStack:
+    """Upstream's `np`, with a stop point before `stack`: one call that copies the whole clip's depth."""
+
+    def __init__(self, numpy):
+        self._numpy = numpy
+
+    def __getattr__(self, name: str):
+        return getattr(self._numpy, name)
+
+    def stack(self, *args, **kwargs):
+        _stop_if_told()
+        return self._numpy.stack(*args, **kwargs)
+
+
+@contextmanager
+def _tail_hook(vda):
+    """Stop points in what upstream does after its last window, without editing a vendored file.
+
+    It aligns each window's depth to the one before into a second list, then stacks that list into one
+    array. No GPU work settles there, and on a long clip it is the CPU-side peak of the pass. The two
+    helpers the alignment calls once a window, and the `np` it stacks with, are rebound in its module
+    for the pass, as `tqdm` is, so each comes with a stop point first.
+    """
+    names = ("compute_scale_and_shift", "get_interpolate_frames", "np")
+    originals = {name: getattr(vda, name) for name in names}
+
+    def stopping_first(call: Callable) -> Callable:
+        def stopped_or_called(*args, **kwargs):
+            _stop_if_told()
+            return call(*args, **kwargs)
+
+        return stopped_or_called
+
+    vda.compute_scale_and_shift = stopping_first(originals["compute_scale_and_shift"])
+    vda.get_interpolate_frames = stopping_first(originals["get_interpolate_frames"])
+    vda.np = _StopBeforeStack(originals["np"])
+    try:
+        yield
+    finally:
+        for name, value in originals.items():
+            setattr(vda, name, value)
 
 
 @dataclass
@@ -215,6 +316,44 @@ class NotEnoughMemory(DepthFailure):
     """This machine cannot spare what the pass needs — see `memory.py`."""
 
 
+class _Stopped(NotEnoughMemory):
+    """The watch's stop, raised at a stop point. `infer` raises a fresh NotEnoughMemory in its place."""
+
+
+class PassAlreadyRunning(NotEnoughMemory):
+    """A second pass in a process that is running one: the memory it was sized with is already taken."""
+
+
+ALREADY_RUNNING = (
+    "Another depth pass is already running in this app, and the memory check before a pass counts on "
+    "there being only one.\n  Wait for it to finish, then run this one again."
+)
+
+# One depth pass at a time in a process, from the check before it to its end. The check sizes a pass
+# against what is free with no other pass of ours running, `limit_gpu` sets one limit for the whole
+# process, and the hooks rebind names in upstream's module for the length of a pass and put back what
+# they found, so two passes at once would size each other wrong and could leave each other's hooks in
+# place. A second pass is refused rather than made to wait: the UI already queues its conversions one
+# at a time (Gradio runs each event one call at a time unless told otherwise), so only a caller
+# running passes on threads of its own meets this, and waiting would hang a pass started from inside
+# another's progress callback on the lock its own thread holds.
+_ONE_PASS = threading.Lock()
+
+
+@contextmanager
+def _only_pass():
+    if not _ONE_PASS.acquire(blocking=False):
+        raise PassAlreadyRunning(ALREADY_RUNNING)
+    # ponytail: an interrupt landing between the line above and the `try` keeps the lock, and every
+    # later pass in this process is refused. Python gives no way to close that one-instruction gap;
+    # the command line exits on an interrupt anyway, and a UI caught there needs a restart. A lock
+    # that names its holder and can be taken back if this ever shows up in use.
+    try:
+        yield
+    finally:
+        _ONE_PASS.release()
+
+
 STOPPED_AT_LIMIT = (
     f"The depth pass stopped at its memory limit before it finished. Close other apps and "
     f"run it again, or use a smaller --input-size. To allow more, set "
@@ -226,7 +365,9 @@ def is_out_of_memory(error: RuntimeError) -> bool:
     return "out of memory" in str(error).lower()
 
 
-def normalize(depth: np.ndarray, invert: bool = False) -> tuple[np.ndarray, float, float]:
+def normalize(
+    depth: np.ndarray, invert: bool = False, between: Callable[[], None] | None = None
+) -> tuple[np.ndarray, float, float]:
     """Global (whole-clip) min/max normalization to uint8.
 
     This is upstream's normalization *logic*, reused deliberately: normalizing per-video
@@ -234,6 +375,7 @@ def normalize(depth: np.ndarray, invert: bool = False) -> tuple[np.ndarray, floa
     with VDA's cross-window scale/shift alignment it is why the output is flicker-free.
 
     VDA emits disparity, so larger values are nearer: the default is near = bright.
+    `between` runs between its whole-clip steps: `infer` hands it the memory watch's stop point.
     """
     # Casting NaN to uint8 is silent and yields zeros, so a broken run would otherwise
     # export as a plausible-looking all-black depth video. Fail loudly instead.
@@ -241,9 +383,13 @@ def normalize(depth: np.ndarray, invert: bool = False) -> tuple[np.ndarray, floa
         raise NonFiniteDepth(
             "Depth output contains NaN/Inf — refusing to encode a corrupt depth video."
         )
+    if between:
+        between()
 
     d_min = float(depth.min())
     d_max = float(depth.max())
+    if between:
+        between()
     span = d_max - d_min
     if span <= 0:
         # Degenerate (perfectly flat) depth — emit mid-gray rather than divide by zero.
@@ -269,6 +415,8 @@ def _run_windows(
             return model.infer_video_depth(
                 frames, fps, input_size=input_size, device=device, fp32=use_fp32
             )
+    except NotEnoughMemory:  # the watch's stop: `infer` lets go of the pass and says so
+        raise
     except RuntimeError as e:
         if not is_out_of_memory(e):
             raise
@@ -294,7 +442,20 @@ def infer(
         raise ValueError(f"--input-size must be a multiple of 14 (DINOv2 patches), got {input_size}")
     if precision not in PRECISIONS:
         raise ValueError(f"precision must be one of {PRECISIONS}, got {precision!r}")
+    with _only_pass():
+        return _one_pass(frames, fps, input_size, precision, invert, device, on_window, on_warn)
 
+
+def _one_pass(
+    frames: np.ndarray,
+    fps: float,
+    input_size: int,
+    precision: str,
+    invert: bool,
+    device: str | None,
+    on_window: ProgressFn | None,
+    on_warn: WarnFn | None,
+) -> DepthResult:
     # Before the model loads, so a pass that cannot fit touches nothing.
     plan = memory.plan(frames.shape, input_size)
     if plan.refusal:
@@ -306,47 +467,66 @@ def infer(
     use_fp32 = precision == "fp32" or device == "cpu"
 
     start = time.perf_counter()
-    depth, out_fps = _run_windows(
-        model, frames, fps, input_size, device, use_fp32, on_window
-    )
+    depth = normalized = None
+    # ponytail: a stop lands at a stop point, never inside one numpy call, so the longest single call
+    # sets how late it can come. Upstream's stack, and each step of `normalize`, goes over the whole
+    # clip's depth in one call: on 30 s of 1280 x 534 the stack took 0.18 s and all of `normalize`
+    # 0.67 s, in three calls. The watch's thread reads on through them. If a stop ever comes too late,
+    # run `normalize` a slice of frames at a time with a stop point between slices; the stack is
+    # upstream's, so it stays one call.
+    try:
+        with watching():
+            depth, out_fps = _run_windows(
+                model, frames, fps, input_size, device, use_fp32, on_window
+            )
 
-    # Reduced precision NaNs out on MPS. Rather than hand the user a black video, detect it
-    # and redo the clip at fp32 — which is the faster path anyway.
-    if not use_fp32 and not np.isfinite(depth).all():
-        message = (
-            f"{precision} produced non-finite depth on {device} (a known MPS defect) — "
-            f"retrying at fp32."
-        )
-        if on_warn:
-            on_warn(message)
-        del depth
+            # Reduced precision NaNs out on MPS. Rather than hand the user a black video, detect it
+            # and redo the clip at fp32 — which is the faster path anyway.
+            if not use_fp32 and not np.isfinite(depth).all():
+                message = (
+                    f"{precision} produced non-finite depth on {device} (a known MPS defect) — "
+                    f"retrying at fp32."
+                )
+                if on_warn:
+                    on_warn(message)
+                del depth
+                gc.collect()
+                # Mandatory: the poisoned graph survives into the next fp32 run without this.
+                empty_cache(device)
+                use_fp32 = True
+                depth, out_fps = _run_windows(
+                    model, frames, fps, input_size, device, True, on_window
+                )
+
+            elapsed = time.perf_counter() - start
+            _stop_if_told()
+            normalized, raw_min, raw_max = normalize(depth, invert=invert, between=_stop_if_told)
+            # Back-to-back conversions in one long-lived Gradio session must not creep toward
+            # OOM: drop the float32 intermediates before returning the uint8 result.
+            depth = None
+            _stop_if_told()  # what the watch read during the last step counts too
+    except _Stopped as stop:
+        message = str(stop)
+    else:
         gc.collect()
-        # Mandatory: the poisoned graph survives into the next fp32 run without this.
         empty_cache(device)
-        use_fp32 = True
-        depth, out_fps = _run_windows(
-            model, frames, fps, input_size, device, True, on_window
+        return DepthResult(
+            frames=normalized,
+            fps=out_fps,
+            device=device,
+            dtype="fp32" if use_fp32 else precision,
+            elapsed=elapsed,
+            raw_min=raw_min,
+            raw_max=raw_max,
+            inverted=invert,
         )
-
-    elapsed = time.perf_counter() - start
-    normalized, raw_min, raw_max = normalize(depth, invert=invert)
-
-    # Back-to-back conversions in one long-lived Gradio session must not creep toward
-    # OOM: drop the float32 intermediates before returning the uint8 result.
-    del depth
+    # Raised out here, not from the handler: the watch's error holds what the stopped pass held, the
+    # window's frames and tensors or the clip's depth, and a chained one would keep them alive in a UI
+    # that goes on running. Once it and the depth here are gone, collect them, then hand the GPU back.
+    depth = normalized = None
     gc.collect()
-    empty_cache(device)
-
-    return DepthResult(
-        frames=normalized,
-        fps=out_fps,
-        device=device,
-        dtype="fp32" if use_fp32 else precision,
-        elapsed=elapsed,
-        raw_min=raw_min,
-        raw_max=raw_max,
-        inverted=invert,
-    )
+    _settle(device)
+    raise NotEnoughMemory(message)
 
 
 def expected_windows(frame_count: int) -> int:

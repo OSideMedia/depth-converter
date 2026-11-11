@@ -5,6 +5,22 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **`depthc result` no longer writes over a fire log it cannot read.** If a kit's `result.json` was
+  there but unreadable (cut off, saved as UTF-16, or JSON of the wrong shape), the next fire was
+  written over it and every earlier fire was lost. Now the command refuses, says which file it left
+  untouched and to move it aside or repair it, and exits 1. A missing file still starts a new log,
+  and the index, `compare` and the library list still treat a broken log as an unfired kit.
+- **A depth pass now stops partway if the machine runs out of memory.** The check before a pass
+  read the machine once, so another app filling memory during the pass could still stall it. The
+  pass now keeps reading what is free, twice a second, from the first window to the end of the
+  pass, including the work after the last window (lining the windows up, stacking them, scaling to
+  grey), which took 1.9 s on a 30 s clip. If that stays under 0.75 GB for three readings in a row it
+  stops with a plain message, exits 1 and writes nothing. `DEPTHC_MEMORY_GB` does not turn it off,
+  and it never retries at a smaller size. A stop lands between two steps, never inside one, so
+  memory that runs out in a pass's last second, and the writing after the pass, are not covered. The
+  floor and the eleven real passes it was set from are beside it in `memory.py`. A second depth pass
+  started in the same app while one is running is refused in plain words; the UI already runs its
+  conversions one at a time.
 - **The camera is now read from the picture, not from the depth.** The real-footage failure in
   v0.16.1 came from the input: a depth picture of a real scene is mostly flat, so the people
   walking through a locked-off shot were nearly all the reader could see, and it named them a pan.
