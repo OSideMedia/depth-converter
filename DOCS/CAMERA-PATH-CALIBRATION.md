@@ -83,9 +83,10 @@ back to the region reader. `pic` is this reader, `rgb` is the region reader on t
 On the tuned clips it gains two buckets and loses two: a crane and a truck with a push each read
 one bucket better, and two buckets of a fast truck pick up "pulls out".
 
-**It has not been scored on real footage.** On the 17 spent clips below it names 12 of 12 moves
-and invents a move on 1 of 5 locked-off shots, but it was built while looking at those clips, so
-that is not a score. A score needs clips it has never seen.
+**On unseen real footage it failed** ("Second real-footage score" below): 7 of 10 moves, and a
+move invented on 2 of 7 locked-off shots. On the 17 spent clips it names 12 of 12 moves and
+invents a move on 1 of 5 locked-off shots, but it was built while looking at those clips, so that
+was never a score.
 
 **What it cannot do.**
 
@@ -290,13 +291,51 @@ out. It has no orbit, roll, handheld shake, whip pan or long lens. Messier foota
 and is unlikely to do better.
 
 **These clips are spent.** A reader changed after this score cannot be scored on the same 17 clips.
-It needs fresh ones. The reader was changed on 2026-11-11 (see "The reader now" above) and has
-not been scored yet.
+It needs fresh ones. The reader was changed on 2026-11-11 (see "The reader now" above) and scored on a
+second, fresh set the same day.
+
+## Second real-footage score: the picture reader (2026-11-11) — FAIL
+
+**The set.** 40 clips the reader had never seen, each 8 seconds: stock clips picked by eye from
+thumbnails, never with the reader, plus fixed windows cut from five videos the owner supplied
+(three dance videos shot on a phone stand, two film scenes). The plan, the window rule and the
+pass mark were written and hashed before the reader ran. Every clip was labelled by eye, then
+by a second model that never saw those labels; the two agreed on all 20 locked-off clips and on 3
+of 9 moves, and the owner ruled on the rest and on four clips promoted into the scored set.
+
+**Scored set: 10 moves and 7 locked-off shots. Pass mark: at most 1 move missed, no move named
+on a locked-off shot.**
+
+| | result |
+|---|---|
+| moves named | 7 of 10 |
+| locked-off shots with a move invented | 2 of 7 |
+| verdict | **FAIL** |
+
+The `--rgb` path gave 6 of 10 and the same 2 of 7.
+
+- **Missed:** a slow zoom along a wall and a faint pull-out (played backwards from a push-in) got
+  no move at all; a vertical move through trees was named a pan.
+- **Invented:** a person walking away from close to the lens, and a flower opening in time-lapse.
+  Both fill the frame, which is the limit named above.
+- **The other five locked-off shots** (walkers, cars, horses, falling leaves) were all read as
+  still. Small figures crossing a locked-off shot are the failure the first score found, and on
+  these clips it did not recur.
+
+**The messy clips, reported and not scored (23).** Of 15 more locked-off-style clips, a move was
+named on 8: 7 of the 11 dance windows and 1 of 4 stock clips. The dancers take up much of a
+vertical frame against a plain wall, so they outvote the background. Three film windows with
+cuts came back as a string of different moves, one per shot or more. Handheld crowd shots were
+named as tilts and pushes.
+
+**What it does not say.** There was no clean tilt in the fresh stock clips, so the only vertical
+move in the score is one promoted clip. On two clips the labellers disagreed on direction; the
+count is 7 of 10 either way. These 40 clips are now spent as well.
 
 ## Limitations
 
-- **Real footage is unscored for the current reader.** The depth read failed on it (see the
-  section above) and the picture read that replaced it has no score on unseen clips yet. The clay
+- **Both readers failed on real footage.** The depth read failed the first set and the picture
+  read that replaced it failed the second (7 of 10 moves, 2 of 7 locked-off shots). The clay
   figures in this file do not carry over to shots with people or vehicles moving through them.
 
 - **One scene.** Clay ground, rows of boxes and sky. The truth counts the static world
