@@ -176,3 +176,34 @@ def test_cli_describe_json_keeps_everything_else_off_stdout(clip_letterboxed, mo
     assert json.loads(result.stdout)["space"] == "depth"
     for said in ("matte detected", "depth", "MPS unavailable", "a warning from the pass"):
         assert said in result.stderr
+
+
+@pytest.mark.parametrize("flags", [[], ["--rgb"]])
+def test_cli_describe_reads_the_camera_from_the_picture(clip_3s, monkeypatch, flags):
+    """Depth or --rgb, the camera words come from the decoded picture, frame for frame."""
+    from typer.testing import CliRunner
+
+    from depthc import engine, motion as motionlib
+    from depthc.cli import app
+
+    def fake_pass(frames, fps, **_):
+        return engine.DepthResult(
+            frames=frames[..., 0], fps=fps, device="cpu", dtype="fp32", elapsed=0.0,
+            raw_min=0.0, raw_max=1.0, inverted=False,
+        )
+
+    seen = {}
+    real_measure = motionlib.measure
+
+    def measure(frames, fps, **kwargs):
+        seen["frames"], seen["picture"] = frames.shape, kwargs.get("picture")
+        return real_measure(frames, fps, **kwargs)
+
+    monkeypatch.setattr(engine, "pick_device", lambda: "cpu")
+    monkeypatch.setattr(engine, "infer", fake_pass)
+    monkeypatch.setattr(motionlib, "measure", measure)
+    result = CliRunner().invoke(app, ["describe", str(clip_3s), "--json", *flags])
+    assert result.exit_code == 0, result.output
+    assert seen["picture"] is not None
+    assert seen["picture"].ndim == 4 and seen["picture"].shape[-1] == 3
+    assert seen["picture"].shape[0] == seen["frames"][0]

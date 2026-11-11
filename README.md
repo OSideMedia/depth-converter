@@ -390,9 +390,12 @@ in`) and, when the ref is a camera-path ref, scores direction agreement as a cos
 ref it is named but not judged. Neither moves the suggested verdict: no measured fire has been
 scored on them yet, so they inform your read. `--no-regions` and `--no-camera-path` switch them
 off. The camera reader was scored against a known Blender camera on clay, and then on real
-footage, where it failed: it named 9 of 12 clean moves and invented a move on 4 of 5 locked-off
-shots with people or a train passing through. Treat the camera words as a hint to check by eye,
-most of all when they name a move on a shot that looks still. Both scores are in
+footage, where it failed: reading the depth picture, it named 9 of 12 clean moves and invented a
+move on 4 of 5 locked-off shots with people or a train passing through. Since then the camera is
+read from the picture instead (the kit's `source.mp4` on the reference side), with whatever moves
+on its own dropped first. That reader has no score on unseen footage yet, and a subject that
+fills the frame still reads as a pan. Treat the camera words as a hint to check by eye,
+most of all when they name a move on a shot that looks still. The scores and the method are in
 [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md).
 
 It ends with a *suggested* verdict (`adhered`, `partial`, `ignored`, `late`) and a ready-to-paste
@@ -418,8 +421,10 @@ the moving thing is the one the prompt named, which stays a by-eye call. The rad
 is recorded only when all four quadrants of the frame agree, so a subject walking toward the lens
 is not booked as a camera move.
 
-The camera words are the least reliable part. On real footage the reader invented moves on
-locked-off shots with people passing and missed slow push-ins, so check them against the picture
+The camera words are the least reliable part. They are read from the picture, on the depth path
+and with `--rgb` alike. Read from the depth, as they were until 2026-11-11, they invented moves
+on locked-off shots with people passing and missed slow push-ins; the picture read has not been
+scored on unseen footage yet, so check them against the picture
 (see [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md)).
 
 ### Reading how much a take boils and flickers

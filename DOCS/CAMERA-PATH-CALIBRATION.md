@@ -12,6 +12,7 @@ and the depth model both run on this Mac, and nothing calls a paid API.
     --estimators rgb-tex,blender-tex,vda-tex --tag texture                     # diagnostic 1
 ./.tools/uv run python scripts/calibrate_camera_path.py \
     --estimators rgb-sim,blender-sim --tag similarity                          # diagnostic 2
+./.tools/uv run python scripts/calibrate_camera_path.py --estimators rgb,pic --tag pic  # the picture reader
 ```
 
 Outputs land in `Outbox/calibration/` (`report*.md`, `results*.json`, the renders), which
@@ -39,7 +40,61 @@ is gitignored media. The numbers below are copied from those reports.
 take has texture everywhere. A miss here is a lower bound on the reader, not a forecast of
 what it does on a real take.
 
-## The reader now — regions vote (2026-11-01)
+## The reader now: tracked points on the picture (2026-11-11)
+
+Since 2026-11-11 every camera word (`describe`, `compare`'s PATH line, a kit's `cameraPath`) is
+read from the picture and never from the depth. `motion.camera_path` does it in four steps:
+
+1. **Track points.** Up to 600 corners per frame, followed to the next frame at a 320 px long
+   edge. A point is kept only when following it there and back lands where it started.
+2. **Drop what moves on its own.** One shift, scale and rotation is fitted to the points. A point
+   that does not go where the fit sends it is a person, a car or a wave, and it loses its vote.
+3. **Refuse a frame with no world in it.** If the fit carries fewer than half the points, the gap
+   names no camera.
+4. **Vote by region, as before.** The points that are left vote through the same 8×8 split and
+   the same stretch-then-shift reading as the region reader below, with the same floors and the
+   same words. A gap with fewer than 40 usable points, or with votes in fewer than 12 regions, is
+   handed to the region reader on the same picture.
+
+The reason is in "Real footage" below: a depth picture of a real scene is mostly flat, so what
+has an edge in it is whatever stands nearer than the rest, and in a locked-off shot that is the
+people walking through. They cast the votes. Tracking also resolves a slower move than dense
+flow on the 160 px grid, which is how the missed slow push-ins come back without lowering a floor.
+
+`compare` reads the reference's camera from the kit's own `source.mp4`. A kit without one, or
+one whose picture does not match its depth frame for frame, is read from the depth as before,
+and `compare` says so.
+
+**On clay it changes little, as it should.** Clay has almost nothing to track, so most gaps fall
+back to the region reader. `pic` is this reader, `rgb` is the region reader on the same picture:
+
+| | `rgb` | `pic` |
+|---|---|---|
+| Tuned clips, exact buckets | 162/168 | 158/168 |
+| Tuned, missed motion | 1 | 4 |
+| Held-out clips, exact buckets | 50/63 | 50/63 |
+| Held-out, missed motion | 4 | 5 |
+| False motion, both sets | 0 | 0 |
+
+On the tuned clips it loses five buckets and gains one: the first or last half-second of three
+pushes and pulls reads as still, two buckets of a fast truck pick up "pulls out", and a truck
+with a push keeps its push for one bucket more.
+
+**It has not been scored on real footage.** On the 17 spent clips below it names 12 of 12 moves
+and invents a move on 1 of 5 locked-off shots, but it was built while looking at those clips, so
+that is not a score. A score needs clips it has never seen.
+
+**What it cannot do.**
+
+- **A subject that fills the frame is the world.** The one locked-off clip it still gets wrong is
+  a train passing close to the lens: most of the points are on the train, so the train wins the
+  vote and the shot reads as a pan. Nothing in the picture says which layer is the background.
+- **The camera share still comes from the depth.** `compare` judges the PATH cosine only when the
+  reference's camera share is 0.30 or more, and that share is still measured on the depth
+  picture, with the weakness described below. It was left alone here.
+- Everything under Limitations at the end still applies.
+
+## The region reader: regions vote (2026-11-01)
 
 The two diagnostics further down left a decision open, and this is the answer to it.
 `motion.flow_series` now reads the camera in four steps:
@@ -217,8 +272,10 @@ at all, however short. Pass: at most 2 moves missed, and no invented move on a l
   path found. Neither is
   the better reader on this set.
 - **The 8 takes.** Every take's main segment held "pushes in". Every one also said "tilts up"
-  beside it, which neither watcher named. That may be a real effect of pushing toward a face above
-  the centre of the frame, or a false word. It has not been settled.
+  beside it, which neither watcher named. It is real (checked 2026-11-11): the takes push toward
+  a face above the centre of the frame, the picture goes from chest to face, and an independent
+  point tracker puts the centre of the push near the top edge. A push aimed above centre slides
+  the picture down as it grows, and that is the word for it.
 
 **What this means.** The camera words in `describe` and the PATH line in `compare` are a hint to
 check by eye, most of all a move named on a shot that looks still while something moves through
@@ -230,12 +287,14 @@ out. It has no orbit, roll, handheld shake, whip pan or long lens. Messier foota
 and is unlikely to do better.
 
 **These clips are spent.** A reader changed after this score cannot be scored on the same 17 clips.
-It needs fresh ones.
+It needs fresh ones. The reader was changed on 2026-11-11 (see "The reader now" above) and has
+not been scored yet.
 
 ## Limitations
 
-- **Real footage fails.** See the section above. The clay figures in this file do not carry over
-  to shots with people or vehicles moving through them.
+- **Real footage is unscored for the current reader.** The depth read failed on it (see the
+  section above) and the picture read that replaced it has no score on unseen clips yet. The clay
+  figures in this file do not carry over to shots with people or vehicles moving through them.
 
 - **One scene.** Clay ground, rows of boxes and sky. The truth counts the static world
   only, so a crossing subject is excluded from it by construction.

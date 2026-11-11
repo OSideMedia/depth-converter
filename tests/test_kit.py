@@ -1354,3 +1354,36 @@ def test_a_grading_command_refuses_a_broken_envelope_before_doing_any_work(tmp_p
 def test_help_still_names_the_dialects_with_a_broken_envelope(tmp_path):
     root = _copy_with_a_broken_envelope(tmp_path)
     assert _depthc(root, "--help").returncode == 0
+
+
+def test_a_kit_build_reads_its_camera_from_the_source_picture(clip_3s, tmp_path, monkeypatch):
+    """kit.json's cameraPath comes from the picture the depth was made from, frame for frame;
+    the depth picture is the read that invented moves on real footage. The depth pass is stood
+    in for, so this runs on CI too: the wiring is what is under test, not the model."""
+    from typer.testing import CliRunner
+
+    from depthc import cli, engine, motion as motionlib
+
+    def fake_pass(frames, fps, **_):
+        return engine.DepthResult(
+            frames=frames[..., 0], fps=fps, device="cpu", dtype="fp32", elapsed=0.0,
+            raw_min=0.0, raw_max=1.0, inverted=False,
+        )
+
+    calls = []
+    real_measure = motionlib.measure
+
+    def measure(frames, fps, with_flow=True, picture=None):
+        calls.append((frames.shape, with_flow, None if picture is None else picture.shape))
+        return real_measure(frames, fps, with_flow=with_flow, picture=picture)
+
+    monkeypatch.setattr(engine, "pick_device", lambda: "cpu")
+    monkeypatch.setattr(engine, "infer", fake_pass)
+    monkeypatch.setattr(motionlib, "measure", measure)
+    lib = tmp_path / "lib"
+    result = CliRunner().invoke(cli.app, ["kit", str(clip_3s), "--library", str(lib), "--tags", "cam"])
+    with_flow = [c for c in calls if c[1]]
+    assert len(with_flow) == 1, result.output
+    depth_shape, _, picture_shape = with_flow[0]
+    assert picture_shape is not None and picture_shape[-1] == 3
+    assert picture_shape[0] == depth_shape[0]

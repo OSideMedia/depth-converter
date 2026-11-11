@@ -14,7 +14,9 @@ reports, read as words; the camera words alone have a clay score
 (DOCS/CAMERA-PATH-CALIBRATION.md). Nothing votes; there is no verdict. It measures WHAT MOVED and WHICH WAY,
 in depth space (the channel Seedance actually reads a ref through), on the same analysis
 grid as a kit — so a description of a generation and the profile of the kit that drove it
-speak the same units. It cannot read intent, identity, mood, or whether the "subject" is
+speak the same units. The camera words are the one exception: since 2026-11-11 they are read
+from the picture the depth was made from (`motion.camera_path`), because the depth picture
+invented moves on real footage. It cannot read intent, identity, mood, or whether the "subject" is
 the one the prompt named — that stays a by-eye call.
 """
 

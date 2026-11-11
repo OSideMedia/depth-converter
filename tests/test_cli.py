@@ -298,9 +298,9 @@ def test_compare_lets_go_of_the_reference_before_the_generated_clips_pass(clip_t
     seen = {}
     real_measure = motionlib.measure
 
-    def measure(frames, fps):
+    def measure(frames, fps, **kwargs):
         seen["reference"] = weakref.ref(frames)
-        return real_measure(frames, fps)
+        return real_measure(frames, fps, **kwargs)
 
     def depth_pass(*_a, **_k):
         seen["alive during the pass"] = seen["reference"]() is not None
@@ -310,6 +310,59 @@ def test_compare_lets_go_of_the_reference_before_the_generated_clips_pass(clip_t
     monkeypatch.setattr(cli, "_depth_profile", depth_pass)
     result = runner.invoke(cli.app, ["compare", str(kit_dir), str(clip_tiny)])
     assert seen.get("alive during the pass") is False, _text(result)
+
+
+def _compare_reference_call(kit_dir, clip, monkeypatch):
+    """Run `compare` up to the generated clip's pass and return what the reference was measured with."""
+    seen = {}
+    real_measure = motionlib.measure
+
+    def measure(frames, fps, **kwargs):
+        seen["frames"], seen["picture"] = frames.shape[0], kwargs.get("picture")
+        return real_measure(frames, fps, **kwargs)
+
+    def depth_pass(*_a, **_k):
+        raise VideoIOError("stop here")
+
+    monkeypatch.setattr(motionlib, "measure", measure)
+    monkeypatch.setattr(cli, "_depth_profile", depth_pass)
+    seen["result"] = runner.invoke(cli.app, ["compare", str(kit_dir), str(clip)])
+    return seen
+
+
+def test_compare_reads_the_reference_camera_from_the_kits_own_picture(clip_tiny, tmp_path, monkeypatch):
+    """The depth picture is the read that invented moves on real footage; the kit carries the picture."""
+    import shutil
+
+    kit_dir = _fake_kit(tmp_path)
+    shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+    shutil.copy(clip_tiny, kit_dir / "source.mp4")
+    seen = _compare_reference_call(kit_dir, clip_tiny, monkeypatch)
+    assert seen["picture"] is not None, _text(seen["result"])
+    assert seen["picture"].shape[0] == seen["frames"] and seen["picture"].shape[-1] == 3
+    assert "read from the depth picture" not in _text(seen["result"])
+
+
+def test_compare_says_so_when_a_kit_has_no_picture_to_read_the_camera_from(clip_tiny, tmp_path, monkeypatch):
+    import shutil
+
+    kit_dir = _fake_kit(tmp_path)
+    shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+    seen = _compare_reference_call(kit_dir, clip_tiny, monkeypatch)
+    assert seen["picture"] is None
+    assert "read from the depth picture" in _text(seen["result"])
+
+
+def test_compare_will_not_pair_a_depth_with_a_picture_of_another_length(clip_tiny, clip_3s, tmp_path, monkeypatch):
+    """A source.mp4 that is not frame for frame with the depth is not its picture."""
+    import shutil
+
+    kit_dir = _fake_kit(tmp_path)
+    shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+    shutil.copy(clip_3s, kit_dir / "source.mp4")
+    seen = _compare_reference_call(kit_dir, clip_tiny, monkeypatch)
+    assert seen["picture"] is None
+    assert "read from the depth picture" in _text(seen["result"])
 
 
 class TestAClipTooBigToRead:
