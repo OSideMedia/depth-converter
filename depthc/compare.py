@@ -56,7 +56,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from depthc.motion import REGION_COLS, REGION_ROWS, MotionProfile, path_label, sparkline
+from depthc.describe import UNREAD
+from depthc.motion import (
+    PATH_RADIAL_STILL, REGION_COLS, REGION_ROWS, SHOT_MIN_READ, MotionProfile, path_label, sparkline,
+)
 
 BUCKET_SECONDS = 0.5
 # Lags measured in buckets: ±1.0 s in 0.5 s steps. Wider lags on a 5 s clip leave too few
@@ -252,7 +255,11 @@ def _region_layer(
 
 
 def _path_series(profile: MotionProfile, seconds: float) -> np.ndarray | None:
-    """[buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`."""
+    """[buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`.
+
+    A picture-read path has NaN rows where the camera could not be read: a bucket is the mean
+    of its readable rows, and NaN itself when fewer than SHOT_MIN_READ of them were.
+    """
     if profile.path is None or not profile.path.size:
         return None
     step = max(1, int(round(BUCKET_SECONDS * profile.fps)))
@@ -260,20 +267,34 @@ def _path_series(profile: MotionProfile, seconds: float) -> np.ndarray | None:
     n = path.shape[0] - step + 1
     if n <= 0:
         return None
-    return np.stack([path[i:i + step].mean(axis=0) for i in range(0, n, step)])
+    out = []
+    for i in range(0, n, step):
+        chunk = path[i:i + step]
+        finite = np.isfinite(chunk).all(axis=1)
+        out.append(chunk[finite].mean(axis=0) if finite.mean() >= SHOT_MIN_READ else np.full(3, np.nan))
+    return np.stack(out)
 
 
-def _path_summary(series: np.ndarray) -> dict:
+def _path_summary(series: np.ndarray, radial_floor: float = PATH_RADIAL_STILL) -> dict:
+    finite = np.isfinite(series).all(axis=1)
+    if not finite.any():
+        return {"dx": None, "dy": None, "radial": None, "label": UNREAD}
+    series = series[finite]
     moving = np.any(series != 0, axis=1)
     if not moving.any():
         return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
     dx, dy, radial = (float(v) for v in series[moving].mean(axis=0))
     return {"dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
-            "label": path_label(dx, dy, radial)}
+            "label": path_label(dx, dy, radial, radial_floor)}
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float | None:
-    """Cosine similarity of two flattened series; None when either has no direction."""
+    """Cosine similarity of two flattened series; None when either has no direction.
+
+    Buckets either side could not read (NaN) are left out of both.
+    """
+    both = np.isfinite(a).all(axis=-1) & np.isfinite(b).all(axis=-1) if a.ndim > 1 else np.isfinite(a) & np.isfinite(b)
+    a, b = a[both], b[both]
     a, b = a.ravel().astype(np.float64), b.ravel().astype(np.float64)
     na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
     if na < 1e-9 or nb < 1e-9:
@@ -383,8 +404,8 @@ def compare_profiles(
         if rp is not None and gp is not None:
             n = min(rp.shape[0], gp.shape[0])
             rp, gp = rp[:n], gp[:n]
-            comparison.ref_path = _path_summary(rp)
-            comparison.gen_path = _path_summary(gp)
+            comparison.ref_path = _path_summary(rp, ref.radial_floor)
+            comparison.gen_path = _path_summary(gp, gen.radial_floor)
             comparison.path_judged = ref.camera is not None and ref.camera >= PATH_JUDGE_SHARE
             comparison.path_cos = _cosine(rp, gp) if comparison.path_judged else None
 

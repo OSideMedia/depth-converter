@@ -95,6 +95,7 @@ def test_the_numbers_match_the_markers_on_any_machine():
 
     assert collected("slow") == EXPECTED["real-model test, no VDA assets"]
     assert collected("vendor and not slow") == EXPECTED["needs the vendored VDA checkout"]
+    assert collected("vision and not slow and not vendor") == EXPECTED["needs Apple Vision"]
 
 
 def test_every_expected_reason_is_one_the_suite_really_gives():

@@ -416,7 +416,10 @@ def run_case(name: str, estimators: list[str], rebuild: bool) -> dict:
         else:
             path = estimate(kit, which)
             np.save(cached, path)
-        est_buckets = path_buckets(path, 24.0)
+        # The picture reader names a zoom from its own floor (it reads the zoom across half a
+        # second); every other reader from the region reader's.
+        floor = motion.PATH_RADIAL_SLOW if which == "pic" else motion.PATH_RADIAL_STILL
+        est_buckets = path_buckets(path, 24.0, radial_floor=floor)
         score = calibrate.score_buckets(truth_buckets, est_buckets)
         score["said"] = _runs(est_buckets)
         row["estimators"][which] = score

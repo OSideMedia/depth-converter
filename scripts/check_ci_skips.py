@@ -7,7 +7,8 @@ in either direction is a failure: more means a test lost its reach, and fewer me
 written down here is no longer true.
 
 On RED: read the reason it prints. A new test that needs the model wants the `slow` marker, and
-then the number below goes up by one in the same commit. A reason not listed here is the run
+then the number below goes up by one in the same commit; a new test that runs Apple Vision wants
+the `vision` marker, likewise (CI runs ubuntu, which has no Vision). A reason not listed here is the run
 losing something it used to do, so fix that rather than add it to the list.
 """
 
@@ -24,6 +25,7 @@ EXPECTED = {
     "real-model test, no VDA assets": 11,
     "needs the vendored VDA checkout": 4,
     "no OSIDE checkout beside this repo": 1,
+    "needs Apple Vision": 2,
 }
 
 

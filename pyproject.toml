@@ -19,6 +19,7 @@ dependencies = [
     "huggingface-hub",
     "gradio",
     "typer",
+    "pyobjc-framework-vision>=11 ; sys_platform == 'darwin'",
 ]
 
 # NEVER add xformers (no macOS story; VDA's motion_module.py try/excepts it)
@@ -57,4 +58,5 @@ testpaths = ["tests"]
 markers = [
     "slow: real-model tests (deselect with '-m \"not slow\"')",
     "vendor: imports the vendored VDA checkout without running the model",
+    "vision: runs Apple Vision for real (macOS 14+ only; off in every other test)",
 ]

@@ -568,7 +568,10 @@ def kit(
 
         # Measured on the frames themselves rather than the encoded file: same arrays, same
         # count, same fps for both sides, which is what makes the retention ratio meaningful.
-        depth_motion = motionlib.measure(job.result.frames, job.result.fps, picture=job.frames)
+        depth_motion = motionlib.measure(
+            job.result.frames, job.result.fps, picture=job.frames,
+            near="dark" if job.result.inverted else "bright",
+        )
         source_motion = motionlib.measure(job.frames, job.result.fps, with_flow=False)
         motion_block = motionlib.manifest_block(depth_motion, source_motion)
 
@@ -740,10 +743,23 @@ def _print_scout(clip: Path, result, indent: str = "    ") -> None:
         )
 
     best = result.best
-    typer.echo(
-        f"{indent}{YELLOW}!{OFF} ranked by HOW MUCH motion, not how many things are moving — "
-        f"check sheet.png for a second figure walking into the window."
-    )
+    share = result.second_figure
+    if share is None:
+        typer.echo(
+            f"{indent}{YELLOW}!{OFF} ranked by HOW MUCH motion, not how many things are moving — "
+            f"check sheet.png for a second figure walking into the window."
+        )
+    elif share >= motionlib.SECOND_FIGURE_SHARE:
+        typer.echo(
+            f"{indent}{YELLOW}! a second figure is in frame for {share * 100:.0f}% of the clip.{OFF} "
+            f"The ranking counts how much moves, not who: pick a window without one "
+            f"(see each window's note) and check sheet.png."
+        )
+    else:
+        typer.echo(
+            f"{indent}{DIM}people counted: two or more in frame for {share * 100:.0f}% of the clip. "
+            f"Only people are counted; check sheet.png for any other second motion.{OFF}"
+        )
     typer.echo(
         f"{indent}{DIM}./.tools/uv run depthc kit {shlex.quote(str(clip))} "
         f"--trim {best.start:g} {best.end:g} --dialect {checks.DEFAULT_DIALECT} "
@@ -972,6 +988,24 @@ def _kit_picture(kit_dir: Path, count: int):
     return motionlib.fit_picture(frames, count)
 
 
+def _ref_near(kit_dir: Path, variant: str | None) -> str | None:
+    """Which end of a kit's ref is near, for the camera reader's no-Vision fallback: "bright" as
+    the model writes it, "dark" when the build or the variant inverted it, None when the ref is
+    not a depth at all (the edges variant) or the manifest cannot say."""
+    import json
+
+    from depthc import kit as kitlib
+
+    if variant == "edges":
+        return None
+    try:
+        settings = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text()).get("settings") or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    inverted = bool(settings.get("invert")) != (variant == "invert")
+    return "dark" if inverted else "bright"
+
+
 def _depth_profile(info, resolution: str, input_size: int, precision: str,
                    trim_seconds: float | None = None):
     """Decode a clip (matte stripped, optionally trimmed), run the depth pass, profile it.
@@ -1171,7 +1205,7 @@ def compare(
                 "no usable source.mp4 beside this kit's depth, so the reference camera on the "
                 "PATH line is read from the depth picture, which invents moves on real footage."
             )
-        ref_profile = motionlib.measure(ref_frames, 24.0, picture=ref_picture)
+        ref_profile = motionlib.measure(ref_frames, 24.0, picture=ref_picture, near=_ref_near(kit_dir, variant))
         del ref_frames, ref_picture  # the depth pass below needs the room, and the memory check counts on it
 
         gen_info = probe_file(generated)
