@@ -389,7 +389,10 @@ generation: when the mirror wins clearly, the report says `MIRRORED — moves th
 in`) and, when the ref is a camera-path ref, scores direction agreement as a cosine; on a body
 ref it is named but not judged. Neither moves the suggested verdict: no measured fire has been
 scored on them yet, so they inform your read. `--no-regions` and `--no-camera-path` switch them
-off. The camera reader was scored against a known Blender camera, clay only, in
+off. The camera reader was scored against a known Blender camera on clay, and then on real
+footage, where it failed: it named 9 of 12 clean moves and invented a move on 4 of 5 locked-off
+shots with people or a train passing through. Treat the camera words as a hint to check by eye,
+most of all when they name a move on a shot that looks still. Both scores are in
 [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md).
 
 It ends with a *suggested* verdict (`adhered`, `partial`, `ignored`, `late`) and a ready-to-paste
@@ -414,6 +417,10 @@ do they agree. `--json` for a machine-readable block. Description only: it canno
 the moving thing is the one the prompt named, which stays a by-eye call. The radial push/pull term
 is recorded only when all four quadrants of the frame agree, so a subject walking toward the lens
 is not booked as a camera move.
+
+The camera words are the least reliable part. On real footage the reader invented moves on
+locked-off shots with people passing and missed slow push-ins, so check them against the picture
+(see [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md)).
 
 ### Reading how much a take boils and flickers
 
