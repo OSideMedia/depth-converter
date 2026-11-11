@@ -136,8 +136,10 @@ def watching():
         watch.start()
         yield
     finally:
-        watch.close()
-        _WATCH.reset(token)
+        try:
+            watch.close()
+        finally:  # closing waits for the thread, and an interrupt can land in that wait
+            _WATCH.reset(token)
     # Reached only when the block ran to its end. A reading still running at the pass's last stop point
     # ends while `close` waits for it, so the stop it settles is checked here, once the thread is done.
     stop = watch.check()
@@ -342,6 +344,10 @@ _ONE_PASS = threading.Lock()
 def _only_pass():
     if not _ONE_PASS.acquire(blocking=False):
         raise PassAlreadyRunning(ALREADY_RUNNING)
+    # ponytail: an interrupt landing between the line above and the `try` keeps the lock, and every
+    # later pass in this process is refused. Python gives no way to close that one-instruction gap;
+    # the command line exits on an interrupt anyway, and a UI caught there needs a restart. A lock
+    # that names its holder and can be taken back if this ever shows up in use.
     try:
         yield
     finally:

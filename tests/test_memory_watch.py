@@ -515,6 +515,28 @@ def test_an_interrupt_while_the_watch_starts_leaves_no_watch_behind(threaded, mo
     assert isinstance(engine.infer(frames, 24.0), engine.DepthResult), "the interrupted pass kept the lock"
 
 
+def test_an_interrupt_while_the_watch_closes_still_takes_the_watch_off_the_pass(monkeypatch):
+    """Closing waits for the thread, up to a reading's own limit, and Ctrl-C can land in that wait.
+    The pass's watch must still come off the context, or whatever runs next there inherits it."""
+    import contextvars
+
+    monkeypatch.setattr(memory, "available_bytes", lambda: PLENTY)
+
+    def close(self) -> None:
+        self._done.set()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(memory.Watch, "close", close)
+
+    def interrupted_block():
+        with pytest.raises(KeyboardInterrupt):
+            with engine.watching():
+                pass
+        return engine._WATCH.get()
+
+    assert contextvars.copy_context().run(interrupted_block) is None
+
+
 def test_the_override_does_not_let_a_pass_run_the_machine_out(stand_in, monkeypatch):
     """The stand-in fixture sets DEPTHC_MEMORY_GB, so the tests above already run under it. Said
     here on its own so a change to that fixture cannot quietly drop the case."""
