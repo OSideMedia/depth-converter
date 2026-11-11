@@ -330,6 +330,18 @@ def _compare_reference_call(kit_dir, clip, monkeypatch):
     return seen
 
 
+def _record_crop(kit_dir, crop):
+    """Set the crop a fake kit says it was built with (its stock manifest names a 1920-wide one)."""
+    import json
+
+    from depthc import kit as kitlib
+
+    manifest_path = kit_dir / kitlib.KIT_MANIFEST
+    manifest = json.loads(manifest_path.read_text())
+    manifest["source"]["crop"] = crop
+    manifest_path.write_text(json.dumps(manifest))
+
+
 def test_compare_reads_the_reference_camera_from_the_kits_own_picture(clip_tiny, tmp_path, monkeypatch):
     """The depth picture is the read that invented moves on real footage; the kit carries the picture."""
     import shutil
@@ -337,6 +349,7 @@ def test_compare_reads_the_reference_camera_from_the_kits_own_picture(clip_tiny,
     kit_dir = _fake_kit(tmp_path)
     shutil.copy(clip_tiny, kit_dir / "depth.mp4")
     shutil.copy(clip_tiny, kit_dir / "source.mp4")
+    _record_crop(kit_dir, None)
     seen = _compare_reference_call(kit_dir, clip_tiny, monkeypatch)
     assert seen["picture"] is not None, _text(seen["result"])
     assert seen["picture"].shape[0] == seen["frames"] and seen["picture"].shape[-1] == 3
@@ -360,6 +373,40 @@ def test_compare_will_not_pair_a_depth_with_a_picture_of_another_length(clip_tin
     kit_dir = _fake_kit(tmp_path)
     shutil.copy(clip_tiny, kit_dir / "depth.mp4")
     shutil.copy(clip_3s, kit_dir / "source.mp4")
+    _record_crop(kit_dir, None)  # so the length is the only thing wrong with it
+    seen = _compare_reference_call(kit_dir, clip_tiny, monkeypatch)
+    assert seen["picture"] is None
+    assert "read from the depth picture" in _text(seen["result"])
+
+
+def test_compare_crops_the_kits_picture_the_way_the_build_recorded(clip_letterboxed, tmp_path, monkeypatch):
+    """source.mp4 is kept uncropped. A build that recorded a rectangle is read through it, and one
+    that recorded none (`--crop none`) keeps its matte: neither is re-guessed at compare time."""
+    import shutil
+
+    heights = {}
+    for name, crop in (("rect", "320:100:0:70"), ("none", None)):
+        root = tmp_path / name
+        root.mkdir()
+        kit_dir = _fake_kit(root)
+        shutil.copy(clip_letterboxed, kit_dir / "depth.mp4")
+        shutil.copy(clip_letterboxed, kit_dir / "source.mp4")
+        _record_crop(kit_dir, crop)
+        seen = _compare_reference_call(kit_dir, clip_letterboxed, monkeypatch)
+        assert seen["picture"] is not None, _text(seen["result"])
+        heights[name] = seen["picture"].shape[1] / seen["picture"].shape[2]
+    assert heights["rect"] == pytest.approx(100 / 320, abs=0.02)
+    assert heights["none"] == pytest.approx(240 / 320, abs=0.02)  # the matte kept: auto would give 160/320
+
+
+def test_compare_refuses_a_recorded_crop_that_does_not_fit_the_picture(clip_tiny, tmp_path, monkeypatch):
+    """A rectangle larger than source.mp4 means the two do not belong together: say so, read the depth."""
+    import shutil
+
+    kit_dir = _fake_kit(tmp_path)
+    shutil.copy(clip_tiny, kit_dir / "depth.mp4")
+    shutil.copy(clip_tiny, kit_dir / "source.mp4")
+    _record_crop(kit_dir, "1920:804:0:140")
     seen = _compare_reference_call(kit_dir, clip_tiny, monkeypatch)
     assert seen["picture"] is None
     assert "read from the depth picture" in _text(seen["result"])

@@ -12,8 +12,8 @@ the code's history. Started 2026-09-06.
   the ones that move on their own, and let the rest vote the way the region reader did. Slow
   push-ins the old read lost come back with the floors unchanged. `compare` reads the reference
   from the kit's `source.mp4` and says so when a kit has none. On clay it is level with the region
-  reader on the held-out clips (50 of 63) and four buckets behind on the tuned ones (158 of 168),
-  with no false motion. **It has no score on unseen real footage yet**, a subject that fills the
+  reader on the tuned clips (162 of 168) and two buckets ahead on the held-out ones (52 of 63
+  against 50), with no false motion. **It has no score on unseen real footage yet**, a subject that fills the
   frame still reads as a pan, and the camera share is still measured on the depth. The camera words
   still do not vote in any verdict.
 - The "tilts up" the reader put beside every push-in on the 8 takes is settled: it is real. Those

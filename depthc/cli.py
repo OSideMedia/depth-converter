@@ -933,18 +933,31 @@ def _kit_picture(kit_dir: Path, count: int):
     None when the kit has no source.mp4, it cannot be read, or it does not come out frame for
     frame with the depth (`motion.fit_picture`). Decoded small: the camera is read at a 320 px
     long edge, so 480p is already more than it uses.
+
+    Cropped to the rectangle the build recorded in kit.json (`source.crop`, null for none):
+    source.mp4 is kept uncropped, and a build told `--crop none` or handed a rectangle must be
+    read the way it was built. Only a kit that recorded nothing has its matte looked for.
     """
-    from depthc import motion as motionlib
-    from depthc.video_io import VideoIOError, detect_crop, probe as probe_file, read_frames, target_size
+    import json
+
+    from depthc import kit as kitlib, motion as motionlib
+    from depthc.video_io import Crop, VideoIOError, detect_crop, probe as probe_file, read_frames, target_size
 
     source = kit_dir / "source.mp4"
     if not source.is_file():
         return None
     try:
+        recorded = json.loads((kit_dir / kitlib.KIT_MANIFEST).read_text()).get("source")
+    except (OSError, ValueError, AttributeError):
+        recorded = None
+    try:
         info = probe_file(source)
-        rect = detect_crop(info)
+        if isinstance(recorded, dict) and "crop" in recorded:
+            rect = Crop.parse(recorded["crop"]) if recorded["crop"] else None
+        else:
+            rect = detect_crop(info)
         frames = read_frames(info, fps=24.0, size=target_size(info, "480p", crop=rect), crop=rect)
-    except VideoIOError:
+    except (VideoIOError, ValueError):
         return None
     return motionlib.fit_picture(frames, count)
 

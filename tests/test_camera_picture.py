@@ -122,7 +122,33 @@ def test_a_slow_push_the_region_reader_loses_is_still_a_push():
     assert moving_share(m.flow_series(clip, 24.0).path) < 0.5  # the old read, same predicate
     path = m.camera_path(clip, 24.0)
     assert moving_share(path) > 0.9
-    assert float(path[:, 2].mean()) > 0
+    assert words(path) == "pushes in"  # it clears the naming floor, not merely zero
+
+
+def test_a_short_pan_is_not_averaged_away_by_the_still_shot_after_it():
+    """Half a second of pan, then seven seconds held, with a little sensor noise on every frame.
+    Tracking noise on the held gaps must read as still, or it dilutes the pan to nothing."""
+    base = texture()
+    rng = np.random.default_rng(3)
+    clip = np.stack([
+        np.clip(np.roll(base, min(i, 12) * 2, axis=1).astype(int)
+                + rng.choice([-1, 0, 1], base.shape, p=[0.005, 0.99, 0.005]), 0, 255).astype(np.uint8)
+        for i in range(180)
+    ])
+    path = m.camera_path(clip, 24.0)
+    assert words(path) == "pans left"
+    assert moving_share(path) < 0.15
+    profile = m.measure(clip, 24.0, picture=clip)
+    assert profile.camera_path is not None and profile.camera_path["label"] == "pans left"
+
+
+def test_a_held_shot_reads_as_exact_zeros():
+    rng = np.random.default_rng(5)
+    base = texture()
+    clip = np.stack([
+        np.clip(base.astype(int) + rng.integers(-2, 3, base.shape), 0, 255).astype(np.uint8) for _ in range(48)
+    ])
+    assert not np.any(m.camera_path(clip, 24.0))
 
 
 # ------------------------------------------------------------------------------ the two exits

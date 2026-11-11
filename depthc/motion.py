@@ -143,6 +143,9 @@ TRACK_FIT_PX = 0.75
 TRACK_MIN_SHARE = 0.5
 # A region of the 8x8 split votes with this many surviving points; its vote is their median travel.
 TRACK_REGION_POINTS = 2
+# A tracked gap counts as moving when the path averaged over this long around it clears the
+# naming floors (`_settle`). Half a second: the bucket every camera word is read in.
+TRACK_SETTLE_SECONDS = 0.5
 # WHERE the path is read. Flow only shows on pixels with texture in two directions (the aperture
 # problem): a flat wall moves without showing it, and in an all-pixel median it votes zero. So the
 # path is read on pixels whose structure-tensor strength clears this share of the frame's strongest
@@ -484,10 +487,36 @@ def _camera_path_from(grid: np.ndarray, tracked: np.ndarray, fps: float = 24.0) 
             untracked.append(index)
         elif reading is not None:
             path[index] = reading
+    path = _settle(path, fps)
     if untracked:
         fallback = flow_series(grid, fps).path
         path[untracked] = fallback[untracked]
     return path
+
+
+def _settle(path: np.ndarray, fps: float) -> np.ndarray:
+    """Zero the gaps where the camera is not moving, as `flow_series` does with its static floor.
+
+    Everything that reads a path takes a zero row to mean "still" and averages the rest
+    (`MotionProfile.camera_path`, the half-second buckets). Tracking never returns an exact zero:
+    a held shot comes back as hundredths of a pixel of noise on every gap, and 169 such gaps
+    averaged with 10 gaps of a real pan would read as static. So a gap is kept only where the
+    path around it, averaged over TRACK_SETTLE_SECONDS, would earn a word from `path_label`.
+    Averaging first is what keeps a slow push: each gap of it is under the floor's noise, the
+    half-second around it is not.
+    """
+    gaps = path.shape[0]
+    if gaps == 0:
+        return path
+    span = max(1, min(gaps, int(round(TRACK_SETTLE_SECONDS * fps))))
+    kernel = np.ones(span, dtype=np.float64) / span
+    # 'same' with the tail counted honestly: divide by how many gaps each window really held
+    held = np.convolve(np.ones(gaps), kernel, mode="same")
+    around = np.stack([np.convolve(path[:, k], kernel, mode="same") / held for k in range(3)], axis=1)
+    moving = (np.hypot(around[:, 0], around[:, 1]) >= PATH_STILL) | (np.abs(around[:, 2]) >= PATH_RADIAL_STILL)
+    settled = path.copy()
+    settled[~moving] = 0.0
+    return settled
 
 
 def camera_path(picture: np.ndarray, fps: float = 24.0) -> np.ndarray:

@@ -42,8 +42,9 @@ what it does on a real take.
 
 ## The reader now: tracked points on the picture (2026-11-11)
 
-Since 2026-11-11 every camera word (`describe`, `compare`'s PATH line, a kit's `cameraPath`) is
-read from the picture and never from the depth. `motion.camera_path` does it in four steps:
+Since 2026-11-11 the camera words (`describe`, `compare`'s PATH line, a kit's `cameraPath`) are
+read from the picture instead of the depth. The one exception is `compare` on a kit that has no
+usable `source.mp4`, described further down. `motion.camera_path` does it in five steps:
 
 1. **Track points.** Up to 600 corners per frame, followed to the next frame at a 320 px long
    edge. A point is kept only when following it there and back lands where it started.
@@ -55,13 +56,16 @@ read from the picture and never from the depth. `motion.camera_path` does it in 
    the same stretch-then-shift reading as the region reader below, with the same floors and the
    same words. A gap with fewer than 40 usable points, or with votes in fewer than 12 regions, is
    handed to the region reader on the same picture.
+5. **Call a held shot still.** Tracking never returns an exact zero, so a gap counts as moving
+   only where the path averaged over the half-second around it would earn a word.
 
 The reason is in "Real footage" below: a depth picture of a real scene is mostly flat, so what
 has an edge in it is whatever stands nearer than the rest, and in a locked-off shot that is the
 people walking through. They cast the votes. Tracking also resolves a slower move than dense
 flow on the 160 px grid, which is how the missed slow push-ins come back without lowering a floor.
 
-`compare` reads the reference's camera from the kit's own `source.mp4`. A kit without one, or
+`compare` reads the reference's camera from the kit's own `source.mp4`, cropped to the
+rectangle the build recorded. A kit without one, or
 one whose picture does not match its depth frame for frame, is read from the depth as before,
 and `compare` says so.
 
@@ -70,15 +74,14 @@ back to the region reader. `pic` is this reader, `rgb` is the region reader on t
 
 | | `rgb` | `pic` |
 |---|---|---|
-| Tuned clips, exact buckets | 162/168 | 158/168 |
-| Tuned, missed motion | 1 | 4 |
-| Held-out clips, exact buckets | 50/63 | 50/63 |
-| Held-out, missed motion | 4 | 5 |
+| Tuned clips, exact buckets | 162/168 | 162/168 |
+| Tuned, missed motion | 1 | 0 |
+| Held-out clips, exact buckets | 50/63 | 52/63 |
+| Held-out, missed motion | 4 | 3 |
 | False motion, both sets | 0 | 0 |
 
-On the tuned clips it loses five buckets and gains one: the first or last half-second of three
-pushes and pulls reads as still, two buckets of a fast truck pick up "pulls out", and a truck
-with a push keeps its push for one bucket more.
+On the tuned clips it gains two buckets and loses two: a crane and a truck with a push each read
+one bucket better, and two buckets of a fast truck pick up "pulls out".
 
 **It has not been scored on real footage.** On the 17 spent clips below it names 12 of 12 moves
 and invents a move on 1 of 5 locked-off shots, but it was built while looking at those clips, so
