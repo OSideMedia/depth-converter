@@ -424,8 +424,9 @@ is not booked as a camera move.
 
 The camera words are the least reliable part. They are read from the picture, on the depth path
 and with `--rgb` alike. Read from the depth, as they were until 2026-11-11, they invented moves
-on locked-off shots with people passing and missed slow push-ins; the picture read has not been
-scored on unseen footage yet, so check them against the picture
+on locked-off shots with people passing and missed slow push-ins; the picture read failed its own
+score on unseen footage (7 of 10 moves, a move invented on 2 of 7 locked-off shots), so check
+them against the picture
 (see [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md)).
 
 ### Reading how much a take boils and flickers

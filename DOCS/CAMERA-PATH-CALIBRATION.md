@@ -90,8 +90,9 @@ was never a score.
 
 **What it cannot do.**
 
-- **A subject that fills the frame is the world.** The one locked-off clip it still gets wrong is
-  a train passing close to the lens: most of the points are on the train, so the train wins the
+- **A subject that fills the frame is the world.** On the spent clips the one locked-off shot it still gets
+  wrong is a train passing close to the lens, and on the fresh ones a person close to the lens and
+  a flower opening: most of the points are on the subject, so the subject wins the
   vote and the shot reads as a pan. Nothing in the picture says which layer is the background.
 - **The camera share still comes from the depth.** `compare` judges the PATH cosine only when the
   reference's camera share is 0.30 or more, and that share is still measured on the depth
@@ -229,7 +230,8 @@ on an off-centre push. The joint fit is the reverse.
 
 ## What this changes, and what it does not
 
-- **Both diagnostics stay in the calibration script.** Only the region reader is in `depthc`.
+- **Both diagnostics stay in the calibration script.** Of the estimators compared here only the region reader went into
+  `depthc`; the picture reader above replaced it as the first read on 2026-11-11.
 - **It moves words and informational lines, not verdicts.** `compare`'s PATH numbers,
   `describe`'s camera words and every camera share line change for every kit, including a share
   that now crosses the line where PATH is judged or a clip counts as camera-led. The PATH line
@@ -287,8 +289,8 @@ the frame. They still do not vote in any verdict, and should not until a reader
 passes on clips it has never seen.
 
 **What it does not say.** The set was the easy case: a clip that could not be read by eye was left
-out. It has no orbit, roll, handheld shake, whip pan or long lens. Messier footage is unmeasured
-and is unlikely to do better.
+out. It has no orbit, roll, handheld shake, whip pan or long lens. Messier footage was unmeasured
+at this score and was expected to do no better; the second score below reports some.
 
 **These clips are spent.** A reader changed after this score cannot be scored on the same 17 clips.
 It needs fresh ones. The reader was changed on 2026-11-11 (see "The reader now" above) and scored on a
