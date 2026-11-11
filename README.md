@@ -439,7 +439,10 @@ the moving thing is the one the prompt named, which stays a by-eye call. The rad
 is recorded only when all four quadrants of the frame agree, so a subject walking toward the lens
 is not booked as a camera move. A clip with cuts is described shot by shot (`Shots: 3, cut at
 2.1s, 4.5s`), and a stretch whose camera could not be read says `can't tell`, never `locked off`;
-`--json` lists both (`shots`, `cameraUnread`).
+`--json` lists both (`shots`, `cameraUnread`). Each shot's camera is read once, and every camera
+word follows that read: the times only say when, so a shot read as moving always has its move
+named and a shot read as still has none. A pan and its return inside one shot cancel in that
+read, so such a shot reads `locked off`.
 
 The camera words are the least reliable part. They are read from the picture, on the depth path
 and with `--rgb` alike. Read from the depth, as they were until 2026-11-11, they invented moves

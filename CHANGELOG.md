@@ -60,14 +60,19 @@ the code's history. Started 2026-09-06.
   - On the clips the reader had already seen (development signal, not a score): the first set
     went from a move invented on 1 of 5 locked-off shots to 0 of 5 with 12 of 12 moves kept; the
     second set's scored clips went from 7 to 8 of 10 moves with 2 of 7 locked-off shots still
-    wrong (wind on grass, a flower); and 7 of its 15 messy locked-off-style clips still get a move
-    (first printed as 6, from a run made before each shot's last part-second was worded).
-  - **Fixed after review.** A shot's length is counted in gaps everywhere, so a shot long enough to
-    be read is never then called locked off by `describe`. No bucket mixes two shots, in `compare`'s
-    PATH series and cosine as in `describe`, and a single word for a clip with cuts (the kit's
-    `cameraPath`, `describe`'s overall line, `compare`'s PATH line) is the longest read shot's, not
-    an average across a cut. The camera-path calibration counts "can't tell" in its own column. Two
-    bodies Vision finds with no outline count as two people.
+    wrong (wind on grass, a flower); and 5 of its 15 messy locked-off-style clips still get a move
+    (8 before; the figures in `DOCS/CAMERA-PATH-CALIBRATION.md` say which change moved which).
+  - **Fixed after two reviews: one camera, read per shot.** The per-shot read (`cameraShots`)
+    and the half-second buckets each had their own rule for what was too short to count, and they
+    disagreed: a shot named a move could be called locked off by `describe`, or "can't tell" by
+    `compare`. Now every camera word is derived from the shot read (the rule is written once, in
+    `depthc/motion.py`): only a whole shot can be too short to read; inside a shot no gap is
+    dropped; one word for a clip (the kit's `cameraPath`, `describe`'s overall line, `compare`'s
+    PATH line) is the longest read shot's, from its own gaps; and bucket words follow their shot's
+    read, so a shot read as still has no move inside it and a shot read as moving has one. No bucket
+    mixes two shots. Limit: a pan and its return inside one shot cancel, and that shot reads still
+    everywhere. The camera-path calibration counts "can't tell" in its own column. Every body Vision
+    finds is masked and counted, by its outline or, where it drew none for that body, by its box.
 
 ## v0.16.1 — 2026-11-10
 

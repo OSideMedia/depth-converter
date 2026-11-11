@@ -58,8 +58,8 @@ import numpy as np
 
 from depthc.describe import UNREAD
 from depthc.motion import (
-    PATH_RADIAL_STILL, REGION_COLS, REGION_ROWS, SHOT_MIN_READ, MotionProfile, bucket_rows, main_shot,
-    path_label, sparkline,
+    REGION_COLS, REGION_ROWS, SHOT_MIN_READ, MotionProfile, bucket_rows, main_shot, path_word,
+    sparkline,
 )
 
 BUCKET_SECONDS = 0.5
@@ -255,13 +255,14 @@ def _region_layer(
     return table, weight_table, structure, mirror
 
 
-def _path_buckets(profile: MotionProfile, seconds: float) -> tuple[np.ndarray, np.ndarray] | None:
-    """([buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`, [buckets] shot).
+def _path_series(profile: MotionProfile, seconds: float) -> np.ndarray | None:
+    """[buckets, 3] mean (dx, dy, radial) per FULL bucket over the first `seconds`: the direction
+    series the cosine compares. It names nothing; the PATH words come from `_path_word`.
 
     A picture-read path has NaN rows where the camera could not be read: a bucket is the mean
     of its readable rows, and NaN itself when fewer than SHOT_MIN_READ of it were. No bucket mixes
     two shots (`motion.bucket_rows`): a pan left cut against a pan right inside one half-second
-    averaged to no move at all. The second array says which shot each bucket was read from.
+    averaged to no move at all.
     """
     if profile.path is None or not profile.path.size:
         return None
@@ -270,49 +271,32 @@ def _path_buckets(profile: MotionProfile, seconds: float) -> tuple[np.ndarray, n
     buckets = bucket_rows(path.shape[0], step, profile.shots)
     if not buckets:
         return None
-    out, owners = [], []
-    for owner, rows, size in buckets:
+    out = []
+    for _, rows, size in buckets:
         chunk = path[rows]
         finite = np.isfinite(chunk).all(axis=1)
         out.append(chunk[finite].mean(axis=0) if finite.sum() / size >= SHOT_MIN_READ else np.full(3, np.nan))
-        owners.append(owner)
-    return np.stack(out), np.array(owners, dtype=np.int32)
+    return np.stack(out)
 
 
-def _path_series(profile: MotionProfile, seconds: float) -> np.ndarray | None:
-    """The bucket means of `_path_buckets`, without the shots."""
-    buckets = _path_buckets(profile, seconds)
-    return None if buckets is None else buckets[0]
-
-
-def _main_owner(profile: MotionProfile, seconds: float) -> int | None:
-    """The shot the PATH summary names over the first `seconds` (`motion.main_shot`), the window
-    `_path_buckets` reads; 0 on a path with no shots, where every bucket's owner is 0. Over a whole
-    clip it is the shot `MotionProfile.camera_path` names."""
-    if profile.shots is None:
-        return 0
-    return main_shot(profile.shots, int(round(seconds * profile.fps)))
-
-
-def _path_summary(
-    series: np.ndarray, radial_floor: float = PATH_RADIAL_STILL,
-    owners: np.ndarray | None = None, main: int | None = 0,
-) -> dict:
-    """The camera word for a whole bucket series. Given `owners` (the shot each bucket was read
-    from), only the buckets of shot `main` count, the shot `MotionProfile.camera_path` names
-    (`motion.main_shot`): an average across a cut names neither shot."""
-    finite = np.isfinite(series).all(axis=1)
-    if owners is not None:
-        finite &= owners == (-2 if main is None else main)
-    if not finite.any():
-        return {"dx": None, "dy": None, "radial": None, "label": UNREAD}
-    series = series[finite]
-    moving = np.any(series != 0, axis=1)
-    if not moving.any():
-        return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
-    dx, dy, radial = (float(v) for v in series[moving].mean(axis=0))
-    return {"dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
-            "label": path_label(dx, dy, radial, radial_floor)}
+def _path_word(profile: MotionProfile, seconds: float) -> dict:
+    """The PATH word for the first `seconds` of a profile, by the ONE CAMERA rule (`depthc.motion`):
+    the word of `main_shot` over the window, read from that shot's own gaps, so it is the kit's
+    cameraPath whenever the window is the whole clip. Never from the time buckets: the longest
+    shot of three short ones can own none of them, and was called "can't tell". A path read the
+    old way (no shots) is one stretch."""
+    unread = {"dx": None, "dy": None, "radial": None, "label": UNREAD}
+    if profile.path is None or not profile.path.size:
+        return unread
+    path = profile.path[: int(round(seconds * profile.fps))]
+    rows = path
+    if profile.shots is not None:
+        main = main_shot(profile.shots, path.shape[0])
+        if main is None:
+            return unread
+        rows = path[profile.shots[main].gaps]
+    word = path_word(rows, profile.radial_floor)
+    return unread if word is None else word
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float | None:
@@ -427,12 +411,12 @@ def compare_profiles(
              comparison.structure_r, comparison.mirror_r) = layer
 
     if camera_path:
-        rb, gb = _path_buckets(ref, overlap), _path_buckets(gen, overlap)
-        if rb is not None and gb is not None:
-            n = min(rb[0].shape[0], gb[0].shape[0])
-            rp, gp = rb[0][:n], gb[0][:n]
-            comparison.ref_path = _path_summary(rp, ref.radial_floor, rb[1][:n], _main_owner(ref, overlap))
-            comparison.gen_path = _path_summary(gp, gen.radial_floor, gb[1][:n], _main_owner(gen, overlap))
+        rp, gp = _path_series(ref, overlap), _path_series(gen, overlap)
+        if rp is not None and gp is not None:
+            n = min(rp.shape[0], gp.shape[0])
+            rp, gp = rp[:n], gp[:n]
+            comparison.ref_path = _path_word(ref, overlap)
+            comparison.gen_path = _path_word(gen, overlap)
             comparison.path_judged = ref.camera is not None and ref.camera >= PATH_JUDGE_SHARE
             comparison.path_cos = _cosine(rp, gp) if comparison.path_judged else None
 

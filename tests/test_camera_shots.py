@@ -210,7 +210,8 @@ def test_describe_words_each_shot_on_its_own_and_lists_what_it_could_not_read():
 def test_compare_gives_no_camera_word_where_it_could_not_read():
     from depthc import compare
 
-    assert compare._path_summary(np.full((4, 3), np.nan))["label"] == "can't tell"
+    blind = m.MotionProfile(fps=24.0, deltas=np.zeros(48, np.float32), path=np.full((48, 3), np.nan))
+    assert compare._path_word(blind, 2.0)["label"] == "can't tell"
     ref = np.array([[0.3, 0.0, 0.0], [np.nan] * 3, [0.3, 0.0, 0.0]])
     gen = np.array([[0.3, 0.0, 0.0], [-5.0, 0.0, 0.0], [0.3, 0.0, 0.0]])
     assert compare._cosine(ref, gen) == pytest.approx(1.0)  # the unread bucket is left out of both
@@ -332,36 +333,105 @@ def test_scout_clip_counts_people_twice_a_second(clip_3s, monkeypatch):
 
 
 # ------------------------------------------------------------- the review of this round
-# Four findings from a review of the round's diff; each test below failed on the round as first
-# committed.
+# Findings from two reviews of the round's diff; each test below failed on the code it reviewed.
+# The rule they hold the reader to is ONE CAMERA, READ PER SHOT (depthc/motion.py): every camera
+# word is derived from the per-shot read in cameraShots, so none can contradict it.
+
+def hold(base: np.ndarray, frames: int) -> np.ndarray:
+    return np.repeat(base[None], frames, axis=0)
+
+
+def hold_then_pan(base: np.ndarray, held: int, moving: int, step: int = 2) -> np.ndarray:
+    """One shot: the wall held, then sliding `step` px a frame."""
+    return np.concatenate([hold(base, held), np.stack([np.roll(base, (i + 1) * step, axis=1) for i in range(moving)])])
+
+
+def pan_then_hold(base: np.ndarray, moving: int, held: int, step: int = 2) -> np.ndarray:
+    return hold_then_pan(base, held, moving, step)[::-1].copy()
+
+
+def cut_together(*shots: np.ndarray) -> np.ndarray:
+    """Shots on their own walls and in turn at three brightnesses, so every join is a cut."""
+    looks = (lambda frames: frames, brighter, darker)
+    return np.concatenate([looks[index % 3](shot) for index, shot in enumerate(shots)])
+
+
+def generated_clips(fps: float):
+    """Hold, pan and cut combinations at `fps`, Codex's cases among them."""
+    s = int(round(fps))
+    wall = [texture(seed=seed) for seed in (7, 23, 31, 41)]
+    for frames in range(4, 13):  # a held second, then a short pan (the first review)
+        yield f"hold+pan{frames}", cut_together(hold(wall[0], s), panned(wall[1], frames, 2))
+    for moving in range(3, 10):  # a held second, then a shot that holds and then pans briefly
+        yield f"hold+hold-pan{moving}", cut_together(hold(wall[0], s), hold_then_pan(wall[1], s // 2 + 1, moving))
+    held, moving = (13, 5) if s == 24 else (16, 7)  # Codex: the remainder describe dropped
+    yield "codex-remainder", cut_together(hold(wall[0], s), hold_then_pan(wall[1], held, moving))
+    outer, middle = (8, 9) if s == 24 else (10, 11)  # Codex: the longest shot owns no bucket
+    for step in (2, -2):
+        yield f"codex-three-pans{step}", cut_together(
+            panned(wall[0], outer, step), panned(wall[1], middle, -step), panned(wall[2], outer, step))
+    for frames in (6, 7, 9, 13, 20):
+        yield f"pan{frames}+hold", cut_together(panned(wall[0], frames, -2), hold(wall[1], s))
+        yield f"pan-hold{frames}", cut_together(pan_then_hold(wall[2], frames, s // 2))
+    yield "hold", hold(wall[0], s * 2)
+    yield "pan", panned(wall[0], s, 2)
+    yield "pan+pan", cut_together(panned(wall[0], s, 2), panned(wall[1], s + 1, -2))
+
+
+@pytest.mark.parametrize("fps", [24.0, 30.0])
+def test_no_camera_word_ever_contradicts_the_shot_read(fps):
+    """For every generated clip: describe's line and segments, the kit's cameraPath and compare's
+    PATH word agree with cameraShots. A shot named a move has that word inside it in describe and
+    no "locked off" or "can't tell" for the clip; a shot read as still has no move inside it; an
+    unread shot is "can't tell"; and the one word for the clip is its main shot's."""
+    from depthc import compare
+    from depthc.describe import UNREAD, describe
+
+    for name, clip in generated_clips(fps):
+        profile = m.measure(clip, fps, picture=clip)
+        shots = profile.camera_shots
+        assert shots, name
+        d = describe(profile)
+        record = d.as_dict()
+        text = " ".join(d.sentences)
+        for shot in shots:
+            said = [s["label"] for s in _segments_inside(record, shot, "cameraSegments")]
+            if shot["label"] is None:
+                assert _segments_inside(record, shot, "cameraUnread") and not said, (name, shot, said)
+            elif shot["label"] == "static":
+                assert set(said) <= {"static"}, (name, shot, said)
+            else:
+                assert shot["label"] in said, (name, shot, said)
+        if any(shot["label"] not in (None, "static") for shot in shots):
+            assert "locked off" not in text and "Camera: can't tell" not in text, (name, text)
+        main = m.main_shot(profile.shots)
+        word = None if main is None else shots[main]["label"]
+        kit = m.manifest_block(profile).get("cameraPath")
+        assert (kit or {}).get("label") == word, (name, kit, shots)
+        result = compare.compare_profiles(profile, profile)
+        assert result.ref_path is not None and result.ref_path["label"] == (word or UNREAD), (name, result.ref_path, shots)
+
+
+def test_bucket_words_follow_the_shot_read():
+    """The shot read decides whether a shot moved; its buckets only say when (`follow_shot`)."""
+    from depthc.describe import UNREAD, follow_shot
+
+    zero = (0.0, 0.0, 0.0)
+    still, unread = ("static", 0.0, zero), (UNREAD, 0.0, zero)
+    left = ("pans left", 0.5, (0.5, 0.0, 0.0))
+    stirred = ("static", 0.04, (0.04, 0.0, 0.0))  # some motion, under the floor on its own
+    word = {"dx": 0.3, "dy": 0.0, "radial": 0.0, "label": "pans left"}
+    named = ("pans left", 0.3, (0.3, 0.0, 0.0))
+    held = {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
+    assert follow_shot([still, left, unread], held) == [still, still, unread]
+    assert follow_shot([still, left, unread], word) == [still, left, unread]
+    assert follow_shot([still, stirred, unread], word) == [still, named, unread]
+    assert follow_shot([still, still, unread], word) == [named, named, unread]
+    assert follow_shot([still, left], None) == [unread, unread]
+
 
 def _segments_inside(record: dict, shot: dict, key: str) -> list[dict]:
     return [s for s in record[key] if shot["startSeconds"] - 0.01 <= s["start"] and s["end"] <= shot["endSeconds"] + 0.01]
-
-
-@pytest.mark.parametrize("fps", [24.0, 25.0, 30.0])
-def test_a_shot_long_enough_to_read_always_gets_a_word_from_describe(fps):
-    """A held second, a cut, then a pan of 4 to 12 frames. Whatever a shot is called in cameraShots,
-    describe says the same inside it: a word for a word, "can't tell" for None. Counted in frames
-    by the shot gate and in gaps by the last bucket, a six-frame pan at 24 fps (eight at 30) was
-    read "pans left" and then dropped, and describe called the clip locked off."""
-    from depthc.describe import describe
-
-    held = np.repeat(texture()[None], int(round(fps)), axis=0)
-    for frames in range(4, 13):
-        clip = np.concatenate([held, brighter(panned(texture(seed=31), frames, 2))])
-        d = describe(m.measure(clip, fps, picture=clip))
-        record = d.as_dict()
-        shots = record["shots"]
-        assert shots is not None and len(shots) == 2, (fps, frames)
-        for shot in shots:
-            if shot["label"] is None:
-                assert _segments_inside(record, shot, "cameraUnread"), (fps, frames, shot)
-            else:
-                said = [s["label"] for s in _segments_inside(record, shot, "cameraSegments")]
-                assert shot["label"] in said, (fps, frames, shot, said)
-        if any(shot["label"] not in (None, "static") for shot in shots):
-            assert "locked off" not in " ".join(d.sentences), (fps, frames)
 
 
 def test_compare_never_averages_a_bucket_across_a_cut():
@@ -393,20 +463,29 @@ def test_a_clip_with_cuts_is_summed_up_by_one_shot_never_an_average_of_two():
     assert result.path_judged and result.path_cos == pytest.approx(1.0)
 
 
-def test_two_bodies_with_no_outline_are_counted_as_two(monkeypatch):
-    """Vision found two bodies and drew no outline: each box is its own person. As one union they
-    counted one, and the scout's second-figure warning never fired. Vision is faked here, so the
-    test runs everywhere; the real thing is in the `vision` tests below."""
+def _fake_vision(monkeypatch, boxes: list[tuple[float, float, float, float]], outline: np.ndarray | None):
+    """Vision, Quartz, objc and Foundation faked: the body detector returns `boxes` (x, y, w, h,
+    normalised, origin at the bottom left) and the instance mask `outline` (a label image), or
+    no outline at all. So the matching of outlines to bodies runs everywhere, CI included."""
     import contextlib
     import sys
     import types
 
     from depthc import people
 
-    def box(x: float, y: float, w: float, h: float):
+    def body(x: float, y: float, w: float, h: float):
         shape = types.SimpleNamespace(origin=types.SimpleNamespace(x=x, y=y),
                                       size=types.SimpleNamespace(width=w, height=h))
         return types.SimpleNamespace(boundingBox=lambda: shape)
+
+    class Address:
+        def __init__(self, raw: bytes):
+            self.raw = raw
+
+        def as_buffer(self, length: int) -> bytes:
+            return self.raw[:length]
+
+    observation = types.SimpleNamespace(instanceMask=lambda: outline)
 
     class Request:
         found: list = []
@@ -425,10 +504,10 @@ def test_two_bodies_with_no_outline_are_counted_as_two(monkeypatch):
             pass
 
     class Outline(Request):
-        found = []
+        found = [] if outline is None else [observation]
 
     class Bodies(Request):
-        found = [box(0.05, 0.1, 0.3, 0.8), box(0.6, 0.1, 0.3, 0.8)]
+        found = [body(*b) for b in boxes]
 
     class Handler:
         @classmethod
@@ -445,18 +524,50 @@ def test_two_bodies_with_no_outline_are_counted_as_two(monkeypatch):
     vision.VNGeneratePersonInstanceMaskRequest = Outline
     vision.VNDetectHumanRectanglesRequest = Bodies
     vision.VNImageRequestHandler = Handler
+    quartz = types.ModuleType("Quartz")
+    quartz.kCVPixelBufferLock_ReadOnly = 1
+    quartz.CVPixelBufferLockBaseAddress = lambda buffer, flags: 0
+    quartz.CVPixelBufferUnlockBaseAddress = lambda buffer, flags: 0
+    quartz.CVPixelBufferGetHeight = lambda buffer: buffer.shape[0]
+    quartz.CVPixelBufferGetWidth = lambda buffer: buffer.shape[1]
+    quartz.CVPixelBufferGetBytesPerRow = lambda buffer: buffer.shape[1]
+    quartz.CVPixelBufferGetBaseAddress = lambda buffer: Address(np.ascontiguousarray(buffer).tobytes())
     objc = types.ModuleType("objc")
     objc.autorelease_pool = contextlib.nullcontext
     foundation = types.ModuleType("Foundation")
     foundation.NSData = types.SimpleNamespace(dataWithBytes_length_=lambda data, length: data)
-    for name, module in (("Vision", vision), ("objc", objc), ("Foundation", foundation),
-                         ("Quartz", types.ModuleType("Quartz"))):
+    for name, module in (("Vision", vision), ("objc", objc), ("Foundation", foundation), ("Quartz", quartz)):
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(people, "available", lambda: True)
+    return people
+
+
+BOTH = [(0.05, 0.1, 0.3, 0.8), (0.6, 0.1, 0.3, 0.8)]  # two bodies, left and right, 24% of the frame each
+
+
+def test_two_bodies_with_no_outline_are_counted_as_two(monkeypatch):
+    """Vision found two bodies and drew no outline: each box is its own person. As one union they
+    counted one, and the scout's second-figure warning never fired."""
+    people = _fake_vision(monkeypatch, BOTH, None)
     found = people.find(np.zeros((1, 90, 160, 3), dtype=np.uint8))
     assert found is not None
     assert found.counts.tolist() == [2]
     assert found.masks[0].mean() == pytest.approx(0.48, abs=0.03)
+
+
+def test_a_body_the_outline_missed_is_masked_by_its_box(monkeypatch):
+    """Two bodies, an outline for the left one only: the right body is masked by its box and counted,
+    so its motion does not vote and the second-figure warning still fires. The outline drawn at
+    half size, as Vision draws it at its own."""
+    outline = np.zeros((45, 80), dtype=np.uint8)
+    outline[8:38, 6:26] = 1  # inside the left box
+    people = _fake_vision(monkeypatch, BOTH, outline)
+    found = people.find(np.zeros((1, 90, 160, 3), dtype=np.uint8))
+    assert found is not None
+    assert found.counts.tolist() == [2]
+    right = found.masks[0][:, 100:]
+    assert right.mean() > 0.4  # the right body is masked
+    assert found.masks[0][16:76, 12:52].all() and not found.masks[0][:, 56:96].any()
 
 
 # ------------------------------------------------------------------------ Vision, for real

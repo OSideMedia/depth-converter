@@ -117,9 +117,10 @@ PATH_READER = "regions-2026-11"  # names the reader in the calibration's saved e
 # through. They cast most of the votes and the reader named a pan. So the camera is now read from
 # the picture, by tracking points instead of dense flow, and the points that do not move with the
 # rest are dropped before anything votes.
-# "tracks-2026-11" was the first picture reader; "shots-2026-11" added the camera round below, and
-# "shots2-2026-11" counts a shot's length in gaps (`shot_min_gaps`).
-PICTURE_READER = "shots2-2026-11"  # names this reader in the calibration's saved estimates
+# "tracks-2026-11" was the first picture reader; "shots-2026-11" added the camera round below,
+# "shots2-2026-11" counted a shot's length in gaps (`shot_min_gaps`), and "shots3-2026-11" masks
+# every body Vision finds, outlined or not (`depthc.people`).
+PICTURE_READER = "shots3-2026-11"  # names this reader in the calibration's saved estimates
 # Tracked at this long edge: twice the analysis grid, so a slow push that moves a point a
 # twentieth of a grid pixel per frame is a tenth of a pixel here, which Lucas-Kanade resolves.
 TRACK_LONG_EDGE = 320
@@ -482,15 +483,52 @@ class Shot:
         return slice(self.start, max(self.start, self.end - 1))
 
 
+# ONE CAMERA, READ PER SHOT: the single rule every camera word follows.
+# The camera is read once per shot. A shot's word is `path_word` over that shot's own readable
+# gaps (`MotionProfile.camera_shots`, a kit's cameraShots); a shot spanning fewer than
+# `shot_min_gaps` gaps is not read at all (no word: "can't tell"), and nothing else is ever too
+# short to count. Every other camera word is derived from that read, so none can contradict it:
+#   - One word for a clip (a kit's cameraPath, describe's overall line, compare's PATH line) is the
+#     word of `main_shot`, read from that shot's own gaps, never from time buckets.
+#   - Time buckets (describe's segments, the calibration) only say WHEN inside a shot. They never
+#     cross a cut; inside a shot no gap is dropped (`bucket_rows`: a remainder too short to stand
+#     alone joins the bucket before it); and their words follow the shot's (`describe.follow_shot`):
+#     in a shot read as still every bucket is still, and in a shot read as moving at least one
+#     bucket names a move.
+# A path read the old way (from the depth, no shots) has no shot read; its buckets stand as the
+# calibration measured them. Time buckets also feed compare's direction cosine, which is a number
+# and names nothing.
+# ponytail: a shot is one word, the mean of its moving gaps, so a pan and its return inside one
+# shot cancel and the whole shot reads still everywhere; reading a shot as runs (a word per run)
+# is the upgrade, and it changes what cameraShots records.
+
+
 def shot_min_gaps(fps: float) -> int:
     """The fewest gaps (frame-to-frame motions) a shot needs to be read: SHOT_MIN_SECONDS of them.
 
-    The one rule for "long enough", counted in gaps wherever a path is cut into stretches: the
-    shot gate in `_camera_reading_from`, and the last part bucket `describe.path_buckets` words.
-    Counted in frames in one place and gaps in the other, a six-frame shot at 24 fps was read
-    ("pans left") and then too short to word, and `describe` called the clip locked off.
+    The only "too short" in the camera words (ONE CAMERA, above): the shot gate in
+    `_camera_reading_from`, and the shortest part bucket `describe` lets stand on its own.
     """
     return max(1, int(np.ceil(SHOT_MIN_SECONDS * fps - 1e-9)))
+
+
+def path_word(rows: np.ndarray, radial_floor: float = PATH_RADIAL_STILL) -> dict | None:
+    """The camera word for a stretch of path: the mean over its MOVING readable rows, as
+    {dx, dy, radial (grid px/frame), label}; None when no row could be read.
+
+    A shot's word in cameraShots is this over the shot's gaps (ONE CAMERA, above).
+    """
+    finite = np.isfinite(rows).all(axis=1)
+    if not finite.any():
+        return None
+    moving = finite & np.any(np.nan_to_num(rows) != 0, axis=1)
+    if not moving.any():
+        return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
+    dx, dy, radial = (float(v) for v in rows[moving].mean(axis=0))
+    return {
+        "dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
+        "label": path_label(dx, dy, radial, radial_floor),
+    }
 
 
 def gap_owners(gaps: int, shots: list[Shot] | None) -> np.ndarray:
@@ -508,21 +546,28 @@ def bucket_rows(
 ) -> list[tuple[int, np.ndarray, int]]:
     """A path of `gaps` rows cut into buckets of `step`, never across a cut: (shot, rows, size).
 
-    Every place that buckets a path goes through here (`describe.path_buckets`, `compare`'s PATH
-    series, the camera-path calibration), so none of them averages one shot with the next. Where a
-    cut falls inside a bucket, the bucket keeps the rows of the shot that holds most of its gaps,
-    the earlier shot on a tie, and drops the rest; `size` is the whole bucket's length, so a
-    bucket left with a sliver of a shot is judged against all of it (SHOT_MIN_READ). Full buckets
-    only, and one last part bucket when `tail` is given and at least `tail` gaps are left over.
+    Every place that buckets a path goes through here (`describe.path_buckets`, `compare`'s
+    direction series, the camera-path calibration), so none of them averages one shot with the
+    next. Where a cut falls inside a bucket, the bucket keeps the rows of the shot that holds most
+    of its gaps, the earlier shot on a tie, and drops the rest; `size` is the whole bucket's
+    length, so a bucket left with a sliver of a shot is judged against all of it (SHOT_MIN_READ).
+
+    `tail` 0: full buckets only, for series laid side by side on one time grid (compare's cosine,
+    the calibration against its truth). `tail` > 0: no gap is dropped (ONE CAMERA): what is left
+    after the full buckets is a bucket of its own when it holds at least `tail` gaps, and joins
+    the bucket before it otherwise (or is the only bucket, on a path shorter than `step`).
     """
     owners = gap_owners(gaps, shots)
-    starts = list(range(0, gaps - step + 1, step))
-    rest = gaps - len(starts) * step
-    if tail and rest >= tail:
-        starts.append(len(starts) * step)
+    spans = [(start, start + step) for start in range(0, gaps - step + 1, step)]
+    rest = gaps - len(spans) * step
+    if tail and rest > 0:
+        if rest >= tail or not spans:
+            spans.append((gaps - rest, gaps))
+        else:
+            spans[-1] = (spans[-1][0], gaps)
     out: list[tuple[int, np.ndarray, int]] = []
-    for start in starts:
-        rows = np.arange(start, min(start + step, gaps))
+    for start, stop in spans:
+        rows = np.arange(start, stop)
         size = rows.size
         ids = owners[rows]
         held = ids[ids >= 0]
@@ -536,10 +581,10 @@ def bucket_rows(
 
 
 def main_shot(shots: list[Shot], gaps: int | None = None) -> int | None:
-    """The shot a one-word camera summary names on a clip with cuts: the read shot holding the most
-    gaps (of the first `gaps` gaps of the path, when given), the earlier on a tie; None when no
-    shot was read. `MotionProfile.camera_path` (the kit's cameraPath, describe's overall line) and
-    compare's PATH line both name this shot, so the two never disagree about which shot it is.
+    """The shot one word for a clip with cuts names: the read shot holding the most gaps (of the
+    first `gaps` gaps of the path, when given), the earlier on a tie; None when no shot was read.
+    `MotionProfile.camera_path` (the kit's cameraPath, describe's overall line) and compare's PATH
+    line both name this shot, from its own gaps (ONE CAMERA, above).
     """
     best, held = None, 0
     for index, shot in enumerate(shots):
@@ -1205,19 +1250,8 @@ class MotionProfile:
         )
 
     def _path_mean(self, rows: np.ndarray) -> dict | None:
-        """Mean over the MOVING readable rows: dx, dy, radial (grid px/frame) + label; None
-        when no row could be read."""
-        finite = np.isfinite(rows).all(axis=1)
-        if not finite.any():
-            return None
-        moving = finite & np.any(np.nan_to_num(rows) != 0, axis=1)
-        if not moving.any():
-            return {"dx": 0.0, "dy": 0.0, "radial": 0.0, "label": "static"}
-        dx, dy, radial = (float(v) for v in rows[moving].mean(axis=0))
-        return {
-            "dx": round(dx, 3), "dy": round(dy, 3), "radial": round(radial, 3),
-            "label": path_label(dx, dy, radial, self.radial_floor),
-        }
+        """`path_word` at this profile's zoom floor: the one way a stretch of path is worded."""
+        return path_word(rows, self.radial_floor)
 
     @property
     def camera_path(self) -> dict | None:

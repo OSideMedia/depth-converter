@@ -29,7 +29,8 @@ import numpy as np
 
 from depthc.motion import (
     PATH_RADIAL_STILL, REGION_COLS, REGION_ROWS, SHOT_MIN_READ, STATIC_FLOOR, STRONG_ENERGY,
-    WEAK_ENERGY, MotionProfile, Shot, bucket_rows, path_label, path_speed, path_tempo, shot_min_gaps,
+    WEAK_ENERGY, MotionProfile, Shot, bucket_rows, path_label, path_speed, path_tempo, path_word,
+    shot_min_gaps,
 )
 
 BUCKET_SECONDS = 0.5
@@ -286,16 +287,19 @@ def path_buckets(
     Blender ground truth — so what the calibration measures is exactly what describe says.
     NaN rows are gaps the reader could not read: a bucket with fewer than SHOT_MIN_READ of its
     gaps readable is UNREAD, and the rest are worded from their readable gaps only.
-    `radial_floor` is the profile's (`MotionProfile.radial_floor`). With `tail`, a last part
-    bucket is worded too when it is as long as a shot has to be to be read (`shot_min_gaps`): a
-    shot between two cuts ends where it ends, and a shot long enough to read always gets a word.
-    With `shots`, no bucket mixes two of them (`motion.bucket_rows`).
+    `radial_floor` is the profile's (`MotionProfile.radial_floor`). With `tail`, no gap is left
+    out: a last part bucket of at least `shot_min_gaps` stands on its own and a shorter one joins
+    the bucket before it (`motion.bucket_rows`). With `shots` (a path read from the picture), no
+    bucket mixes two shots and the words follow each shot's read (`follow_shot`, and the ONE
+    CAMERA rule in `depthc.motion`).
     """
     if path is None or not path.size:
         return []
     step = max(1, int(round(bucket_seconds * fps)))
     out: list[tuple[str, float, tuple[float, float, float]]] = []
-    for _, rows, size in bucket_rows(path.shape[0], step, shots, shot_min_gaps(fps) if tail else 0):
+    owners: list[int] = []
+    for owner, rows, size in bucket_rows(path.shape[0], step, shots, shot_min_gaps(fps) if tail else 0):
+        owners.append(owner)
         chunk = path[rows]
         finite = np.isfinite(chunk).all(axis=1)
         if float(finite.sum()) / size < SHOT_MIN_READ:
@@ -308,7 +312,41 @@ def path_buckets(
             continue
         dx, dy, radial = (float(v) for v in chunk[moving].mean(axis=0))
         out.append((path_label(dx, dy, radial, radial_floor), path_speed(dx, dy, radial), (dx, dy, radial)))
+    if shots is None:
+        return out
+    for index, shot in enumerate(shots):
+        mine = [k for k, owner in enumerate(owners) if owner == index]
+        word = path_word(path[shot.gaps], radial_floor) if shot.read else None
+        for k, bucket in zip(mine, follow_shot([out[k] for k in mine], word)):
+            out[k] = bucket
     return out
+
+
+def follow_shot(
+    buckets: list[tuple[str, float, tuple[float, float, float]]], word: dict | None,
+) -> list[tuple[str, float, tuple[float, float, float]]]:
+    """One shot's bucket words made to follow the shot's own read (`word`, `motion.path_word`).
+
+    The shot read decides WHETHER the camera moved in a shot; its buckets only say when. A shot
+    with no word (not read) is "can't tell" throughout. In a shot read as still, every readable
+    bucket is still. In a shot read as moving, the buckets stand when at least one names a move;
+    when none does (the move sat in gaps a bucket could not word on its own), the readable
+    buckets that hold any motion take the shot's word, or every readable bucket when none does.
+    So `describe` never says "locked off" or "can't tell" for a shot cameraShots names a move in.
+    """
+    zero = (0.0, 0.0, 0.0)
+    if word is None:
+        return [(UNREAD, 0.0, zero) for _ in buckets]
+    if word["label"] == "static":
+        return [b if b[0] == UNREAD else ("static", 0.0, zero) for b in buckets]
+    if any(b[0] not in ("static", UNREAD) for b in buckets):
+        return buckets
+    vec = (word["dx"], word["dy"], word["radial"])
+    named = (word["label"], path_speed(*vec), vec)
+    stirred = [b[0] != UNREAD and b[1] > 0 for b in buckets]
+    if not any(stirred):
+        stirred = [b[0] != UNREAD for b in buckets]
+    return [named if take else b for b, take in zip(buckets, stirred)]
 
 
 def _shot_runs(profile: MotionProfile, bucket_seconds: float) -> list[Segment]:
@@ -322,15 +360,19 @@ def _shot_runs(profile: MotionProfile, bucket_seconds: float) -> list[Segment]:
         if not shot.read:
             out.append(Segment(offset, shot.end / profile.fps, UNREAD))
             continue
-        # A shot between cuts is worded to its end; a path read the old way (no shots) keeps
-        # full buckets only, as the calibration scores it.
+        rows = profile.path[shot.gaps]
+        # A shot read from the picture is worded to its end and follows its own read (ONE CAMERA
+        # in `depthc.motion`); a path read the old way (no shots) keeps full buckets only, as the
+        # calibration scores it.
+        read = profile.shots is not None
         buckets = path_buckets(
-            profile.path[shot.gaps], profile.fps, bucket_seconds, profile.radial_floor,
-            tail=profile.shots is not None,
+            rows, profile.fps, bucket_seconds, profile.radial_floor,
+            tail=read, shots=[Shot(0, rows.shape[0] + 1)] if read else None,
         )
         labels = [label for label, _, _ in buckets]
         speeds = [speed for _, speed, _ in buckets]
-        for segment in _segments(labels, bucket_seconds):
+        runs = _segments(labels, bucket_seconds)
+        for segment in runs:
             # Tempo is graded over the whole run, not per bucket: a per-bucket adverb would
             # split one "pans left" into fragments at every flicker across a band edge.
             if segment.label not in ("static", UNREAD):
@@ -340,6 +382,8 @@ def _shot_runs(profile: MotionProfile, bucket_seconds: float) -> list[Segment]:
             segment.start += offset
             segment.end = min(segment.end + offset, shot.end / profile.fps)
             out.append(segment)
+        if read and runs:
+            runs[-1].end = shot.end / profile.fps  # the last bucket holds the shot's last gap
     return out
 
 

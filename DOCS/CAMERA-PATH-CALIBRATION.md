@@ -379,19 +379,24 @@ camera round".
 for 10% of the clip or more, noting it on each window that has one. It counts people only and
 never changes the ranking.
 
-**Four fixes after a review of the round (same day).** A shot's length is counted in gaps (the
-motions between frames) everywhere: the shot gate counted frames and `describe`'s last
-part-bucket counted gaps, so a six-frame pan at 24 fps was read "pans left" and then had no
-bucket to word it, and `describe` called the clip locked off; a shot now needs a quarter of a
-second of gaps to be read, and one that is read always gets its word. No bucket anywhere mixes two
-shots (`compare`'s PATH series and cosine, the calibration below, `describe`): a bucket a cut
-falls in keeps the shot holding most of it. Where one word sums up a clip with cuts (a kit's
-`cameraPath`, `describe`'s overall line, `compare`'s PATH line), it is the longest read shot's, not
-an average of all of them: a pan left cut against a pan right averaged to no move. The calibration
+**After two reviews of the round (same day): one camera, read per shot.** The round had two views
+of the camera, the per-shot read (`cameraShots`) and the half-second buckets, each with its own
+rule for what was too short to count, and they disagreed: a six-frame pan at 24 fps was read
+"pans left" and then had no bucket to word it, a shot that held and then panned for its last five
+frames lost the pan to a dropped remainder, and the longest of three short shots owned no bucket,
+so `describe` said "locked off" or `compare` said "can't tell" about a shot named a move. Now every
+camera word is derived from the shot read, by one rule written once in `depthc/motion.py` ("ONE
+CAMERA, READ PER SHOT"): only a whole shot can be too short to read (a quarter of a second of
+gaps); inside a shot no gap is dropped; one word for a clip (a kit's `cameraPath`, `describe`'s
+overall line, `compare`'s PATH line) is the longest read shot's, from its own gaps; bucket words
+follow their shot's read (a shot read as still has no move inside it, a shot read as moving has
+one); and no bucket mixes two shots. A generated set of held, panned and cut clips at 24 and 30
+fps holds every consumer to it (`tests/test_camera_shots.py`). The limit: a shot is one word, so a
+pan and its return inside one shot cancel and the shot reads still everywhere. The calibration
 counts a "can't tell" bucket in its own column instead of scoring it as a word (it was no miss
-against a true pan and a false move against a held shot). And where Vision finds two bodies but
-draws no outline, each box counts as its own person, so the scout's second-figure warning is not
-lost.
+against a true pan and a false move against a held shot). And every body Vision finds is masked
+and counted: by its outline, or by its box where Vision drew no outline for that body (it had
+dropped a second body whenever it outlined only the first).
 
 **On the spent clips (development signal, not a score).** Same clips, old reader against new,
 with Vision on:
@@ -402,20 +407,24 @@ with Vision on:
 | First set: locked-off shots with a move invented | 1/5 | 0/5 |
 | Second set, scored clips: moves named | 7/10 | 8/10 |
 | Second set, scored clips: locked-off shots with a move invented | 2/7 | 2/7 |
-| Second set, messy locked-off-style clips with a move named | 8/15 | 7/15 |
+| Second set, messy locked-off-style clips with a move named | 8/15 | 5/15 |
 | Cuts found in the three film windows (nine, marked by eye) | not looked for | 9 of 9, none invented on any other clip |
 
 Still wrong on the scored clips: the vertical move through trees is still named a pan; the slow
 truck past a near bookshelf now reads "pulls out" for its first 2.5 seconds (its sideways travel
 is under the pan floor, so only the zoom is left); wind on the grass keeps a move on one
 locked-off shot once its walker is masked; and the flower is not a person, so nothing masks it.
-Of the 7 messy clips still named, on one the background points the mask leaves move together
+Of the 5 messy clips still named, on one the background points the mask leaves move together
 (95% of 230), so either the phone stand moved or the mask missed something; that is not settled
-by eye. Without Vision (the CI path, no depth) the numbers are 12 of 12 and 1 of 5 on the first
-set, 8 of 10 and 2 of 7 on the second, and 9 of 15 messy. (Corrected the same day: this table
-first said 6 of 15 messy, and 10 of 12 and 8 of 15 without Vision. Those came from runs made before
-the last part of each shot was worded; the reader as committed gives the figures above, and the
-four review fixes leave every one of them unchanged.) Two further film scenes the owner
+by eye. Without Vision (the CI path, no depth) the numbers are 12 of 12 and 0 of 5 on the first
+set, 8 of 10 and 2 of 7 on the second, and 6 of 15 messy. (These are the figures after both
+reviews. The first printing said 6 of 15 messy, and 10 of 12 and 8 of 15 without Vision, from
+runs made before each shot's last part-second was worded; the reader as first committed gave 7 of
+15, and without Vision 12 of 12, 1 of 5 and 9 of 15. The second review's rule that a shot read as
+still has no move inside it is what moved them: two messy clips with Vision, and three messy clips
+and one first-set locked-off shot without it, had buckets naming short moves (mostly back and
+forth) that their shot read, the mean over the whole shot, puts under the floors; they now read
+locked off. With Vision the scored figures did not move.) Two further film scenes the owner
 supplied came back with 7 and 8 cuts, all real by eye, and about three cuts missed in the last
 stretch of fast action in one, which reads as "can't tell". With Vision on, a 25-second clip took
 about 12 seconds to read on one Apple Silicon Mac.
@@ -432,8 +441,9 @@ about 12 seconds to read on one Apple Silicon Mac.
 Both false-motion buckets are the first half-second of a slow zoom (one in, one out) whose true
 zoom is 0.047, just under the 0.05 floor the truth is worded with; the new floor names it. The
 other lost bucket is a push beside a truck that the beside-a-pan rule no longer names. Re-run
-after the four review fixes, with the reader's shots passed to the buckets and "can't tell" in its
-own column: every figure above is unchanged, and no clay bucket is "can't tell".
+after each review's fixes (the reader's shots passed to the buckets, "can't tell" in its own
+column, bucket words following the shot read, every body Vision finds masked): every figure above
+is unchanged, and no clay bucket is "can't tell".
 
 **What it cannot do.** Vision finds people only: a train, a car or a flower that fills the frame
 still wins the vote. A macOS update can change what Vision finds. The depth fallback leaves out

@@ -69,7 +69,8 @@ def _labels(rgb: np.ndarray) -> np.ndarray | None:
     anyway, with full confidence: on the seen clips it covered 99% of a flower and most of a forest.
     So an instance is kept only where the human-rectangle detector found a body: at least
     BOX_OVERLAP of its pixels must sit inside a detected box. That detector found nobody on the
-    flower or the forest and found every dancer and walker checked by eye.
+    flower or the forest and found every dancer and walker checked by eye. A body it found that
+    no kept outline belongs to is masked by its own box (`_match`), one label per body.
     """
     import cv2
     import objc
@@ -98,37 +99,61 @@ def _labels(rgb: np.ndarray) -> np.ndarray | None:
             y0 = max(0, int(np.floor((1.0 - box.origin.y - box.size.height) * height)))
             y1 = max(0, int(np.ceil((1.0 - box.origin.y) * height)))
             spans.append((y0, y1, x0, x1))
-        # Each box keeps its own label, painted largest first so a smaller box inside a larger one
-        # still shows: with no outline, two bodies must count as two (the scout's second-figure
-        # warning), not as one union.
         spans.sort(key=lambda b: (b[1] - b[0]) * (b[3] - b[2]), reverse=True)
-        box_labels = np.zeros((height, width), dtype=np.uint8)
-        for label, (y0, y1, x0, x1) in enumerate(spans[:255], start=1):
-            box_labels[y0:y1, x0:x1] = label
-        boxes = box_labels > 0
-        results = outline.results() or []
+        boxes = np.zeros((height, width), dtype=bool)
+        for y0, y1, x0, x1 in spans:
+            boxes[y0:y1, x0:x1] = True
         if not boxes.any():
             return np.zeros((height, width), dtype=np.uint8)
-        if not len(results):
-            # A body with no outline: its own box is the best mask there is.
-            return box_labels
-        buffer = results[0].instanceMask()
-        Quartz.CVPixelBufferLockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
-        try:
-            rows = Quartz.CVPixelBufferGetHeight(buffer)
-            cols = Quartz.CVPixelBufferGetWidth(buffer)
-            stride = Quartz.CVPixelBufferGetBytesPerRow(buffer)
-            raw = Quartz.CVPixelBufferGetBaseAddress(buffer).as_buffer(stride * rows)
-            labels = np.frombuffer(raw, dtype=np.uint8).reshape(rows, stride)[:, :cols].copy()
-        finally:
-            Quartz.CVPixelBufferUnlockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
-    # The mask is in the frame's own normalised coordinates, whatever its pixel size.
-    labels = cv2.resize(labels, (width, height), interpolation=cv2.INTER_NEAREST)
+        results = outline.results() or []
+        labels = np.zeros((height, width), dtype=np.uint8)
+        if len(results):
+            buffer = results[0].instanceMask()
+            Quartz.CVPixelBufferLockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
+            try:
+                rows = Quartz.CVPixelBufferGetHeight(buffer)
+                cols = Quartz.CVPixelBufferGetWidth(buffer)
+                stride = Quartz.CVPixelBufferGetBytesPerRow(buffer)
+                raw = Quartz.CVPixelBufferGetBaseAddress(buffer).as_buffer(stride * rows)
+                drawn = np.frombuffer(raw, dtype=np.uint8).reshape(rows, stride)[:, :cols].copy()
+            finally:
+                Quartz.CVPixelBufferUnlockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
+            # The mask is in the frame's own normalised coordinates, whatever its pixel size.
+            labels = cv2.resize(drawn, (width, height), interpolation=cv2.INTER_NEAREST)
+    return _match(labels, spans)
+
+
+def _match(labels: np.ndarray, spans: list[tuple[int, int, int, int]]) -> np.ndarray:
+    """Outlines kept where a body was found, and every body with no outline of its own as its box.
+
+    `labels` is Vision's instance label image (all 0 when it drew no outline), `spans` the body
+    boxes (y0, y1, x0, x1), largest first. An outline is kept when at least BOX_OVERLAP of it lies
+    inside the boxes, and it belongs to the box holding most of it. A box no kept outline belongs
+    to is a person too, masked by the box itself (never over a kept outline; a smaller box inside a
+    larger one still shows), so two bodies count as two whether Vision outlined both, one or none.
+    """
+    height, width = labels.shape
+    masks = []
+    for y0, y1, x0, x1 in spans:
+        mask = np.zeros((height, width), dtype=bool)
+        mask[y0:y1, x0:x1] = True
+        masks.append(mask)
+    boxes = np.any(masks, axis=0) if masks else np.zeros((height, width), dtype=bool)
     kept = np.zeros_like(labels)
+    owned: set[int] = set()
     for label in range(1, int(labels.max()) + 1):
         pixels = labels == label
-        if pixels.any() and float(boxes[pixels].mean()) >= BOX_OVERLAP:
-            kept[pixels] = label
+        if not pixels.any() or float(boxes[pixels].mean()) < BOX_OVERLAP:
+            continue
+        kept[pixels] = label
+        owned.add(int(np.argmax([float(mask[pixels].mean()) for mask in masks])))
+    free = kept == 0
+    next_label = int(kept.max()) + 1
+    for index, mask in enumerate(masks):
+        if index in owned or next_label > 255:
+            continue
+        kept[mask & free] = next_label
+        next_label += 1
     return kept
 
 
