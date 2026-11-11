@@ -239,8 +239,12 @@ Phase 5 (automating the attach) is still deferred, but Phase 4 has now passed.
 - Conversions run ~20–35s for an 8s clip at 720p on MPS.
 - A default depth pass (8 s of 720p) peaks near 7.3 GB, and `ps` will not show it: GPU memory is not in RSS. Read
   `top -l 1 -pid <pid> -stats mem`. The backbone's grouping (`engine.bound_memory`) is what holds
-  it there, and `memory.py` refuses a pass the machine cannot spare. Anything that builds the
-  model outside `load_model` needs the same two calls, as `smoke.py` has them. On a long clip or at
+  it there, and `memory.py` refuses a pass the machine cannot spare. While a pass runs,
+  `memory.Watch` reads what is free at the settle points `bound_memory` installs and stops the pass in
+  plain words when it stays under the floor (`engine.watching`). Anything that builds the model
+  outside `load_model` needs the same three things, `bound_memory`, `limit_gpu` and `watching`, as
+  `smoke.py` has them. A good pass's free memory swings by GBs between half-second readings, so the
+  floor counts readings in a row; the measured table is beside it in `memory.py`. On a long clip or at
   a small `--input-size` the peak is at the end of the pass and on the CPU side, where upstream holds
   several copies of the depth, so a smaller `--input-size` stops helping. A memory test runs one clip
   at a time, under a kill switch below what is free.

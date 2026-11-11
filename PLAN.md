@@ -455,6 +455,10 @@ Key engineering decisions:
   `ps` hid it: GPU memory is not in RSS, so read `top -l 1 -pid <pid> -stats mem`. The fix is still
   not tiling. `engine.bound_memory` feeds the backbone 4 frames at a time (7.1 to 7.3 GB, same
   bytes, same speed), and `memory.py` sizes each pass to what the machine has free.
+  **[AMENDED 2026-11-11]** That check read the machine once, before the pass. `memory.Watch` now
+  reads it again while the pass runs, at the points `bound_memory` already settles the GPU, and
+  stops the pass when free memory stays under 0.75 GB for three readings in a row. The floor and the
+  real passes it was set from are beside it in `memory.py`.
 
 ---
 

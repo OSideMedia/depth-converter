@@ -31,6 +31,7 @@ output bytes do not change. `memory.py` then sets a limit from what the machine 
 
 from __future__ import annotations
 
+import contextvars
 import gc
 import sys
 import time
@@ -95,7 +96,7 @@ def _in_groups(whole: Callable, device: str) -> Callable:
         for start in range(0, x.shape[0], BACKBONE_FRAMES):
             parts.append(whole(x[start:start + BACKBONE_FRAMES], n, reshape=reshape,
                                return_class_token=True, norm=norm))
-            _settle(device)
+            _checkpoint(device)
         return tuple(
             (torch.cat([part[layer][0] for part in parts]), torch.cat([part[layer][1] for part in parts]))
             for layer in range(len(parts[0]))
@@ -105,10 +106,47 @@ def _in_groups(whole: Callable, device: str) -> Callable:
 
 
 def bound_memory(model: torch.nn.Module, device: str) -> None:
-    """Keep a window's memory down, with no vendor edit and no change to the output."""
+    """Keep a window's memory down, with no vendor edit and no change to the output.
+
+    Each place it settles the GPU is also where a pass under `watching` reads the machine.
+    """
     model.pretrained.get_intermediate_layers = _in_groups(model.pretrained.get_intermediate_layers, device)
     for stage in model.head.motion_modules:
-        stage.register_forward_hook(lambda *_: _settle(device))
+        stage.register_forward_hook(lambda *_: _checkpoint(device))
+
+
+# The watch on the pass this thread is running, if any. The model is built once and kept, so its
+# settle points cannot carry a pass's watch themselves.
+_WATCH: contextvars.ContextVar[memory.Watch | None] = contextvars.ContextVar("depthc_watch", default=None)
+
+
+@contextmanager
+def watching():
+    """Stop a depth pass run inside this block if the machine runs out of memory partway.
+
+    `infer` runs every pass under it. Anything that runs the model outside `infer` needs it too, as
+    `smoke.py` has it. Each block gets a fresh `memory.Watch`, so one pass's dips never count
+    against the next.
+    """
+    token = _WATCH.set(memory.Watch())
+    try:
+        yield
+    finally:
+        _WATCH.reset(token)
+
+
+def _checkpoint(device: str) -> None:
+    """Hand back what the GPU work just held, then let the pass's watch read the machine.
+
+    These points come a dozen times a window, so a pass can stop partway through one. The per-window
+    hook comes once a window and never inside smoke's single window.
+    """
+    _settle(device)
+    watch = _WATCH.get()
+    if watch is not None:
+        stop = watch.check()
+        if stop:
+            raise NotEnoughMemory(stop)
 
 
 def limit_gpu(device: str, limit: int) -> None:
@@ -265,16 +303,24 @@ def _run_windows(
     on_window: ProgressFn | None,
 ) -> tuple[np.ndarray, float]:
     try:
-        with _window_hook(device, on_window):
+        with watching(), _window_hook(device, on_window):
             return model.infer_video_depth(
                 frames, fps, input_size=input_size, device=device, fp32=use_fp32
             )
+    except NotEnoughMemory as stop:  # the watch, partway through
+        message = str(stop)
     except RuntimeError as e:
         if not is_out_of_memory(e):
             raise
         raise NotEnoughMemory(STOPPED_AT_LIMIT) from e
     finally:
         empty_cache(device)
+    # Raised out here, not from the handler: the watch's error holds the stopped window's frames and
+    # their tensors, and a chained one would keep them alive in a UI that goes on running. Once it is
+    # gone, collect them, then hand the GPU back.
+    gc.collect()
+    _settle(device)
+    raise NotEnoughMemory(message)
 
 
 def infer(

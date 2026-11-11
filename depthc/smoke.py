@@ -105,7 +105,8 @@ def main() -> int:
 
     from depthc import engine, memory  # after the torch check above: engine imports torch
 
-    # The same check as a real pass, so the first run on a new machine cannot stall it either.
+    # The same check as a real pass, so the first run on a new machine cannot stall it either. The
+    # model is built here, not by `engine.load_model`, so the three memory measures are named here too.
     plan = memory.plan((32, 518, 518, 3), 518)
     if plan.refusal:
         fail(plan.refusal)
@@ -126,10 +127,13 @@ def main() -> int:
     x = torch.rand(1, 32, 3, 518, 518, device=device)
     t0 = time.perf_counter()
     try:
-        with torch.no_grad():
+        with torch.no_grad(), engine.watching():  # the same watch as a real pass, at the same points
             depth = model(x)
         if device == "mps":
             torch.mps.synchronize()
+    except engine.NotEnoughMemory as e:  # the watch stopped it partway; before RuntimeError, its parent
+        fail(str(e))
+        return 1
     except RuntimeError as e:
         if not engine.is_out_of_memory(e):
             raise
