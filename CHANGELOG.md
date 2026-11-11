@@ -10,6 +10,12 @@ the code's history. Started 2026-09-06.
   written over it and every earlier fire was lost. Now the command refuses, says which file it left
   untouched and to move it aside or repair it, and exits 1. A missing file still starts a new log,
   and the index, `compare` and the library list still treat a broken log as an unfired kit.
+- **A depth pass now stops partway if the machine runs out of memory.** The check before a pass
+  read the machine once, so another app filling memory during the pass could still stall it. The
+  pass now keeps reading what is free, and if that stays under 0.75 GB for three readings in a row
+  it stops with a plain message, exits 1 and writes nothing. `DEPTHC_MEMORY_GB` does not turn it
+  off, and it never retries at a smaller size. The floor and the nine real passes it was set from
+  are beside it in `memory.py`.
 - **The camera is now read from the picture, not from the depth.** The real-footage failure in
   v0.16.1 came from the input: a depth picture of a real scene is mostly flat, so the people
   walking through a locked-off shot were nearly all the reader could see, and it named them a pan.
