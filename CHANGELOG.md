@@ -60,7 +60,14 @@ the code's history. Started 2026-09-06.
   - On the clips the reader had already seen (development signal, not a score): the first set
     went from a move invented on 1 of 5 locked-off shots to 0 of 5 with 12 of 12 moves kept; the
     second set's scored clips went from 7 to 8 of 10 moves with 2 of 7 locked-off shots still
-    wrong (wind on grass, a flower); and 6 of its 15 messy locked-off-style clips still get a move.
+    wrong (wind on grass, a flower); and 7 of its 15 messy locked-off-style clips still get a move
+    (first printed as 6, from a run made before each shot's last part-second was worded).
+  - **Fixed after review.** A shot's length is counted in gaps everywhere, so a shot long enough to
+    be read is never then called locked off by `describe`. No bucket mixes two shots, in `compare`'s
+    PATH series and cosine as in `describe`, and a single word for a clip with cuts (the kit's
+    `cameraPath`, `describe`'s overall line, `compare`'s PATH line) is the longest read shot's, not
+    an average across a cut. The camera-path calibration counts "can't tell" in its own column. Two
+    bodies Vision finds with no outline count as two people.
 
 ## v0.16.1 — 2026-11-10
 

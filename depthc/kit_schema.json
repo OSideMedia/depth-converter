@@ -165,7 +165,7 @@
           "items": { "type": "array", "items": { "type": "number", "minimum": 0 } }
         },
         "cameraPath": {
-          "description": "Mean camera path over the moving gaps, grid px/frame. dx>0 = pixels move right = camera pans left. Null when the flow pass was skipped, or when no gap of the clip could be read (cameraShots then says can't tell). Reported, never voted on.",
+          "description": "Mean camera path over the moving gaps, grid px/frame. dx>0 = pixels move right = camera pans left. On a clip with cuts it is the longest read shot's, never an average across a cut (cameraShots gives every shot's). Null when the flow pass was skipped, or when no gap of the clip could be read (cameraShots then says can't tell). Reported, never voted on.",
           "type": ["object", "null"],
           "required": ["dx", "dy", "radial", "label"],
           "additionalProperties": false,

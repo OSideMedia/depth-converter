@@ -331,6 +331,134 @@ def test_scout_clip_counts_people_twice_a_second(clip_3s, monkeypatch):
     assert result.windows and all(window.figures == 1.0 for window in result.windows)
 
 
+# ------------------------------------------------------------- the review of this round
+# Four findings from a review of the round's diff; each test below failed on the round as first
+# committed.
+
+def _segments_inside(record: dict, shot: dict, key: str) -> list[dict]:
+    return [s for s in record[key] if shot["startSeconds"] - 0.01 <= s["start"] and s["end"] <= shot["endSeconds"] + 0.01]
+
+
+@pytest.mark.parametrize("fps", [24.0, 25.0, 30.0])
+def test_a_shot_long_enough_to_read_always_gets_a_word_from_describe(fps):
+    """A held second, a cut, then a pan of 4 to 12 frames. Whatever a shot is called in cameraShots,
+    describe says the same inside it: a word for a word, "can't tell" for None. Counted in frames
+    by the shot gate and in gaps by the last bucket, a six-frame pan at 24 fps (eight at 30) was
+    read "pans left" and then dropped, and describe called the clip locked off."""
+    from depthc.describe import describe
+
+    held = np.repeat(texture()[None], int(round(fps)), axis=0)
+    for frames in range(4, 13):
+        clip = np.concatenate([held, brighter(panned(texture(seed=31), frames, 2))])
+        d = describe(m.measure(clip, fps, picture=clip))
+        record = d.as_dict()
+        shots = record["shots"]
+        assert shots is not None and len(shots) == 2, (fps, frames)
+        for shot in shots:
+            if shot["label"] is None:
+                assert _segments_inside(record, shot, "cameraUnread"), (fps, frames, shot)
+            else:
+                said = [s["label"] for s in _segments_inside(record, shot, "cameraSegments")]
+                assert shot["label"] in said, (fps, frames, shot, said)
+        if any(shot["label"] not in (None, "static") for shot in shots):
+            assert "locked off" not in " ".join(d.sentences), (fps, frames)
+
+
+def test_compare_never_averages_a_bucket_across_a_cut():
+    """Seven frames panning left, a cut, a pan right: the first half-second holds six gaps of the
+    one and five of the other, and averaged together they named no move (dx about 0.09)."""
+    from depthc import compare
+    from depthc.describe import path_buckets
+
+    clip = np.concatenate([panned(texture(), 7, 2), brighter(panned(texture(seed=23), 41, -2))])
+    profile = m.measure(clip, 24.0, picture=clip)
+    assert [(s.start, s.end) for s in profile.shots] == [(0, 7), (7, 48)]
+    series = compare._path_series(profile, 2.0)
+    assert m.path_label(*series[0]) == "pans left"
+    assert {m.path_label(*row) for row in series[1:]} == {"pans right"}
+    assert path_buckets(profile.path, 24.0, shots=profile.shots)[0][0] == "pans left"
+
+
+def test_a_clip_with_cuts_is_summed_up_by_one_shot_never_an_average_of_two():
+    """A pan left of 25 frames cut against a pan right of 26: across the cut they cancel. The kit's
+    cameraPath, describe's overall line and compare's PATH line all name the longer shot."""
+    from depthc import compare
+
+    clip = np.concatenate([panned(texture(), 25, 2), brighter(panned(texture(seed=23), 26, -2))])
+    profile = m.measure(clip, 24.0, picture=clip)
+    assert [shot["label"] for shot in profile.camera_shots] == ["pans left", "pans right"]
+    assert profile.camera_path is not None and profile.camera_path["label"] == "pans right"
+    result = compare.compare_profiles(profile, profile)
+    assert result.ref_path["label"] == "pans right"
+    assert result.path_judged and result.path_cos == pytest.approx(1.0)
+
+
+def test_two_bodies_with_no_outline_are_counted_as_two(monkeypatch):
+    """Vision found two bodies and drew no outline: each box is its own person. As one union they
+    counted one, and the scout's second-figure warning never fired. Vision is faked here, so the
+    test runs everywhere; the real thing is in the `vision` tests below."""
+    import contextlib
+    import sys
+    import types
+
+    from depthc import people
+
+    def box(x: float, y: float, w: float, h: float):
+        shape = types.SimpleNamespace(origin=types.SimpleNamespace(x=x, y=y),
+                                      size=types.SimpleNamespace(width=w, height=h))
+        return types.SimpleNamespace(boundingBox=lambda: shape)
+
+    class Request:
+        found: list = []
+
+        @classmethod
+        def alloc(cls):
+            return cls()
+
+        def init(self):
+            return self
+
+        def results(self):
+            return self.found
+
+        def setUpperBodyOnly_(self, flag):
+            pass
+
+    class Outline(Request):
+        found = []
+
+    class Bodies(Request):
+        found = [box(0.05, 0.1, 0.3, 0.8), box(0.6, 0.1, 0.3, 0.8)]
+
+    class Handler:
+        @classmethod
+        def alloc(cls):
+            return cls()
+
+        def initWithData_options_(self, data, options):
+            return self
+
+        def performRequests_error_(self, requests, error):
+            return True, None
+
+    vision = types.ModuleType("Vision")
+    vision.VNGeneratePersonInstanceMaskRequest = Outline
+    vision.VNDetectHumanRectanglesRequest = Bodies
+    vision.VNImageRequestHandler = Handler
+    objc = types.ModuleType("objc")
+    objc.autorelease_pool = contextlib.nullcontext
+    foundation = types.ModuleType("Foundation")
+    foundation.NSData = types.SimpleNamespace(dataWithBytes_length_=lambda data, length: data)
+    for name, module in (("Vision", vision), ("objc", objc), ("Foundation", foundation),
+                         ("Quartz", types.ModuleType("Quartz"))):
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(people, "available", lambda: True)
+    found = people.find(np.zeros((1, 90, 160, 3), dtype=np.uint8))
+    assert found is not None
+    assert found.counts.tolist() == [2]
+    assert found.masks[0].mean() == pytest.approx(0.48, abs=0.03)
+
+
 # ------------------------------------------------------------------------ Vision, for real
 
 @pytest.mark.vision

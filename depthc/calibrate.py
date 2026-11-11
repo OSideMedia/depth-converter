@@ -257,7 +257,16 @@ def score_buckets(
     truth: list[tuple[str, float, tuple[float, float, float]]],
     estimate: list[tuple[str, float, tuple[float, float, float]]],
 ) -> dict:
-    """Bucket-by-bucket agreement between two `path_buckets` series of the same clip."""
+    """Bucket-by-bucket agreement between two `path_buckets` series of the same clip.
+
+    A bucket the estimate could not read ("can't tell") is counted on its own, as `unread`: it is
+    never exact, it earns no translation or zoom credit (it said nothing about either), and it is
+    neither missed motion (it did not say "static") nor false motion (it named no move). Scored as
+    a word, it read as no miss against a true pan and as a false move against a held shot. It is
+    left out of the speed ratio, which it would drag to zero.
+    """
+    from depthc.describe import UNREAD
+
     n = min(len(truth), len(estimate))
     rows = []
     for k in range(n):
@@ -265,22 +274,24 @@ def score_buckets(
         e_label, e_speed, e_vec = estimate[k]
         t_tr, t_rad = label_parts(t_label)
         e_tr, e_rad = label_parts(e_label)
+        said = e_label != UNREAD
         rows.append({
             "bucket": k, "truth": t_label, "estimate": e_label,
             "exact": t_label == e_label,
-            "translation": t_tr == e_tr, "radial": t_rad == e_rad,
+            "translation": said and t_tr == e_tr, "radial": said and t_rad == e_rad,
             "truthSpeed": round(t_speed, 3), "estimateSpeed": round(e_speed, 3),
             "truthVec": [round(v, 3) for v in t_vec], "estimateVec": [round(v, 3) for v in e_vec],
         })
     moving = [r for r in rows if r["truth"] != "static" and r["truthSpeed"] > 0]
-    ratios = [r["estimateSpeed"] / r["truthSpeed"] for r in moving if r["estimate"] != "static"]
+    ratios = [r["estimateSpeed"] / r["truthSpeed"] for r in moving if r["estimate"] not in ("static", UNREAD)]
     return {
         "buckets": n,
         "exact": sum(r["exact"] for r in rows),
         "translation": sum(r["translation"] for r in rows),
         "radial": sum(r["radial"] for r in rows),
         "missedMotion": sum(1 for r in moving if r["estimate"] == "static"),
-        "falseMotion": sum(1 for r in rows if r["truth"] == "static" and r["estimate"] != "static"),
+        "falseMotion": sum(1 for r in rows if r["truth"] == "static" and r["estimate"] not in ("static", UNREAD)),
+        "unread": sum(1 for r in rows if r["estimate"] == UNREAD),
         "speedRatioMedian": round(float(np.median(ratios)), 3) if ratios else None,
         "rows": rows,
     }

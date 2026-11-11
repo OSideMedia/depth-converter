@@ -90,20 +90,28 @@ def _labels(rgb: np.ndarray) -> np.ndarray | None:
         done, _error = handler.performRequests_error_([outline, bodies], None)
         if not done:
             return None
-        boxes = np.zeros((height, width), dtype=bool)
+        spans = []
         for body in bodies.results() or []:
             box = body.boundingBox()  # normalised, origin at the bottom left
-            x0 = int(np.floor(box.origin.x * width))
-            x1 = int(np.ceil((box.origin.x + box.size.width) * width))
-            y0 = int(np.floor((1.0 - box.origin.y - box.size.height) * height))
-            y1 = int(np.ceil((1.0 - box.origin.y) * height))
-            boxes[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = True
+            x0 = max(0, int(np.floor(box.origin.x * width)))
+            x1 = max(0, int(np.ceil((box.origin.x + box.size.width) * width)))
+            y0 = max(0, int(np.floor((1.0 - box.origin.y - box.size.height) * height)))
+            y1 = max(0, int(np.ceil((1.0 - box.origin.y) * height)))
+            spans.append((y0, y1, x0, x1))
+        # Each box keeps its own label, painted largest first so a smaller box inside a larger one
+        # still shows: with no outline, two bodies must count as two (the scout's second-figure
+        # warning), not as one union.
+        spans.sort(key=lambda b: (b[1] - b[0]) * (b[3] - b[2]), reverse=True)
+        box_labels = np.zeros((height, width), dtype=np.uint8)
+        for label, (y0, y1, x0, x1) in enumerate(spans[:255], start=1):
+            box_labels[y0:y1, x0:x1] = label
+        boxes = box_labels > 0
         results = outline.results() or []
         if not boxes.any():
             return np.zeros((height, width), dtype=np.uint8)
         if not len(results):
-            # A body with no outline: the box itself is the best mask there is.
-            return boxes.astype(np.uint8)
+            # A body with no outline: its own box is the best mask there is.
+            return box_labels
         buffer = results[0].instanceMask()
         Quartz.CVPixelBufferLockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly)
         try:

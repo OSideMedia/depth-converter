@@ -29,7 +29,7 @@ import numpy as np
 
 from depthc.motion import (
     PATH_RADIAL_STILL, REGION_COLS, REGION_ROWS, SHOT_MIN_READ, STATIC_FLOOR, STRONG_ENERGY,
-    WEAK_ENERGY, MotionProfile, Shot, path_label, path_speed, path_tempo,
+    WEAK_ENERGY, MotionProfile, Shot, bucket_rows, path_label, path_speed, path_tempo, shot_min_gaps,
 )
 
 BUCKET_SECONDS = 0.5
@@ -277,7 +277,7 @@ def _segments(labels: list[str], bucket_seconds: float) -> list[Segment]:
 
 def path_buckets(
     path: np.ndarray | None, fps: float, bucket_seconds: float = BUCKET_SECONDS,
-    radial_floor: float = PATH_RADIAL_STILL, tail: bool = False,
+    radial_floor: float = PATH_RADIAL_STILL, tail: bool = False, shots: list[Shot] | None = None,
 ) -> list[tuple[str, float, tuple[float, float, float]]]:
     """Per bucket: (label, speed, mean (dx, dy, radial) over the gaps that moved).
 
@@ -287,21 +287,18 @@ def path_buckets(
     NaN rows are gaps the reader could not read: a bucket with fewer than SHOT_MIN_READ of its
     gaps readable is UNREAD, and the rest are worded from their readable gaps only.
     `radial_floor` is the profile's (`MotionProfile.radial_floor`). With `tail`, a last part
-    bucket of at least half a bucket is worded too: a shot between two cuts ends where it ends, and
-    without it a one-second shot would be worded for its first half only.
+    bucket is worded too when it is as long as a shot has to be to be read (`shot_min_gaps`): a
+    shot between two cuts ends where it ends, and a shot long enough to read always gets a word.
+    With `shots`, no bucket mixes two of them (`motion.bucket_rows`).
     """
     if path is None or not path.size:
         return []
     step = max(1, int(round(bucket_seconds * fps)))
-    starts = list(range(0, path.shape[0] - step + 1, step))
-    rest = path.shape[0] - len(starts) * step
-    if tail and rest > 0 and 2 * rest >= step:
-        starts.append(len(starts) * step)
     out: list[tuple[str, float, tuple[float, float, float]]] = []
-    for i in starts:
-        chunk = path[i:i + step]
+    for _, rows, size in bucket_rows(path.shape[0], step, shots, shot_min_gaps(fps) if tail else 0):
+        chunk = path[rows]
         finite = np.isfinite(chunk).all(axis=1)
-        if float(finite.mean()) < SHOT_MIN_READ:
+        if float(finite.sum()) / size < SHOT_MIN_READ:
             out.append((UNREAD, 0.0, (0.0, 0.0, 0.0)))
             continue
         chunk = chunk[finite]

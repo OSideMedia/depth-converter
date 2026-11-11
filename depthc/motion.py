@@ -117,8 +117,9 @@ PATH_READER = "regions-2026-11"  # names the reader in the calibration's saved e
 # through. They cast most of the votes and the reader named a pan. So the camera is now read from
 # the picture, by tracking points instead of dense flow, and the points that do not move with the
 # rest are dropped before anything votes.
-# "tracks-2026-11" was the first picture reader; "shots-2026-11" adds the camera round below.
-PICTURE_READER = "shots-2026-11"  # names this reader in the calibration's saved estimates
+# "tracks-2026-11" was the first picture reader; "shots-2026-11" added the camera round below, and
+# "shots2-2026-11" counts a shot's length in gaps (`shot_min_gaps`).
+PICTURE_READER = "shots2-2026-11"  # names this reader in the calibration's saved estimates
 # Tracked at this long edge: twice the analysis grid, so a slow push that moves a point a
 # twentieth of a grid pixel per frame is a tenth of a pixel here, which Lucas-Kanade resolves.
 TRACK_LONG_EDGE = 320
@@ -166,7 +167,7 @@ CUT_HISTOGRAM = 0.10        # half the L1 distance between the two frames' grey 
 CUT_HISTOGRAM_ALONE = 0.30  # a frame with too few corners to judge survival (black, flat): this
 CUT_HISTOGRAM_BINS = 32
 CUT_MIN_CORNERS = 10        # fewer corners than this and survival is not judged (a dark frame has 20)
-SHOT_MIN_SECONDS = 0.25     # a shot shorter than this is not read at all
+SHOT_MIN_SECONDS = 0.25     # a shot spanning fewer gaps than this is not read at all (`shot_min_gaps`)
 # PEOPLE. A person is the commonest thing in frame that moves on its own, and in the seen failures
 # one filled enough of it to outvote the background: dancers against a plain wall, a walker close
 # to the lens. Their points are dropped before the fit (`depthc.people`, Apple Vision, macOS only).
@@ -481,6 +482,74 @@ class Shot:
         return slice(self.start, max(self.start, self.end - 1))
 
 
+def shot_min_gaps(fps: float) -> int:
+    """The fewest gaps (frame-to-frame motions) a shot needs to be read: SHOT_MIN_SECONDS of them.
+
+    The one rule for "long enough", counted in gaps wherever a path is cut into stretches: the
+    shot gate in `_camera_reading_from`, and the last part bucket `describe.path_buckets` words.
+    Counted in frames in one place and gaps in the other, a six-frame shot at 24 fps was read
+    ("pans left") and then too short to word, and `describe` called the clip locked off.
+    """
+    return max(1, int(np.ceil(SHOT_MIN_SECONDS * fps - 1e-9)))
+
+
+def gap_owners(gaps: int, shots: list[Shot] | None) -> np.ndarray:
+    """[gaps] int: which shot each gap of a path belongs to; -1 for a cut gap. All 0 with no shots."""
+    if shots is None:
+        return np.zeros(gaps, dtype=np.int32)
+    owners = np.full(gaps, -1, dtype=np.int32)
+    for index, shot in enumerate(shots):
+        owners[shot.gaps] = index
+    return owners
+
+
+def bucket_rows(
+    gaps: int, step: int, shots: list[Shot] | None = None, tail: int = 0,
+) -> list[tuple[int, np.ndarray, int]]:
+    """A path of `gaps` rows cut into buckets of `step`, never across a cut: (shot, rows, size).
+
+    Every place that buckets a path goes through here (`describe.path_buckets`, `compare`'s PATH
+    series, the camera-path calibration), so none of them averages one shot with the next. Where a
+    cut falls inside a bucket, the bucket keeps the rows of the shot that holds most of its gaps,
+    the earlier shot on a tie, and drops the rest; `size` is the whole bucket's length, so a
+    bucket left with a sliver of a shot is judged against all of it (SHOT_MIN_READ). Full buckets
+    only, and one last part bucket when `tail` is given and at least `tail` gaps are left over.
+    """
+    owners = gap_owners(gaps, shots)
+    starts = list(range(0, gaps - step + 1, step))
+    rest = gaps - len(starts) * step
+    if tail and rest >= tail:
+        starts.append(len(starts) * step)
+    out: list[tuple[int, np.ndarray, int]] = []
+    for start in starts:
+        rows = np.arange(start, min(start + step, gaps))
+        size = rows.size
+        ids = owners[rows]
+        held = ids[ids >= 0]
+        owner = -1
+        if held.size:
+            values, counts = np.unique(held, return_counts=True)
+            owner = int(values[int(np.argmax(counts))])  # the first maximum is the earlier shot
+            rows = rows[ids == owner]
+        out.append((owner, rows, size))
+    return out
+
+
+def main_shot(shots: list[Shot], gaps: int | None = None) -> int | None:
+    """The shot a one-word camera summary names on a clip with cuts: the read shot holding the most
+    gaps (of the first `gaps` gaps of the path, when given), the earlier on a tie; None when no
+    shot was read. `MotionProfile.camera_path` (the kit's cameraPath, describe's overall line) and
+    compare's PATH line both name this shot, so the two never disagree about which shot it is.
+    """
+    best, held = None, 0
+    for index, shot in enumerate(shots):
+        rows = shot.gaps
+        stop = rows.stop if gaps is None else min(rows.stop, gaps)
+        if shot.read and stop - rows.start > held:
+            best, held = index, stop - rows.start
+    return best
+
+
 @dataclass
 class CameraReading:
     """The camera over time, read from the picture: what `camera_reading` returns.
@@ -668,7 +737,7 @@ def _camera_reading_from(
     shots = _shots(frames, cuts)
     unread |= cuts
     for shot in shots:
-        if (shot.end - shot.start) / fps < SHOT_MIN_SECONDS:
+        if shot.end - shot.start - 1 < shot_min_gaps(fps):
             shot.read = False
             unread[shot.gaps] = True
     untracked &= ~unread
@@ -1154,11 +1223,18 @@ class MotionProfile:
     def camera_path(self) -> dict | None:
         """Mean camera path over the MOVING gaps: dx, dy, radial (grid px/frame) + label.
 
+        Never across a cut: on a clip with more than one shot it is the longest read shot's
+        (`main_shot`), and `camera_shots` gives every shot's. Averaged over the whole clip, a pan
+        left cut against a pan right came out as no move at all.
+
         None when there is no path, and when no gap of it could be read (can't tell): either
         way there is no camera word to give. `camera_shots` says which.
         """
         if self.path is None or not self.path.size:
             return None
+        if self.shots is not None and len(self.shots) > 1:
+            main = main_shot(self.shots)
+            return None if main is None else self._path_mean(self.path[self.shots[main].gaps])
         return self._path_mean(self.path)
 
     @property
