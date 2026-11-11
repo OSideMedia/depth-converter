@@ -393,8 +393,9 @@ off. The camera reader was scored against a known Blender camera on clay, and th
 footage, where it failed: reading the depth picture, it named 9 of 12 clean moves and invented a
 move on 4 of 5 locked-off shots with people or a train passing through. Since then the camera is
 read from the picture instead (the kit's `source.mp4` on the reference side), with whatever moves
-on its own dropped first. That reader has no score on unseen footage yet, and a subject that
-fills the frame still reads as a pan. Treat the camera words as a hint to check by eye,
+on its own dropped first. That reader was scored on 40 clips it had never seen and failed too: 7 of 10
+clear moves named, and a move invented on 2 of 7 locked-off shots, both with a subject filling the
+frame. On phone-on-a-stand dance videos it named a move on 7 of 11 windows. Treat the camera words as a hint to check by eye,
 most of all when they name a move on a shot that looks still. The scores and the method are in
 [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md).
 
@@ -423,8 +424,9 @@ is not booked as a camera move.
 
 The camera words are the least reliable part. They are read from the picture, on the depth path
 and with `--rgb` alike. Read from the depth, as they were until 2026-11-11, they invented moves
-on locked-off shots with people passing and missed slow push-ins; the picture read has not been
-scored on unseen footage yet, so check them against the picture
+on locked-off shots with people passing and missed slow push-ins; the picture read failed its own
+score on unseen footage (7 of 10 moves, a move invented on 2 of 7 locked-off shots), so check
+them against the picture
 (see [`DOCS/CAMERA-PATH-CALIBRATION.md`](DOCS/CAMERA-PATH-CALIBRATION.md)).
 
 ### Reading how much a take boils and flickers

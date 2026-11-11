@@ -13,8 +13,9 @@ the code's history. Started 2026-09-06.
   push-ins the old read lost come back with the floors unchanged. `compare` reads the reference
   from the kit's `source.mp4` and says so when a kit has none. On clay it is level with the region
   reader on the tuned clips (162 of 168) and two buckets ahead on the held-out ones (52 of 63
-  against 50), with no false motion. **It has no score on unseen real footage yet**, a subject that fills the
-  frame still reads as a pan, and the camera share is still measured on the depth. The camera words
+  against 50), with no false motion. **Scored on 40 unseen real clips, it failed**: 7 of 10 moves named and
+  a move invented on 2 of 7 locked-off shots (ordinary passers-by no longer fool it; a subject that
+  fills the frame, or a dancer in a vertical frame, still does), and the camera share is still measured on the depth. The camera words
   still do not vote in any verdict.
 - The "tilts up" the reader put beside every push-in on the 8 takes is settled: it is real. Those
   takes push toward a face above the centre of the frame.
