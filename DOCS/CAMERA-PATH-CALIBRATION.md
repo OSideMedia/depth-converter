@@ -175,8 +175,9 @@ on an off-centre push. The joint fit is the reverse.
   `describe`'s camera words and every camera share line change for every kit, including a share
   that now crosses the line where PATH is judged or a clip counts as camera-led. The PATH line
   and the camera line still do not vote.
-- **The real-take reading was an inference when this was written.** It has since been scored on
-  real footage, and it failed: see the next section.
+- **The real-take reading is no longer an inference.** When the region reader landed on
+  2026-11-01 no real take had been scored. One has been since, and the reader failed: see the next
+  section.
 
 ## Real footage: the first score (2026-11-10)
 
