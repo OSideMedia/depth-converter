@@ -35,9 +35,10 @@ the code's history. Started 2026-09-06.
   still do not vote in any verdict.
 - The "tilts up" the reader put beside every push-in on the 8 takes is settled: it is real. Those
   takes push toward a face above the centre of the frame.
-- **The camera round: shots, people, "can't tell", slow zooms. Unscored.** Four changes to the
-  picture reader, one for each way the second real-footage score failed. None of them has been
-  scored on clips the reader has not seen, and the camera words still do not vote in any verdict.
+- **The camera round: shots, people, "can't tell", slow zooms. Failed its score.** Four changes
+  to the picture reader, one for each way the second real-footage score failed. They were built
+  on clips the reader had already seen and then scored on fresh ones (below), and the camera
+  words still do not vote in any verdict.
   - **Cuts.** A clip is split into shots where almost no tracked point survives a frame AND the
     brightness histogram jumps, and each shot is read on its own. `describe` prints `Shots: N, cut
     at …`, and a kit records `cameraShots` (each shot's start, end and word). The detector is our
@@ -57,6 +58,11 @@ the code's history. Started 2026-09-06.
     still applies, since real pans show a small zoom of their own.
   - **The scout warns about a second figure** when two or more people are in frame for 10% of the
     clip or more (macOS only; counts people, never changes the ranking).
+  - **Scored on 49 unseen clips, the round failed, by less than before**: 12 of 14 moves named
+    and a move invented on 1 of 6 locked-off shots (the pass mark is at most 1 missed and none
+    invented). Every cut marked as sure in five film scenes was found, and 3 of 11 marked unsure.
+    The camera words still do not
+    vote in any verdict (`DOCS/CAMERA-PATH-CALIBRATION.md`, "Third real-footage score").
   - On the clips the reader had already seen (development signal, not a score): the first set
     went from a move invented on 1 of 5 locked-off shots to 0 of 5 with 12 of 12 moves kept; the
     second set's scored clips went from 7 to 8 of 10 moves with 2 of 7 locked-off shots still

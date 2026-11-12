@@ -85,7 +85,8 @@ one bucket better, and two buckets of a fast truck pick up "pulls out".
 
 **On unseen real footage it failed** ("Second real-footage score" below): 7 of 10 moves, and a
 move invented on 2 of 7 locked-off shots. The camera round that followed is described after that
-score, and has not been scored. On the 17 spent clips it names 12 of 12 moves and
+score, and failed a third set ("Third real-footage score" below): 12 of 14 moves, and a move
+invented on 1 of 6 locked-off shots. On the 17 spent clips it names 12 of 12 moves and
 invents a move on 1 of 5 locked-off shots, but it was built while looking at those clips, so that
 was never a score.
 
@@ -339,7 +340,7 @@ named as tilts and pushes.
 move in the score is one promoted clip. On two clips the labellers disagreed on direction; the
 count is 7 of 10 either way. These 40 clips are now spent as well.
 
-## The camera round: shots, people, "can't tell", slow zooms (2026-11-11) — UNSCORED
+## The camera round: shots, people, "can't tell", slow zooms (2026-11-11) — FAILED its score
 
 Four changes to the picture reader, one for each way the second score failed. Every number in them
 was chosen while looking at the 57 spent clips (the two sets above), so nothing in this section is
@@ -465,11 +466,71 @@ half of every frame whatever is in it, and a subject no nearer than its backgrou
 points. A dissolve or a fade is one shot. A shot read on just over half its gaps can still be
 worded from the wrong half.
 
+## Third real-footage score: the camera round (2026-11-11) — FAIL
+
+**The set.** 49 clips the reader had never seen: 34 stock clips of 8 seconds, picked by eye from
+thumbnails and never with the reader; 10 fixed 8-second windows cut from four dance videos shot
+on a phone stand; and five film scenes, whole, cuts and all (four of about 20 seconds and one of 4.4). The owner
+supplied the dance videos and the film scenes. The plan, the pass mark and the scorer were
+written and hashed before the reader ran, and the hashes were checked again before scoring.
+Every clip was labelled by eye, then by a second model that never saw those labels; the owner
+ruled on the eight clips where the two disagreed, and those rulings were frozen with the rest.
+The cuts in the film scenes were marked from frames, each as sure or unsure.
+
+**Scored set: 14 moves and 6 locked-off shots. Pass mark: at most 1 move missed, no move named
+on a locked-off shot.**
+
+| | result |
+|---|---|
+| moves named | 12 of 14 |
+| locked-off shots with a move invented | 1 of 6 |
+| verdict | **FAIL** |
+
+The `--rgb` path gave the same answer on all 20 scored clips.
+
+- **Missed:** a slow pan across hills under moving cloud was read as still. A slow slide past an
+  exercise class was named in the opposite direction, for a second and a half, and still for the
+  rest: the people fill the frame and raise their arms together.
+- **Invented:** a locked-off shot down a tree-lined road, where two runners come past close to
+  the lens. The buckets name a tilt for half a second and still for the rest, and the shot is
+  worded "tilts up".
+- **The other five locked-off shots** were read as still, and no locked-off shot was answered
+  with nothing but "can't tell".
+
+**Reported and not scored (29).**
+
+- *Locked-off-style clips (12):* a move was named on 3, all three of them dance windows (3 of 9
+  dance windows, 0 of 3 stock clips; the second score had 7 of 11 dance windows). Two more dance
+  windows were "can't tell" from start to finish, which is not a wrong answer and not a read.
+- *One more dance window* is locked off with a zoom out and back in. The reader named the zoom, and
+  pans beside it that are not there.
+- *Two drone shots looking straight down* were named "tilts up" throughout. The owner's ruling
+  is that neither has a move worth naming.
+- *Five more stock clips* had no single move the labellers could settle on. Three were answered
+  with no move, and two with one.
+- *Clips with cuts (6):* all 19 cuts marked as sure were found, across the five film scenes and
+  one stock clip.
+  The scorer lists three more as invented; checked against frames after scoring, all three are
+  real cuts the marking missed. The frozen score lists them as invented and is left as it was.
+  Of 11 cuts marked unsure, all in one stretch of fast action, 3 were found.
+- *"Can't tell" in the film scenes:* 14.3 of 19.7 seconds, 7.2 of 21.3, 10.6 of 22.3 and 18.2 of
+  21.9 in four of them, and none of 4.4 in the fifth. The per-shot read stops a film scene coming
+  back as a string of invented moves, mostly by declining to answer.
+- *Handheld clips (3)* were named as strings of short moves, or "can't tell" throughout.
+
+That is 12, 1, 2, 5, 6 and 3: 29.
+
+**What it does not say.** The stock clips were picked by the same hand that built the reader,
+from thumbnails, so the set is unseen but not blind. There is no tilt down in the scored set and
+one clean tilt up. Every run had Apple Vision on; the path without it was not scored. Three
+misses over 20 clips is a small count: one clip either way changes the reading, though not the
+verdict. These 49 clips are now spent as well.
+
 ## Limitations
 
 - **Both readers failed on real footage.** The depth read failed the first set and the picture
   read that replaced it failed the second (7 of 10 moves, 2 of 7 locked-off shots). The camera
-  round after that has not been scored on unseen clips. The clay
+  round after that failed the third (12 of 14 moves, 1 of 6 locked-off shots). The clay
   figures in this file do not carry over to shots with people or vehicles moving through them.
 
 - **One scene.** Clay ground, rows of boxes and sky. The truth counts the static world
