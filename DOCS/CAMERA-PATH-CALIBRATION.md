@@ -101,8 +101,10 @@ was never a score.
   line ("a camera-path reference" or "a subject-motion reference") is worded from the same share.
   Both are still measured on the depth picture, with the weakness described below, and both are
   outside the per-shot rule the camera words follow (ONE CAMERA, below): a clip whose every shot
-  reads still (the walkers test fixture) can still be called a camera-path reference. They were
-  left alone here; changing them is a product call.
+  reads still (the walkers test fixture) can still read as a camera-path reference. After the
+  third score failed, the owner's call was to leave both measurements as they are and change only
+  the wording: the line now says the share was measured in the depth, that people filling or
+  crossing a locked-off shot can look whole-frame there, and where the per-shot read is.
 - Everything under Limitations at the end still applies.
 
 ## The region reader: regions vote (2026-11-01)

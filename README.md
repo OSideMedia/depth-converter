@@ -322,7 +322,7 @@ bad generation are about **motion**:
 | **dead stretch** | ≥0.75 s of nothing anywhere else: a beat the model has to invent |
 | **motion spikes** | a hard cut inside the ref: a second motion signal, and the worst kind |
 | **depth retention** | how much of the source's motion survived into depth. Low means the movement runs parallel to the camera plane |
-| **motion type** | whether this is a camera-path or a subject-motion reference |
+| **motion type** | whether the depth reads as a camera-path or a subject-motion reference. Measured on the depth, so people filling a locked-off shot can read as camera; check `depthc describe` |
 | **output coverage** | the ref length is not exactly requestable as an output length |
 
 For scale, measured on four reference clips: a sword duel reads **4.40**, a walk-in **1.69**, a

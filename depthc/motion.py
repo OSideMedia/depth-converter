@@ -506,8 +506,9 @@ class Shot:
 # Outside this rule: the camera SHARE (`MotionProfile.camera`, the whole-frame part of the motion)
 # and the kit's motion-type line worded from it (`checks.py`, "camera-path" or "subject-motion"
 # reference) are still measured on the depth, not read per shot. So a clip whose every shot reads
-# still can be called a camera-path reference, and the share still decides whether compare
-# judges the PATH cosine.
+# still can still read as a camera-path reference, and the share still decides whether compare
+# judges the PATH cosine. The line says so itself: it words the share as a reading of the depth
+# and points at the per-shot read, since the per-shot reader failed its score and cannot replace it.
 # ponytail: a shot is one word, the mean of its moving gaps, so a pan and its return inside one
 # shot cancel and the whole shot reads still everywhere; reading a shot as runs (a word per run)
 # is the upgrade, and it changes what cameraShots records.

@@ -291,6 +291,19 @@ def test_motion_type_names_a_camera_reference():
     )
 
 
+def test_motion_type_says_what_was_measured_and_where_the_camera_words_are():
+    """The share is measured on the depth, where people crossing a locked-off shot look like a
+    camera move (scored, DOCS/CAMERA-PATH-CALIBRATION.md). The line must not state a camera move
+    as a fact: it says what it measured and points at the per-shot read."""
+    for share in (0.8, 0.2):
+        detail = next(
+            f.detail for f in check(**GOOD, motion=profile(4.0, camera=share)).findings
+            if f.check == "motion type"
+        )
+        assert "in the depth" in detail and "depthc describe" in detail
+        assert "this is a" not in detail
+
+
 def test_motion_type_names_a_body_reference():
     report = check(**GOOD, motion=profile(4.0, camera=0.2))
     assert "subject-motion" in next(
