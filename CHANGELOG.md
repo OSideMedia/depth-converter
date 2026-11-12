@@ -5,6 +5,11 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **Docs: a sword duel fired on Seedance 2.5 at 1080p (2026-11-11).** It adhered on timing and
+  camera path, the swords dropped out of some frames, and its 720p control was refused at the
+  provider's output check. `DOCS/LIVE-FIRE.md` has the numbers and the limits. The 2.5 advice a kit prints now says 1080p
+  has two good results and is not proven, and a `rejected` fire is worded as a refusal of the input
+  or the output.
 - **A kit's "motion type" line no longer states a camera move as a fact.** It is worded from the
   share of whole-frame movement in the depth, where people filling or crossing a locked-off shot
   can look like a camera move. The line now says what it measured and points at `depthc describe`,

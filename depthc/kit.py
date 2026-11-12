@@ -577,9 +577,10 @@ def _resolution_lines(manifest: dict) -> list[str]:
     return [
         f"  Tiers here: {' / '.join(tiers) or 'unknown'}. No 4K on this model as of 2026-08-24.",
         "  Iterate at 720p — that is the safe default and it is measured on 2.0.",
-        "  1080p has one good result here: a gentle walk adhered on 2026-08-24, and a hard",
-        "  reference is unfired. The 0/3 in DOCS/LIVE-FIRE.md is 2.0's native 1080p lane, not",
-        "  this one. If you fire 1080p here, run `depthc compare` and record it.",
+        "  1080p has two good results here: a gentle walk adhered on 2026-08-24 and a sword duel",
+        "  on 2026-11-11, the duel with its swords dropping out of some frames. Not proven. The",
+        "  0/3 in DOCS/LIVE-FIRE.md is 2.0's native 1080p lane, not this one. If you fire 1080p",
+        "  here, run `depthc compare` and record it.",
     ]
 
 
@@ -690,7 +691,7 @@ VERDICTS = {
     "partial": "followed some of it — drifted, or lost the timing",
     "ignored": "generated its own motion; the ref did nothing",
     "late": "sat still and then started — the ref's timing did not transfer",
-    "rejected": "the API or moderation refused the input",
+    "rejected": "the API or moderation refused the input or the output",
 }
 RESULT_SCHEMA_VERSION = 1
 RESULT_SCHEMA = Path(__file__).parent / "result_schema.json"  # documents result.json; tests hold it

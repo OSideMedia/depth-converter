@@ -314,7 +314,8 @@ def test_the_2_5_template_does_not_present_the_0_of_3_as_its_own_result():
     """
     text = _render(dialect="seedance-2.5")
     assert "DOES NOT TRANSFER" in text
-    assert "a hard reference is unfired" in text
+    assert "two good results and is not proven" in text
+    assert "a hard reference is unfired" not in text  # a sword duel was fired 2026-11-11
     assert "UNMEASURED" not in text  # the 2026-08-24 fire measured it, once
 
 

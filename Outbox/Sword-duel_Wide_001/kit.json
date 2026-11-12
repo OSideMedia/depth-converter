@@ -1,0 +1,206 @@
+{
+  "schemaVersion": 1,
+  "kitName": "Sword-duel_Wide_001",
+  "createdAt": "2026-11-12T02:03:25+00:00",
+  "tool": {
+    "name": "depthc",
+    "version": "0.16.1",
+    "model": "Video-Depth-Anything Small (vits, Apache-2.0)",
+    "vdaCommit": "4f5ae23172ba60fd7bc11ef671cca678842c7072",
+    "device": "mps",
+    "elapsedSeconds": 23.28
+  },
+  "promptDialect": "seedance-2.5",
+  "targetModel": {
+    "dialect": "seedance-2.5",
+    "refSeconds": [
+      2.0,
+      30.0
+    ],
+    "outputSeconds": [
+      4.0,
+      30.0
+    ],
+    "pixels": [
+      407696,
+      8295044
+    ],
+    "maxFileMb": 200.0,
+    "outputResolutions": [
+      "480p",
+      "720p",
+      "1080p"
+    ],
+    "refsWithStartFrame": true
+  },
+  "tags": [
+    "Sword-duel",
+    "Wide"
+  ],
+  "description": "Two fighters duel with swords in a wide shot among stone ruins, full bodies in frame, trading blows while the camera drifts left with them. One unbroken shot; the scout's top window was passed over because it spans a cut. Two figures are the subject here, not a competing signal.",
+  "source": {
+    "filename": "sword-wide.mp4",
+    "sha256": "19cc185b1403746142d7752a9f424b0b8545e9e5a44f62eab75b25b3f9e01864",
+    "durationSeconds": 38.038,
+    "fps": 23.976,
+    "width": 1280,
+    "height": 720,
+    "trim": [
+      15.5,
+      20.5
+    ],
+    "crop": "1280:696:0:12"
+  },
+  "depth": {
+    "filename": "depth.mp4",
+    "sha256": "af86df3c50677c7b929542ac12b887c31b461ab8acc0e482c75b8b71c9060b73",
+    "durationSeconds": 5.0,
+    "fps": 24.0,
+    "width": 1280,
+    "height": 696,
+    "frameCount": 120,
+    "sizeBytes": 1138863,
+    "pixels": 890880
+  },
+  "binding": {
+    "filename": "binding.txt",
+    "sha256": "ec3b022bb48e228d20537c27907f862ef47d5cd764eb6b6debbc8198086dcfe2"
+  },
+  "still": {
+    "filename": "still.png",
+    "frameIndex": 12,
+    "containsRealFaces": true,
+    "usage": "local-only reference; do not attach as @Image"
+  },
+  "settings": {
+    "resolution": "720p",
+    "fps": "conform-24",
+    "invert": false,
+    "inputSize": 518,
+    "precision": "fp32",
+    "crop": "auto",
+    "keepAudio": false
+  },
+  "suggestedOutputSeconds": 5.0,
+  "checks": {
+    "tier": "WARN",
+    "findings": [
+      {
+        "tier": "PASS",
+        "check": "duration",
+        "detail": "5.00s is inside the 3-8s sweet spot.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "output coverage",
+        "detail": "5.00s is exactly requestable as an output length.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "file size",
+        "detail": "1.1 MB is within 200 MB.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "resolution",
+        "detail": "1280\u00d7696 = 890,880 px is in window.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "frame rate",
+        "detail": "24 fps matches Seedance's output cadence.",
+        "remedy": ""
+      },
+      {
+        "tier": "WARN",
+        "check": "still.png faces",
+        "detail": "The still is flagged as containing real photographic faces, which Seedance rejects on image inputs.",
+        "remedy": "Keep still.png local \u2014 never attach it as an @Image ref. Use --no-faces if the source has no people in it."
+      },
+      {
+        "tier": "PASS",
+        "check": "motion signal",
+        "detail": "3.00 mean depth-space energy \u2014 a clear signal (\u2583\u2582\u2583\u2586\u2588\u2587\u2588\u2588\u2584\u2583).",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "depth retention",
+        "detail": "59% of the source's motion survived into depth.",
+        "remedy": ""
+      },
+      {
+        "tier": "PASS",
+        "check": "motion type",
+        "detail": "40% of the movement in the depth is whole-frame, which reads as a subject-motion reference. People filling or crossing a locked-off shot can look whole-frame in the depth; `depthc describe` reads the camera per shot from the picture.",
+        "remedy": ""
+      }
+    ]
+  },
+  "motion": {
+    "energy": 2.996,
+    "median": 2.578,
+    "peak": 7.86,
+    "headEnergy": 1.488,
+    "tailEnergy": 1.582,
+    "cameraShare": 0.397,
+    "bucketSeconds": 0.5,
+    "buckets": [
+      1.69,
+      1.22,
+      1.83,
+      3.7,
+      4.94,
+      3.81,
+      4.83,
+      4.39,
+      2.03,
+      1.4
+    ],
+    "sparkline": "\u2583\u2582\u2583\u2586\u2588\u2587\u2588\u2588\u2584\u2583",
+    "deadStretch": null,
+    "spikeSeconds": [],
+    "regionEnergy": [
+      [
+        0.829,
+        3.769,
+        1.837
+      ],
+      [
+        1.831,
+        7.489,
+        3.108
+      ],
+      [
+        1.593,
+        4.223,
+        2.167
+      ]
+    ],
+    "cameraPath": {
+      "dx": 0.267,
+      "dy": 0.029,
+      "radial": 0.039,
+      "label": "pans left"
+    },
+    "cameraShots": [
+      {
+        "startSeconds": 0.0,
+        "endSeconds": 5.0,
+        "label": "pans left"
+      }
+    ],
+    "grid": "long-edge 160 (aspect-preserving, v2)",
+    "fps": 24.0,
+    "sourceEnergy": 5.065,
+    "retention": 0.592
+  },
+  "sheet": {
+    "filename": "sheet.png",
+    "usage": "local-only contact sheet"
+  }
+}

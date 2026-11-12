@@ -61,7 +61,7 @@ Every rule carries its provenance: [measured] = a paid fire this repo recorded
 [reasoned] = follows from the mechanics, untested.
 
 A [measured] rule is measured ON A MODEL, and the model is part of the finding. THIS FILE
-HAS ONE 2.5 FIRE BEHIND IT, the 1080p note below. Rules are marked by what they rest on:
+HAS TWO 2.5 FIRES BEHIND IT, the 1080p note below. Rules are marked by what they rest on:
 
   [measured on 2.0]      a paid 2.0 fire. Whether it transfers to 2.5 is UNKNOWN unless the
                          rule says why it should — do not read it as a 2.5 result.
@@ -75,12 +75,14 @@ When a 2.5 fire is recorded, promote the rule and say so here.
   as of 2026-08-24 — so "master at 4K", the 2.0 rule, is not a thing you can do here. If
   ByteDance adds one later this line is what changes.
 
-• [measured on 2.0 — DOES NOT TRANSFER; one fire on 2.5] On 2.0, 1080p was 0/3 for
+• [measured on 2.0 — DOES NOT TRANSFER; two fires on 2.5] On 2.0, 1080p was 0/3 for
   depth-motion work while every other tier was 4/4. That was 2.0's NATIVE 1080p lane. 2.5's
   1080p is a separately-wired lane, switched on 2026-08-17, and on 2026-08-24 one gentle
-  reference, a lateral walk, adhered on it. That is suggestive, not an all-clear. So:
+  reference, a lateral walk, adhered on it. On 2026-11-11 a hard one, a sword duel, adhered
+  too, with its swords dropping out of some frames and no 720p control (the provider refused
+  that arm's output). That is suggestive, not an all-clear. So:
       – 720p is the safe default on 2.5 today, and it is where you should iterate.
-      – 1080p is the only rung above it. It has one good result, and a hard reference is unfired.
+      – 1080p is the only rung above it. It has two good results and is not proven.
   Do not quote the 0/3 figure as a 2.5 result. If you fire 1080p on 2.5, run
   `depthc compare` and record it.
 

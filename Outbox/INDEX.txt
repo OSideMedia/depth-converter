@@ -19,7 +19,7 @@ Everything else in a kit folder is reference or archive — do not upload it.
 ref actually carries. 4.40 = a sword duel that behaved, 0.94 = a crawl whose
 generation started late. A kit with no FIRED line has never been tested.
 
-2 kits:
+3 kits:
 
   Clay-close-alone_001
       1280x720 · 4s · check: WARN · motion 0.55 ▄▆▆▅█▆▄▄
@@ -32,3 +32,9 @@ generation started late. A kit with no FIRED line has never been tested.
       Nothing here can be fired. kit.json + result.json are kept as the record of what was built and what it did.
       Live proof 2026-09-07: rebuilt from Probe1080p_001's 5s source (Pexels 2084066, free licence) so kit.json carries depth.sha256 for the OSIDE refs[].sha256 join. No fire.
       FIRED 1x · last: partial — Watched 2026-09-07 (recorded by Claude on the owner's instruction): ref = man walking L→R in profile past a storefront, camera tracking so he stays mid-frame; gen (Seedance 2.0 480p 4s, Anime Style Constant) = a figure walking L→R in profile across a STATIC frame under a lamp. Walk, direction and profile framing followed; the tracking is not. compare's energy read was flat (ratio 0.096, r0=-0.423) because flat cel shading gives the depth pass no gradient — the metric, not the motion, is what failed here.
+
+  Sword-duel_Wide_001
+      1280x696 · 5s · check: WARN · motion 3.00 ▃▂▃▆█▇██▄▃
+      from sword-wide.mp4, trimmed 15.5-20.5s
+      Two fighters duel with swords in a wide shot among stone ruins, full bodies in frame, trading blows while the camera drifts left with them. One unbroken shot; the scout's top window was passed over because it spans a cut. Two figures are the subject here, not a competing signal.
+      FIRED 2x · last: rejected — 720p control arm, same prompt and ref: provider refused the OUTPUT, OutputVideoSensitiveContentDetected.PolicyViolation (may be related to copyright restrictions). No charge. Not retried, owner's call.
