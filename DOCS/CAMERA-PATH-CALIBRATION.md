@@ -470,7 +470,7 @@ worded from the wrong half.
 
 **The set.** 49 clips the reader had never seen: 34 stock clips of 8 seconds, picked by eye from
 thumbnails and never with the reader; 10 fixed 8-second windows cut from four dance videos shot
-on a phone stand; and five film scenes of about 20 seconds each, whole, cuts and all. The owner
+on a phone stand; and five film scenes, whole, cuts and all (four of about 20 seconds and one of 4.4). The owner
 supplied the dance videos and the film scenes. The plan, the pass mark and the scorer were
 written and hashed before the reader ran, and the hashes were checked again before scoring.
 Every clip was labelled by eye, then by a second model that never saw those labels; the owner
