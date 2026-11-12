@@ -24,6 +24,8 @@ the `depth.mp4` this tool made from it. Near is light, far is dark, and the colo
 
 ## What it does
 
+![Three steps: a reference clip, a depth kit made on your Mac, the same motion on your character](DOCS/images/how-it-works.png)
+
 - **Converts a clip to depth** with Video Depth Anything Small, locally on your Mac's GPU.
   An 8 s clip at 720p takes about 20–35 s.
 - **Finds the window worth cutting** by ranking every window of a clip for motion, dead
@@ -134,6 +136,8 @@ repo's own runs, with no media, and show as `MEDIA GONE — record only`. Each b
 `INDEX.txt`, so it will show as modified in `git status`.
 
 ## Why depth instead of the raw clip
+
+![A raw clip carries the look; its depth version carries motion and layout, not the look](DOCS/images/raw-vs-depth.png)
 
 Seedance treats a video reference as a **motion + camera channel**: it reproduces choreography,
 walk cadence, dolly, orbit and whip-pan camera paths, and timing. Feeding it the *depth* version
