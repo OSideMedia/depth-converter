@@ -177,7 +177,7 @@ no still and no identity references. Both arms identical except the output tier.
 | Arm | Res | Cost | Verdict | Energy vs ref | Adherence | Regions direct/mirror |
 |---|---|---|---|---|---|---|
 | Sword-duel_Wide_001 | **1080p** | $3.41 | **adhered** | +5% (not judged) | r = **+0.980** | +0.956 / +0.723 |
-| Sword-duel_Wide_001 | 720p (control) | $0.00 | **rejected** | — | refused at OUTPUT moderation |
+| Sword-duel_Wide_001 | 720p (control) | $0.00 | **rejected** | — | refused at OUTPUT moderation | — |
 
 Total settled $3.41. Lag controls on the 1080p arm: −1.0s −0.018 · −0.5s +0.603 ·
 **0.0s +0.980** · +0.5s +0.597 · +1.0s +0.233. Path: reference and take both read as "pans

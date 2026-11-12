@@ -17,7 +17,7 @@
     {
       "firedAt": "2026-11-12T02:48:58+00:00",
       "verdict": "rejected",
-      "meaning": "the API or moderation refused the input",
+      "meaning": "the API or moderation refused the input or the output",
       "surface": "ark",
       "model": "ark-seedance-2.5",
       "variant": "base",
