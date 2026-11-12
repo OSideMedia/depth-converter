@@ -502,11 +502,14 @@ The `--rgb` path gave the same answer on all 20 scored clips.
 - *Locked-off-style clips (12):* a move was named on 3, all three of them dance windows (3 of 9
   dance windows, 0 of 3 stock clips; the second score had 7 of 11 dance windows). Two more dance
   windows were "can't tell" from start to finish, which is not a wrong answer and not a read.
-- *One dance window* is locked off with a zoom out and back in. The reader named the zoom, and
+- *One more dance window* is locked off with a zoom out and back in. The reader named the zoom, and
   pans beside it that are not there.
 - *Two drone shots looking straight down* were named "tilts up" throughout. The owner's ruling
   is that neither has a move worth naming.
-- *Cuts:* all 19 cuts marked as sure were found, across the five film scenes and one stock clip.
+- *Five more stock clips* had no single move the labellers could settle on. Three were answered
+  with no move, and two with one.
+- *Clips with cuts (6):* all 19 cuts marked as sure were found, across the five film scenes and
+  one stock clip.
   The scorer lists three more as invented; checked against frames after scoring, all three are
   real cuts the marking missed. The frozen score lists them as invented and is left as it was.
   Of 11 cuts marked unsure, all in one stretch of fast action, 3 were found.
@@ -514,6 +517,8 @@ The `--rgb` path gave the same answer on all 20 scored clips.
   21.9 in four of them, and none of 4.4 in the fifth. The per-shot read stops a film scene coming
   back as a string of invented moves, mostly by declining to answer.
 - *Handheld clips (3)* were named as strings of short moves, or "can't tell" throughout.
+
+That is 12, 1, 2, 5, 6 and 3: 29.
 
 **What it does not say.** The stock clips were picked by the same hand that built the reader,
 from thumbnails, so the set is unseen but not blind. There is no tilt down in the scored set and
