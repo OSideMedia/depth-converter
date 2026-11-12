@@ -996,6 +996,8 @@ def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     drawn from it "reads as" camera-path or subject-motion. It is never stated as what the
     camera or the subject did, because it cannot tell them apart on real footage (HONEST
     LIMIT below). `checks.py`, `cli.py`, `describe.py`, `kit.py` and `compare.py` word it so.
+    The rule is about what the tool prints. The number keeps its name, camera share, in the
+    code, the JSON and the docs that define it, and dated fire records are not rewritten.
 
     Farneback dense flow, then split each frame pair's field into the shift the textured
     regions vote for (a pan, a dolly, a tracking move) and the residual around it (a subject
@@ -1008,7 +1010,7 @@ def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     stops voting.
 
     HONEST LIMIT: a *translation* is the only camera motion this separates cleanly. A zoom,
-    orbit or roll moves pixels in opposing directions, so its shift is near zero and it books
+    orbit or roll moves pixels in opposing directions, so its shift is near zero and it reads
     as subject motion. So a low number is "not a simple camera translation" rather than
     "definitely subject". A high number is not "definitely camera" either: on real footage,
     people filling or crossing a locked-off shot are most of what a depth picture shows, and

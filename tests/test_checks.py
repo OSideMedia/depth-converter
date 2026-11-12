@@ -339,6 +339,23 @@ def test_no_line_states_the_whole_frame_share_as_a_camera_fact():
     for prof in (measured, walked):
         comp = comparelib.compare_profiles(prof, prof)
         rendered += comparelib.render(comp, "kit", "take", colour=False).splitlines()
+    # The kit README's share line, and describe on the low-share clip (its other branch).
+    from pathlib import Path
+
+    from depthc import kit as kitlib
+    report = check(**GOOD, motion=profile(4.0, camera=0.8))
+    manifest = kitlib.build_manifest(
+        kit_name="Share_001", source_path=Path("/tmp/x.mp4"), source_sha256="a" * 64,
+        source_duration=8.0, source_fps=24.0, source_size=(1920, 1080), trim=(1.0, 6.0),
+        crop=None, depth_duration=5.0, depth_fps=24.0, depth_size=(1280, 536),
+        depth_bytes=800_000, depth_sha256="b" * 64, binding_sha256="c" * 64,
+        frame_count=120, still_index=0, still_has_real_faces=False,
+        tags=[], description="", settings={}, report=report, device="cpu", elapsed=1.0,
+    )
+    manifest["motion"] = {"sparkline": "▁▂▃", "energy": 4.0, "cameraShare": 0.8}
+    readme = kitlib.render_kit_readme(manifest, report)
+    assert "80% whole-frame in the depth" in readme
+    rendered += readme.splitlines() + list(describelib.describe(walked).sentences)
     assert any("SHARE    ref" in line for line in rendered)
     assert any("not judged: ref reads as a body ref" in line for line in rendered)
     assert any("reads as a camera-path shot" in line for line in rendered)
