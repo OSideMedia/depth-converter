@@ -26,3 +26,11 @@ Depth Converter uses `video_depth_anything_vits.pth` from the Hugging Face repo
 > none of it ships here. This tool is used for commercial film work, so it ships
 > the Small model exclusively and deliberately offers **no model-size selector**. Adding one
 > that downloads Base/Large/Giant weights would be a licensing violation, not an upgrade.
+
+### Images in the README
+
+`DOCS/images/banner.png`, `DOCS/images/kit-contents.png`, `DOCS/images/how-it-works.png` and
+`DOCS/images/raw-vs-depth.png` are illustrations made with an AI
+image generator for this project. They explain the idea and are not output of the tool.
+`DOCS/images/real-source-and-depth.jpg` and `DOCS/images/real-contact-sheet.jpg` are the tool's
+own output from a blockout the project rendered itself in Blender (kit `Clay-close-alone_001`).

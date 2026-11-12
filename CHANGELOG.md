@@ -5,6 +5,8 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+- **Docs: the README has pictures.** A banner, three drawings (how it works, raw clip against depth, what a kit holds) and two real outputs
+  (a source frame beside its depth frame, and a contact sheet). Adds a tests badge and a Python badge.
 - **Docs: a sword duel fired on Seedance 2.5 at 1080p (2026-11-11).** It adhered on timing and
   camera path, the swords dropped out of some frames, and its 720p control was refused at the
   provider's output check. `DOCS/LIVE-FIRE.md` has the numbers and the limits. The 2.5 advice a kit prints now says 1080p
