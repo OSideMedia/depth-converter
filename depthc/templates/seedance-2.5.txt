@@ -61,7 +61,7 @@ Every rule carries its provenance: [measured] = a paid fire this repo recorded
 [reasoned] = follows from the mechanics, untested.
 
 A [measured] rule is measured ON A MODEL, and the model is part of the finding. THIS FILE
-HAS ONE 2.5 FIRE BEHIND IT, the 1080p note below. Rules are marked by what they rest on:
+HAS TWO 2.5 FIRES BEHIND IT, the 1080p note below. Rules are marked by what they rest on:
 
   [measured on 2.0]      a paid 2.0 fire. Whether it transfers to 2.5 is UNKNOWN unless the
                          rule says why it should — do not read it as a 2.5 result.
