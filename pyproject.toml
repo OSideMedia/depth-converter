@@ -1,6 +1,6 @@
 [project]
 name = "depthc"
-version = "0.16.1"
+version = "0.17.0"
 description = "Turn a short reference clip into a Seedance-ready depth video and motion kit, locally on an Apple Silicon Mac"
 readme = "README.md"
 license = "MIT"

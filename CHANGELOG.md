@@ -5,6 +5,8 @@ the code's history. Started 2026-09-06.
 
 ## Unreleased
 
+## v0.17.0 — 2026-11-11
+
 - **Docs: the README has pictures.** A banner, three drawings (how it works, raw clip against depth, what a kit holds) and two real outputs
   (a source frame beside its depth frame, and a contact sheet). Adds a tests badge and a Python badge.
 - **Docs: a sword duel fired on Seedance 2.5 at 1080p (2026-11-11).** It adhered on timing and
