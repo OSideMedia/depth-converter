@@ -46,8 +46,9 @@ Use **Video Depth Anything — Small (VDA-Small)**, not per-frame Depth Anything
   inference (32-frame windows, 10-frame overlap, cross-window scale/shift alignment) and
   **per-video global normalization** — flicker-free by construction. Per-frame DA-V2 +
   smoothing fixes brightness flicker but not depth-scale drift; VDA fixes both.
-- **LICENSE LAW:** across DA-V2, VDA, and DA3, **only the Small models are Apache-2.0.
-  Every Base/Large/Giant checkpoint is CC-BY-NC-4.0 (non-commercial).** The owner makes
+- **LICENSE LAW:** across DA-V2 and VDA, **only the Small models are Apache-2.0.
+  Every Base/Large/Giant checkpoint there is CC-BY-NC-4.0 (non-commercial).** (DA3 is licensed
+  model by model, corrected 2026-11-11; none of it ships here.) The owner makes
   commercial films. Ship VDA-Small only. Do not add a model-size dropdown that downloads
   NC-licensed weights. Include the Apache license/attribution notice in the repo.
 

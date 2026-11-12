@@ -5,8 +5,9 @@ a rejected patch.
 
 ## Three rules that are not negotiable
 
-- **VDA-Small only.** Across Depth Anything V2, Video Depth Anything and Depth Anything 3, only the
-  Small checkpoints are Apache-2.0. Every Base, Large and Giant is CC-BY-NC-4.0. There is no
+- **VDA-Small only.** Across Depth Anything V2 and Video Depth Anything, only the Small
+  checkpoints are Apache-2.0. Every Base, Large and Giant there is CC-BY-NC-4.0. Depth Anything 3
+  is licensed model by model and none of it ships here. There is no
   model-size selector by design, so **a PR that adds one will be declined**: it is a licensing
   violation, not an upgrade.
 - **Media never goes in git.** `Inbox/`, `Processed/` and `Outbox/` media stay ignored, because source
