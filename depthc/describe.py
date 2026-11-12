@@ -510,7 +510,7 @@ def _sentences(d: Description) -> list[str]:
             kind = ""
             if d.camera_share is not None:
                 kind = (
-                    f" ({d.camera_share * 100:.0f}% of the movement in the depth is "
+                    f" ({d.camera_share * 100:.0f}% of the movement is "
                     f"whole-frame, which reads as a "
                     f"{'camera-path' if d.camera_share >= 0.60 else 'subject-motion'} shot)"
                 )

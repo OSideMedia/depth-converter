@@ -990,7 +990,12 @@ def fit_picture(picture: np.ndarray, count: int) -> np.ndarray | None:
 
 
 def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
-    """How much of the movement is the camera rather than the subject, 0.0-1.0.
+    """How much of the movement is whole-frame (one shift the textured regions agree on), 0.0-1.0.
+
+    THE RULE FOR EVERY LINE WORDED FROM THIS NUMBER: it is called "whole-frame", and a class
+    drawn from it "reads as" camera-path or subject-motion. It is never stated as what the
+    camera or the subject did, because it cannot tell them apart on real footage (HONEST
+    LIMIT below). `checks.py`, `cli.py`, `describe.py`, `kit.py` and `compare.py` word it so.
 
     Farneback dense flow, then split each frame pair's field into the shift the textured
     regions vote for (a pan, a dolly, a tracking move) and the residual around it (a subject

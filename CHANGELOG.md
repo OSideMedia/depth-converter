@@ -9,8 +9,9 @@ the code's history. Started 2026-09-06.
   share of whole-frame movement in the depth, where people filling or crossing a locked-off shot
   can look like a camera move. The line now says what it measured and points at `depthc describe`,
   which reads the camera per shot from the picture. The same share is worded the same way in
-  `describe`'s camera sentence and in a kit's README ("whole-frame in the depth", no longer
-  "(camera)"). The measurement, the threshold and what `compare` judges are unchanged.
+  `describe`'s camera sentence, in a kit's README ("whole-frame in the depth", no longer
+  "(camera)") and in `compare`, whose `CAMERA` row is now `SHARE` and whose "ref is a body ref"
+  is "ref reads as a body ref". The measurement, the threshold and what `compare` judges are unchanged.
 - **`depthc result` no longer writes over a fire log it cannot read.** If a kit's `result.json` was
   there but unreadable (cut off, saved as UTF-16, or JSON of the wrong shape), the next fire was
   written over it and every earlier fire was lost. Now the command refuses, says which file it left

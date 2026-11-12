@@ -305,6 +305,46 @@ def test_motion_type_says_what_was_measured_and_where_the_camera_words_are():
         assert "this is a" not in detail
 
 
+def test_no_line_states_the_whole_frame_share_as_a_camera_fact():
+    """One rule (motion.camera_share): the share is "whole-frame" and a class drawn from it
+    "reads as" one. Each surface is rendered and held to the same predicate, and the old
+    wording of each is run through it to show it can fail."""
+    import numpy as np
+
+    from depthc import compare as comparelib, describe as describelib, motion as motionlib
+
+    def states_a_fact(text: str) -> bool:
+        return any(bad in text for bad in ("this is a", "(a camera-path shot)", "is a body ref",
+                                           "(camera)", "CAMERA   ref", "the rest is the subject"))
+
+    for old in ("80% of the movement is whole-frame — this is a camera-path reference.",
+                "Camera: pans left 0–3s (a camera-path shot).",
+                "not judged: ref is a body ref (3% whole-frame)",
+                "80% whole-frame (camera)", "  CAMERA   ref 80% whole-frame"):
+        assert states_a_fact(old)
+
+    base = np.random.default_rng(7).random((90, 160)) * 255
+    pan = np.stack([np.roll(base, 2 * i, axis=1) for i in range(48)]).astype(np.uint8)
+    measured = motionlib.measure(pan, 24.0)
+    rendered = [
+        f.detail for share in (0.8, 0.2)
+        for f in check(**GOOD, motion=profile(4.0, camera=share)).findings
+        if f.check == "motion type"
+    ] + list(describelib.describe(measured).sentences)
+    # A square crossing a still wall: a low share, so compare takes its "not judged" branch.
+    body = np.repeat(base[None], 48, axis=0).astype(np.uint8)
+    for i in range(48):
+        body[i, 30:60, 10 + 2 * i:40 + 2 * i] = 255
+    walked = motionlib.measure(body, 24.0)
+    for prof in (measured, walked):
+        comp = comparelib.compare_profiles(prof, prof)
+        rendered += comparelib.render(comp, "kit", "take", colour=False).splitlines()
+    assert any("SHARE    ref" in line for line in rendered)
+    assert any("not judged: ref reads as a body ref" in line for line in rendered)
+    assert any("reads as a camera-path shot" in line for line in rendered)
+    assert not [line for line in rendered if states_a_fact(line)]
+
+
 def test_motion_type_names_a_body_reference():
     report = check(**GOOD, motion=profile(4.0, camera=0.2))
     assert "subject-motion" in next(
