@@ -63,7 +63,8 @@ bundles for no real gain over doing it here.
    locked-off shots; since 2026-11-11 the camera is read from the picture, and that reader FAILED a
    second set of unseen clips the same day, 7 of 10 moves and a move invented on 2 of 7
    locked-off shots, `DOCS/CAMERA-PATH-CALIBRATION.md`; the camera round after it, cuts, a
-   person mask, "can't tell" and slow zooms, is UNSCORED): read them, quote them in
+   person mask, "can't tell" and slow zooms, FAILED a third set of 49 unseen clips, 12 of 14
+   moves and a move invented on 1 of 6 locked-off shots): read them, quote them in
    the notes, but they do not vote — when a fire is MIRRORED or the path cosine is negative, that is a by-eye finding to record, not a verdict the tool
    made. Then `depthc result <kit> --verdict … --notes
    "…"` with the measured numbers. A generation is the only evidence that says whether any

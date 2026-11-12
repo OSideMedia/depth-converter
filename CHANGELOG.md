@@ -57,6 +57,10 @@ the code's history. Started 2026-09-06.
     still applies, since real pans show a small zoom of their own.
   - **The scout warns about a second figure** when two or more people are in frame for 10% of the
     clip or more (macOS only; counts people, never changes the ranking).
+  - **Scored on 49 unseen clips, the round failed, by less than before**: 12 of 14 moves named
+    and a move invented on 1 of 6 locked-off shots (the pass mark is at most 1 missed and none
+    invented). Every cut marked in five film scenes was found. The camera words still do not
+    vote in any verdict (`DOCS/CAMERA-PATH-CALIBRATION.md`, "Third real-footage score").
   - On the clips the reader had already seen (development signal, not a score): the first set
     went from a move invented on 1 of 5 locked-off shots to 0 of 5 with 12 of 12 moves kept; the
     second set's scored clips went from 7 to 8 of 10 moves with 2 of 7 locked-off shots still
