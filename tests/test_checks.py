@@ -355,7 +355,11 @@ def test_no_line_states_the_whole_frame_share_as_a_camera_fact():
     manifest["motion"] = {"sparkline": "▁▂▃", "energy": 4.0, "cameraShare": 0.8}
     readme = kitlib.render_kit_readme(manifest, report)
     assert "80% whole-frame in the depth" in readme
-    rendered += readme.splitlines() + list(describelib.describe(walked).sentences)
+    # describe's other branch: a camera move named, with a low share beside it.
+    import dataclasses
+    low = list(describelib.describe(dataclasses.replace(measured, camera=0.2)).sentences)
+    assert any("reads as a subject-motion shot" in line for line in low)
+    rendered += readme.splitlines() + low
     assert any("SHARE    ref" in line for line in rendered)
     assert any("not judged: ref reads as a body ref" in line for line in rendered)
     assert any("reads as a camera-path shot" in line for line in rendered)
