@@ -96,13 +96,17 @@ was never a score.
   wrong is a train passing close to the lens, and on the fresh ones a person close to the lens and
   a flower opening: most of the points are on the subject, so the subject wins the
   vote and the shot reads as a pan. Nothing in the picture says which layer is the background.
-- **The camera share and the motion-type line still come from the depth.** `compare` judges the
+- **The camera share and the motion-type line still come from the depth.** ("Camera share" is
+  the number's name in the code and in this file. What it measures is the share of the movement
+  that is whole-frame, and the tool prints it as that.) `compare` judges the
   PATH cosine only when the reference's camera share is 0.30 or more, and a kit's motion-type
   line ("a camera-path reference" or "a subject-motion reference") is worded from the same share.
   Both are still measured on the depth picture, with the weakness described below, and both are
   outside the per-shot rule the camera words follow (ONE CAMERA, below): a clip whose every shot
-  reads still (the walkers test fixture) can still be called a camera-path reference. They were
-  left alone here; changing them is a product call.
+  reads still (the walkers test fixture) can still read as a camera-path reference. After the
+  third score failed, the owner's call was to leave both measurements as they are and change only
+  the wording: the line now says the share was measured in the depth, that people filling or
+  crossing a locked-off shot can look whole-frame there, and where the per-shot read is.
 - Everything under Limitations at the end still applies.
 
 ## The region reader: regions vote (2026-11-01)
@@ -162,7 +166,7 @@ truck whose left half slides uniformly faster than its right reads as a zoom. It
 (`pan-left-85mm` 0.09 → 0.85) and locked-off frames stay low: static 0.00–0.12, a box crossing
 ≤ 0.01, a figure approaching ≤ 0.05, the unseen near figure ≤ 0.26. Pushes and pulls stay ≤ 0.14,
 since a zoom is left in the residual on purpose. `static-handheld` reads 0.48 / 0.22 / 0.34: that
-camera truly shakes. The one other kit measured moves from under 0.01 to about 0.2, still counts as
+camera truly shakes. The one other kit measured moves from under 0.01 to about 0.2, still reads as
 subject motion, and reads static in words both ways.
 
 ## First result — the all-pixel reader (2026-10-26)
@@ -240,7 +244,7 @@ on an off-centre push. The joint fit is the reverse.
   `depthc`; the picture reader above replaced it as the first read on 2026-11-11.
 - **It moves words and informational lines, not verdicts.** `compare`'s PATH numbers,
   `describe`'s camera words and every camera share line change for every kit, including a share
-  that now crosses the line where PATH is judged or a clip counts as camera-led. The PATH line
+  that now crosses the line where PATH is judged or a clip reads as camera-led. The PATH line
   and the camera line still do not vote.
 - **The real-take reading is no longer an inference.** When the region reader landed on
   2026-11-01 no real take had been scored. One has been since, and the reader failed: see the next

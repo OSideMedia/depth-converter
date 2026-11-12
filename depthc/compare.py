@@ -562,7 +562,7 @@ def render(c: Comparison, kit_name: str, generated_name: str, colour: bool = Tru
             else f"{p.seconds:+.1f}s r=—".replace("+0.0s", " 0.0s")
             for p in c.lags
         ),
-        f"  CAMERA   ref "
+        f"  SHARE    ref "
         + (f"{c.ref_camera * 100:.0f}%" if c.ref_camera is not None else "—")
         + " whole-frame · gen "
         + (f"{c.gen_camera * 100:.0f}%" if c.gen_camera is not None else "—"),
@@ -624,6 +624,6 @@ def _render_structure(c: Comparison, bold: str, dim: str, off: str, red: str) ->
             )
         else:
             share = f"{c.ref_camera * 100:.0f}%" if c.ref_camera is not None else "unmeasured"
-            line += f"   {dim}not judged: ref is a body ref ({share} whole-frame){off}"
+            line += f"   {dim}not judged: ref reads as a body ref ({share} whole-frame){off}"
         lines.append(line)
     return lines

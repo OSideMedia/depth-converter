@@ -506,8 +506,9 @@ class Shot:
 # Outside this rule: the camera SHARE (`MotionProfile.camera`, the whole-frame part of the motion)
 # and the kit's motion-type line worded from it (`checks.py`, "camera-path" or "subject-motion"
 # reference) are still measured on the depth, not read per shot. So a clip whose every shot reads
-# still can be called a camera-path reference, and the share still decides whether compare
-# judges the PATH cosine.
+# still can still read as a camera-path reference, and the share still decides whether compare
+# judges the PATH cosine. The line says so itself: it words the share as a reading of the depth
+# and points at the per-shot read, since the per-shot reader failed its score and cannot replace it.
 # ponytail: a shot is one word, the mean of its moving gaps, so a pan and its return inside one
 # shot cancel and the whole shot reads still everywhere; reading a shot as runs (a word per run)
 # is the upgrade, and it changes what cameraShots records.
@@ -989,7 +990,14 @@ def fit_picture(picture: np.ndarray, count: int) -> np.ndarray | None:
 
 
 def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
-    """How much of the movement is the camera rather than the subject, 0.0-1.0.
+    """How much of the movement is whole-frame (one shift the textured regions agree on), 0.0-1.0.
+
+    THE RULE FOR EVERY LINE WORDED FROM THIS NUMBER: it is called "whole-frame", and a class
+    drawn from it "reads as" camera-path or subject-motion. It is never stated as what the
+    camera or the subject did, because it cannot tell them apart on real footage (HONEST
+    LIMIT below). `checks.py`, `cli.py`, `describe.py`, `kit.py` and `compare.py` word it so.
+    The rule is about what the tool prints. The number keeps its name, camera share, in the
+    code, the JSON and the docs that define it, and dated fire records are not rewritten.
 
     Farneback dense flow, then split each frame pair's field into the shift the textured
     regions vote for (a pan, a dolly, a tracking move) and the residual around it (a subject
@@ -1002,9 +1010,11 @@ def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
     stops voting.
 
     HONEST LIMIT: a *translation* is the only camera motion this separates cleanly. A zoom,
-    orbit or roll moves pixels in opposing directions, so its shift is near zero and it books
-    as subject motion. Treat a high number as "definitely camera", a low one as "not a
-    simple camera translation" rather than "definitely subject". (The radial term in
+    orbit or roll moves pixels in opposing directions, so its shift is near zero and it reads
+    as subject motion. So a low number is "not a simple camera translation" rather than
+    "definitely subject". A high number is not "definitely camera" either: on real footage,
+    people filling or crossing a locked-off shot are most of what a depth picture shows, and
+    they book as whole-frame (DOCS/CAMERA-PATH-CALIBRATION.md). (The radial term in
     `flow_series` names a zoom/push separately, but does not fold it into this share — the
     share's thresholds were calibrated without it.)
     """

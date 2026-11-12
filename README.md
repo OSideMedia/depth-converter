@@ -322,7 +322,7 @@ bad generation are about **motion**:
 | **dead stretch** | ≥0.75 s of nothing anywhere else: a beat the model has to invent |
 | **motion spikes** | a hard cut inside the ref: a second motion signal, and the worst kind |
 | **depth retention** | how much of the source's motion survived into depth. Low means the movement runs parallel to the camera plane |
-| **motion type** | whether this is a camera-path or a subject-motion reference |
+| **motion type** | how much of the movement in the depth is whole-frame, and whether that reads as a camera-path or a subject-motion reference. People filling a locked-off shot can be whole-frame in the depth too; check `depthc describe` |
 | **output coverage** | the ref length is not exactly requestable as an output length |
 
 For scale, measured on four reference clips: a sword duel reads **4.40**, a walk-in **1.69**, a
@@ -381,7 +381,7 @@ with the reference's, computed identically every time. The report leads with the
 ratio** (over-following is what smears bodies and dissolves props, and correlation cannot see
 it: adherent runs sit at +6–8%, the three failures at 1080p on 2.0 ran +22–32%), then the
 **zero-lag correlation** with ±0.5/±1.0 s controls (a real alignment peaks at zero and collapses
-off-zero), then the camera share on both sides. The ratio is computed on the overlapping
+off-zero), then the whole-frame share on both sides (the `SHARE` row). The ratio is computed on the overlapping
 duration only: the generation's decode is trimmed to the ref's length before inference, so
 neither an excluded tail's motion nor its depth extremes can poison the numbers.
 
@@ -398,8 +398,8 @@ left→right crossing and its mirror image draw the same sparkline and correlate
 ref's energy actually sits, and runs the same check against the horizontally *mirrored*
 generation: when the mirror wins clearly, the report says `MIRRORED — moves the other way`.
 **PATH** names the camera move on both sides in camera terms (`pans left, pushes
-in`) and, when the ref is a camera-path ref, scores direction agreement as a cosine; on a body
-ref it is named but not judged. Both sides are named over the overlap only, the stretch being
+in`) and, when the ref's whole-frame share reads as a camera-path ref, scores direction agreement
+as a cosine; on one that reads as a body ref it is named but not judged. Both sides are named over the overlap only, the stretch being
 compared: a reference longer than the take is read as if it ended where the take does, so its
 word can differ from the kit's `cameraPath` for the whole clip, and a stretch under a quarter of
 a second is `can't tell`. The cosine needs a whole half-second on both sides and shows `—`

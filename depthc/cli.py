@@ -725,7 +725,7 @@ def _print_scout(clip: Path, result, indent: str = "    ") -> None:
     )
     if profile.camera is not None:
         kind = "camera-path" if profile.camera >= motionlib.CAMERA_DOMINANT else "subject-motion"
-        typer.echo(f"{indent}{DIM}{profile.camera * 100:.0f}% whole-frame movement → {kind}{OFF}")
+        typer.echo(f"{indent}{DIM}{profile.camera * 100:.0f}% whole-frame movement in the depth → reads as {kind}{OFF}")
 
     if not result.windows:
         typer.echo(f"{indent}{YELLOW}too short to propose a {result.target_seconds:g}s window{OFF}")

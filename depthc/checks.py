@@ -607,8 +607,10 @@ def _motion_findings(
         )
         add(Finding(
             Tier.PASS, "motion type",
-            f"{motion.camera * 100:.0f}% of the movement is whole-frame — this is a {kind} "
-            f"reference.",
+            f"{motion.camera * 100:.0f}% of the movement in the depth is whole-frame, which "
+            f"reads as a {kind} reference. People filling or crossing a locked-off shot can "
+            f"look whole-frame in the depth; `depthc describe` reads the camera per shot from "
+            f"the picture.",
         ))
 
 
