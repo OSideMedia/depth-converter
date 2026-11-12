@@ -634,8 +634,10 @@ goes in git. To report a security problem, see [SECURITY.md](SECURITY.md).
 
 MIT, see [LICENSE](LICENSE). Third-party notices are in [`LICENSES/`](LICENSES/).
 
-This tool ships **VDA-Small only**, which is Apache-2.0. Every Base, Large and Giant Depth Anything
-checkpoint is **CC-BY-NC-4.0 (non-commercial)** and is deliberately unavailable here.
+This tool ships **VDA-Small only**, which is Apache-2.0. Every Base, Large and Giant checkpoint of
+Depth Anything V2 and Video Depth Anything is **CC-BY-NC-4.0 (non-commercial)** and is deliberately
+unavailable here. (Depth Anything 3 is not used; its Large and Giant models carry the same
+non-commercial licence, its Small and Base are Apache-2.0.)
 
 Seedance is a ByteDance product. This project is an independent tool and is **not affiliated with,
 endorsed by, or supported by ByteDance**.

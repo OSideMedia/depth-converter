@@ -179,8 +179,10 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
 
 ## Laws — do not violate
 
-- **VDA-Small only.** Across DA-V2, VDA and DA3 only the Small checkpoints are Apache-2.0;
-  every Base/Large/Giant is CC-BY-NC-4.0. The owner makes commercial films. There is no
+- **VDA-Small only.** Across DA-V2 and VDA only the Small checkpoints are Apache-2.0; every
+  Base/Large/Giant there is CC-BY-NC-4.0. (Depth Anything 3 differs: upstream lists DA3-SMALL and
+  DA3-BASE as Apache-2.0 and its Large, Giant and nested models as CC-BY-NC-4.0, read 2026-11-11.
+  That corrects a fact, not this law: no DA3 model ships here.) The owner makes commercial films. There is no
   model-size selector by design, and adding one is a licensing violation, not an upgrade.
   Apple Vision (the person mask, `depthc/people.py`) is an OS framework reached through PyObjC
   (MIT), not a model this repo ships or downloads: that is why it was allowed. It stays optional
