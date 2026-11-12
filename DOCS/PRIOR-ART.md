@@ -48,8 +48,10 @@ Source: [PySceneDetect](https://github.com/Breakthrough/PySceneDetect)
 Camera-motion labelling is standard in video-dataset annotation. Splitting dense flow into a
 global (median) component and a residual is the cheap version of it.
 
-**Applied:** `motion.camera_share()`, reported in every kit and in the checker as "this is a
-camera-path reference" or "a subject-motion reference". It immediately paid for itself:
+**Applied:** `motion.camera_share()`, reported in every kit and in the checker as reading as
+"a camera-path reference" or "a subject-motion reference" (worded as a reading of the depth, not
+a fact about the camera, since real footage showed people in a locked-off shot can book as
+whole-frame; `DOCS/CAMERA-PATH-CALIBRATION.md`). It immediately paid for itself:
 CLIP D was described in its 001 kit as a "slow lateral dolly … a CAMERA-PATH reference" and
 measures 3% whole-frame movement even at a one-second flow baseline. Its contact sheet
 confirms a locked-off camera. The description was wrong and no one would have caught it.

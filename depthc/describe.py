@@ -510,9 +510,9 @@ def _sentences(d: Description) -> list[str]:
             kind = ""
             if d.camera_share is not None:
                 kind = (
-                    " (a camera-path shot)" if d.camera_share >= 0.60
-                    else f" ({d.camera_share * 100:.0f}% of the movement is whole-frame — "
-                         f"the rest is the subject)"
+                    f" ({d.camera_share * 100:.0f}% of the movement in the depth is "
+                    f"whole-frame, which reads as a "
+                    f"{'camera-path' if d.camera_share >= 0.60 else 'subject-motion'} shot)"
                 )
             out.append(f"Camera: {runs}{kind}.{unread}")
     else:

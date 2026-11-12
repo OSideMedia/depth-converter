@@ -1004,8 +1004,10 @@ def camera_share(frames: np.ndarray, fps: float = 24.0) -> float:
 
     HONEST LIMIT: a *translation* is the only camera motion this separates cleanly. A zoom,
     orbit or roll moves pixels in opposing directions, so its shift is near zero and it books
-    as subject motion. Treat a high number as "definitely camera", a low one as "not a
-    simple camera translation" rather than "definitely subject". (The radial term in
+    as subject motion. So a low number is "not a simple camera translation" rather than
+    "definitely subject". A high number is not "definitely camera" either: on real footage,
+    people filling or crossing a locked-off shot are most of what a depth picture shows, and
+    they book as whole-frame (DOCS/CAMERA-PATH-CALIBRATION.md). (The radial term in
     `flow_series` names a zoom/push separately, but does not fold it into this share — the
     share's thresholds were calibrated without it.)
     """

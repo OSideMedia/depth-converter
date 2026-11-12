@@ -276,7 +276,7 @@ def render_kit_readme(manifest: dict, report: Report, has_preview: bool = False)
                if retention is not None else ""),
             f"  {'':{len(motion['sparkline'])}}   each block is "
             f"{motion.get('bucketSeconds', 0.5):g}s · · = no usable motion"
-            + (f" · {motion['cameraShare'] * 100:.0f}% whole-frame (camera)"
+            + (f" · {motion['cameraShare'] * 100:.0f}% whole-frame in the depth"
                if motion.get("cameraShare") else ""),
             "  for scale: 4.40 = a sword duel that behaved · 0.94 = a crawl whose generation "
             "started late",

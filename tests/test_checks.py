@@ -301,6 +301,7 @@ def test_motion_type_says_what_was_measured_and_where_the_camera_words_are():
             if f.check == "motion type"
         )
         assert "in the depth" in detail and "depthc describe" in detail
+        assert "locked-off" in detail  # the caveat itself, not just the pointer
         assert "this is a" not in detail
 
 
