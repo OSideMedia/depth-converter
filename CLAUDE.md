@@ -168,8 +168,11 @@ the depth video, experimental) — **exactly one is uploaded per generation**.
   (live 2026-08-17) ADHERED on 2026-08-24: −7 % energy at r = +0.820 against a 720p
   control at +11 % / r = +0.716, same ref, same prompt ($3.83 settled;
   `DOCS/LIVE-FIRE.md` § 2026-08-24). **Suggestive, not an all-clear:** one GENTLE
-  reference survived (a lateral walk with background parallax); a demanding ref — the
-  sword duel the 0/3 was measured on — is still unfired on 2.5's 1080p. There is **no 4K
+  reference survived (a lateral walk with background parallax). On 2026-11-11 a demanding
+  ref, a sword duel (not the kit the 0/3 was measured on, and prompt only), ADHERED on 2.5's
+  1080p at r = +0.980 with the path matching, but the swords dropped out of some frames and
+  its 720p control was refused at output moderation for possible copyright, so there is no
+  control ($3.41; `DOCS/LIVE-FIRE.md` § 2026-11-11). Two passes, still not proven. There is **no 4K
   rung on 2.5** as of 2026-08-24, so "master at 4K" names a tier that does not exist
   there; iterate at 720p, and if you fire 1080p run `depthc compare` and record it.
 - **Judge by motion ratio first, correlation second.** They disagreed and the ratio was right:

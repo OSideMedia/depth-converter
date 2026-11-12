@@ -568,7 +568,10 @@ measurement.
 **On Seedance 2.5 the 0 for 3 does not transfer.** Its separately wired 1080p lane adhered on
 2026-08-24: −7% energy at r = +0.820 against a 720p control at +11%, r = +0.716, same ref and same
 prompt ($3.83). That is one gentle reference, a lateral walk, so it is suggestive and not an
-all-clear: the sword duel is unfired on 2.5's 1080p. 2.5 has no 4K rung as of that date. Iterate at
+all-clear. On 2026-11-11 a sword duel, prompt only, also adhered on 2.5's 1080p (r = +0.980, same
+camera path, $3.41): the movement and timing carried over, but the swords dropped out of some
+frames, and the 720p control was refused by the provider's output check for possible copyright, so
+that fire has no control. Two passes are not proof. 2.5 has no 4K rung as of 2026-08-24. Iterate at
 720p, and if you fire 1080p, run `depthc compare` and record it.
 
 ## Where your files go

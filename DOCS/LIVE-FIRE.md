@@ -154,9 +154,10 @@ tier, so the result is about the LANE and not the subject.
 
 **LIMIT ON THIS RESULT — read it before quoting it.** ONE GENTLE REFERENCE SURVIVED. The ref
 is a lateral walk whose energy is substantially background parallax; the 0/3 was a sword duel
-— fast, multi-limb, with props that dissolved. A demanding reference on 2.5's 1080p is still
-unfired, so this is suggestive, not an all-clear. A FAIL here would have been conclusive; a
-pass is not.
+— fast, multi-limb, with props that dissolved. A demanding reference on 2.5's 1080p was
+unfired on this date, so this is suggestive, not an all-clear. A FAIL here would have been
+conclusive; a pass is not. **[2026-11-11] A sword duel has since been fired on 2.5's 1080p and
+adhered, with the swords dropping out of some frames: see § 2026-11-11.**
 
 **BILLING, MEASURED.** Both arms billed exactly 2.008× the estimate — 241 frames where
 `24 x seconds` predicts 120. Ark's "input WITH video" rate column bills **input seconds PLUS
@@ -165,6 +166,40 @@ output seconds**, and this ref was the same length as the render. OSIDE's `arkTo
 render carrying a video reference is under-quoted — by 2x when ref length matches output
 length. Approved ceiling was $1.91; settled $3.83. Recorded here because the estimate was
 wrong for a documented reason, not because the fire was.
+
+### Results — 2026-11-11 · Seedance 2.5, native 1080p, a demanding reference (sword duel)
+
+Kit `Sword-duel_Wide_001`: a 5.00s wide stretch of a two-fighter sword duel from a feature
+film, held locally and never in this repo. 3.00 mean depth-space energy, 59% depth retention,
+40% whole-frame, with a pan. Prompt only: two fighters with slender swords among stone ruins,
+no still and no identity references. Both arms identical except the output tier.
+
+| Arm | Res | Cost | Verdict | Energy vs ref | Adherence | Regions direct/mirror |
+|---|---|---|---|---|---|---|
+| Sword-duel_Wide_001 | **1080p** | $3.41 | **adhered** | +5% (not judged) | r = **+0.980** | +0.956 / +0.723 |
+| Sword-duel_Wide_001 | 720p (control) | $0.00 | **rejected** | — | refused at OUTPUT moderation |
+
+Total settled $3.41. Lag controls on the 1080p arm: −1.0s −0.018 · −0.5s +0.603 ·
+**0.0s +0.980** · +0.5s +0.597 · +1.0s +0.233. Path: reference and take both read as "pans
+left" (cos +0.994). Whole-frame share 40% against 38%. The energy ratio is not judged because
+the framing differs (1.84:1 reference against a 16:9 take).
+
+**Watched by the owner:** the movement is good. Both fighters hold for the whole take and the
+beats land where the reference's do. **The swords are not steady**: each blade drops out of
+some frames and comes back. Timing and path transferred; the props only partly did.
+
+**The control was refused.** The 720p arm failed with
+`OutputVideoSensitiveContentDetected.PolicyViolation`, "the output video may be related to
+copyright restrictions", at no charge. The 1080p take rebuilt the look of the source's set and
+costume although the prompt named neither: a depth reference carries a recognisable scene's
+layout along with its motion. A kit cut from a well-known film can be refused at the output
+for that reason, and the refusal is not predictable from one arm passing.
+
+**LIMIT ON THIS RESULT.** One take, no control, and not the kit the 0 for 3 was measured on:
+that one was cast with two identity references, this one was prompt only. It removes "a
+demanding reference is unfired on 2.5's 1080p"; it does not make 1080p proven. Price note: the
+1080p promotional rate ended 2026-09-17, so this 5s render with a 5s reference cost $3.41
+against $2.45 in August.
 
 ### Results — 2026-09-07 · the only depth kit ever fired through OSIDE's own door
 

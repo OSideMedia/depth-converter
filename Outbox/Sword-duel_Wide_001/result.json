@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "kitName": "Sword-duel_Wide_001",
+  "fires": [
+    {
+      "firedAt": "2026-11-12T02:48:57+00:00",
+      "verdict": "adhered",
+      "meaning": "followed the motion and timing",
+      "surface": "ark",
+      "model": "ark-seedance-2.5",
+      "variant": "base",
+      "outputSeconds": 5.0,
+      "costUsd": 3.41,
+      "outputRef": "held locally: LIVEFIRE-2026-11-11-25-1080P-SWORD-DEPTHREF/1080p.mp4",
+      "notes": "1080p, prompt only, no still. ratio 1.048 (not judged, framing differs) r0=0.98, path pans left both cos 0.994. Owner watched: movement good, both fighters and beats carry over; swords drop out of some frames. Take also rebuilt the source's set and look unasked."
+    },
+    {
+      "firedAt": "2026-11-12T02:48:58+00:00",
+      "verdict": "rejected",
+      "meaning": "the API or moderation refused the input",
+      "surface": "ark",
+      "model": "ark-seedance-2.5",
+      "variant": "base",
+      "outputSeconds": 5.0,
+      "costUsd": 0.0,
+      "outputRef": "",
+      "notes": "720p control arm, same prompt and ref: provider refused the OUTPUT, OutputVideoSensitiveContentDetected.PolicyViolation (may be related to copyright restrictions). No charge. Not retried, owner's call."
+    }
+  ]
+}
