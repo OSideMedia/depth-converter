@@ -636,8 +636,8 @@ MIT, see [LICENSE](LICENSE). Third-party notices are in [`LICENSES/`](LICENSES/)
 
 This tool ships **VDA-Small only**, which is Apache-2.0. Every Base, Large and Giant checkpoint of
 Depth Anything V2 and Video Depth Anything is **CC-BY-NC-4.0 (non-commercial)** and is deliberately
-unavailable here. (Depth Anything 3 is not used; its Large and Giant models carry the same
-non-commercial licence, its Small and Base are Apache-2.0.)
+unavailable here. (Depth Anything 3 is not used. It is licensed model by model: DA3-LARGE,
+DA3-GIANT and the nested models are non-commercial, DA3-SMALL and DA3-BASE are Apache-2.0.)
 
 Seedance is a ByteDance product. This project is an independent tool and is **not affiliated with,
 endorsed by, or supported by ByteDance**.
