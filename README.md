@@ -1,9 +1,13 @@
 [![version](https://img.shields.io/badge/version-0.16.1-blue)](CHANGELOG.md)
+[![tests](https://github.com/OSideMedia/depth-converter/actions/workflows/tests.yml/badge.svg)](https://github.com/OSideMedia/depth-converter/actions/workflows/tests.yml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.11%2B-blue)](pyproject.toml)
 [![platform](https://img.shields.io/badge/platform-Apple%20Silicon%20Mac-lightgrey)](#requirements)
 [![Seedance](https://img.shields.io/badge/Seedance-2.0%20%7C%202.5-e8552d)](#does-it-work-yes-measured)
 
 # Depth Converter
+
+![A figure walking toward the viewer across five frames, changing from a line drawing into a depth picture](DOCS/images/banner.png)
 
 Turns a short reference clip into a Seedance-ready depth video, so you can copy real
 choreography and camera moves onto AI characters and scenes.
@@ -12,6 +16,11 @@ Point it at a clip and you get a **kit**: a temporally consistent grayscale `dep
 keeps the motion and drops the appearance, a contact sheet to check by eye, paste-ready prompt
 text, and a PASS, WARN or FAIL grade. It runs on your Mac and calls no paid API. You take
 `depth.mp4` to Seedance yourself.
+
+![A frame of a source clip beside the same frame of its depth video](DOCS/images/real-source-and-depth.jpg)
+
+*Real output: one frame of a source clip (a blockout rendered in Blender) and the same frame of
+the `depth.mp4` this tool made from it. Near is light, far is dark, and the colours are gone.*
 
 ## What it does
 
@@ -265,6 +274,8 @@ failure the binding field exists to prevent.
 
 ### What is in a kit
 
+![An open folder holding a depth video, a contact sheet, a prompt file and a grade](DOCS/images/kit-contents.png)
+
 Finished kits land in `Outbox/` (override with `--library` or `$DEPTHC_LIBRARY`). Each is one
 folder named from its tags plus an auto-incrementing index (`Sword-duel_Two-fighters_001/`),
 and `Outbox/INDEX.txt` lists them all.
@@ -284,6 +295,10 @@ motion profile as a sparkline.
 `sheet.png` is a contact sheet of the depth video with timestamps. **Look at it before
 firing**: it is the one thing that catches what the window scorer is blind to, and the
 letterbox bug was found by looking at a picture rather than by any test.
+
+![A real contact sheet: ten timestamped depth frames of one kit](DOCS/images/real-contact-sheet.jpg)
+
+*A real `sheet.png`, from the same blockout kit as the frame at the top of this page.*
 
 `source.mp4` is stored trimmed but **uncropped**, at source resolution. The crop is recorded in
 `kit.json` as a setting, so a kit can always be re-converted at different settings later.
