@@ -646,6 +646,20 @@ Three things the runs taught:
   photographic face. Keep it local as a framing reference, and never attach it as an `@Image` ref
   when it does.
 
+### Copyright and responsible use
+
+Depth Converter is intended for lawful video processing, technical evaluation, and creative
+production.
+
+Users are responsible for ensuring they have the necessary rights, permissions, or other lawful
+basis to process their chosen media, including compliance with applicable copyright laws and
+third-party service terms.
+
+We do not encourage or endorse copyright infringement or the unauthorised distribution of
+protected material.
+
+Development testing and technical demonstrations do not grant users rights to third-party content.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Two things worth knowing before you open a PR: a model-size
